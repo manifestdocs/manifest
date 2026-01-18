@@ -10,7 +10,7 @@ license = "BUSL-1.1"
 repository = "https://github.com/rocket-tycoon/manifest"
 
 [[bin]]
-name = "mfst"
+name = "manifest"
 path = "src/main.rs"
 
 [dependencies]

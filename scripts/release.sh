@@ -68,10 +68,10 @@ else
     echo "Warning: $PLUGIN_JSON not found, skipping plugin.json update"
 fi
 
-# Update mfst-wrapper.sh in claude-plugins marketplace
-echo "Updating mfst-wrapper.sh in claude-plugins..."
+# Update manifest-wrapper.sh in claude-plugins marketplace
+echo "Updating manifest-wrapper.sh in claude-plugins..."
 CLAUDE_PLUGINS_DIR="$(dirname "$PROJECT_ROOT")/claude-plugins"
-WRAPPER_SH="$CLAUDE_PLUGINS_DIR/plugins/manifest/bin/mfst-wrapper.sh"
+WRAPPER_SH="$CLAUDE_PLUGINS_DIR/plugins/manifest/bin/manifest-wrapper.sh"
 if [ -f "$WRAPPER_SH" ]; then
     sed -i '' "s/^VERSION=\".*\"/VERSION=\"$VERSION\"/" "$WRAPPER_SH"
 else

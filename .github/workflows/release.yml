@@ -36,17 +36,17 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/mfst dist/
+          cp target/${{ matrix.target }}/release/manifest dist/
           cp README.md dist/
           cp LICENSE dist/ 2>/dev/null || true
           cd dist
-          tar -czvf ../mfst-${{ github.ref_name }}-${{ matrix.target }}.tar.gz *
+          tar -czvf ../manifest-${{ github.ref_name }}-${{ matrix.target }}.tar.gz *
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mfst-${{ matrix.target }}
-          path: mfst-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+          name: manifest-${{ matrix.target }}
+          path: manifest-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
 
   release:
     name: Create Release
@@ -92,9 +92,9 @@ jobs:
           VERSION="${{ github.ref_name }}"
 
           # Calculate SHA256 for each platform
-          SHA_ARM=$(sha256sum artifacts/mfst-aarch64-apple-darwin/mfst-${VERSION}-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)
-          SHA_INTEL=$(sha256sum artifacts/mfst-x86_64-apple-darwin/mfst-${VERSION}-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)
-          SHA_LINUX=$(sha256sum artifacts/mfst-x86_64-unknown-linux-gnu/mfst-${VERSION}-x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+          SHA_ARM=$(sha256sum artifacts/manifest-aarch64-apple-darwin/manifest-${VERSION}-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA_INTEL=$(sha256sum artifacts/manifest-x86_64-apple-darwin/manifest-${VERSION}-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA_LINUX=$(sha256sum artifacts/manifest-x86_64-unknown-linux-gnu/manifest-${VERSION}-x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
 
           echo "SHA256 (ARM):   $SHA_ARM"
           echo "SHA256 (Intel): $SHA_INTEL"
@@ -112,26 +112,26 @@ jobs:
 
             on_macos do
               on_arm do
-                url "https://github.com/rocket-tycoon/manifest/releases/download/${VERSION}/mfst-${VERSION}-aarch64-apple-darwin.tar.gz"
+                url "https://github.com/rocket-tycoon/manifest/releases/download/${VERSION}/manifest-${VERSION}-aarch64-apple-darwin.tar.gz"
                 sha256 "${SHA_ARM}"
               end
               on_intel do
-                url "https://github.com/rocket-tycoon/manifest/releases/download/${VERSION}/mfst-${VERSION}-x86_64-apple-darwin.tar.gz"
+                url "https://github.com/rocket-tycoon/manifest/releases/download/${VERSION}/manifest-${VERSION}-x86_64-apple-darwin.tar.gz"
                 sha256 "${SHA_INTEL}"
               end
             end
 
             on_linux do
-              url "https://github.com/rocket-tycoon/manifest/releases/download/${VERSION}/mfst-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+              url "https://github.com/rocket-tycoon/manifest/releases/download/${VERSION}/manifest-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
               sha256 "${SHA_LINUX}"
             end
 
             def install
-              bin.install "mfst"
+              bin.install "manifest"
             end
 
             service do
-              run [opt_bin/"mfst", "serve"]
+              run [opt_bin/"manifest", "serve"]
               keep_alive true
               working_dir var/"manifest"
               log_path var/"log/manifest.log"
@@ -144,7 +144,7 @@ jobs:
             end
 
             test do
-              system "#{bin}/mfst", "--help"
+              system "#{bin}/manifest", "--help"
             end
           end
           FORMULA

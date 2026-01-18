@@ -23,7 +23,7 @@ fn print_banner<W: Write>(mut w: W, mode: &str) {
 }
 
 #[derive(Parser)]
-#[command(name = "mfst")]
+#[command(name = "manifest")]
 #[command(version)]
 #[command(about = "Living feature documentation for AI-assisted development")]
 struct Cli {
