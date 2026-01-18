@@ -329,7 +329,12 @@ pub struct FeatureHistoryResponse {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct HistoryEntryInfo {
     pub id: String,
-    pub session_id: Option<String>,
+    /// The version this work was done for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<String>,
+    /// Version name for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_name: Option<String>,
     pub summary: String,
     pub commits: Vec<CommitInfo>,
     pub created_at: String,

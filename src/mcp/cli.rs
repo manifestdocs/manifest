@@ -240,7 +240,8 @@ impl CliMcpServer {
                 .into_iter()
                 .map(|h| HistoryEntryInfo {
                     id: h.id.to_string(),
-                    session_id: h.session_id.map(|id| id.to_string()),
+                    version_id: h.version_id.map(|id| id.to_string()),
+                    version_name: None, // Feature history endpoint doesn't join version names
                     summary: h.details.summary,
                     commits: h
                         .details
@@ -392,6 +393,7 @@ impl CliMcpServer {
                     details: req.details,
                     state: Some(state),
                     priority: req.priority,
+                    target_version_id: None,
                 },
             )
             .await
@@ -460,6 +462,7 @@ impl CliMcpServer {
                         desired_details: None,
                         state: Some(FeatureState::Specified),
                         priority: None,
+                        target_version_id: None,
                     },
                 )
                 .await

@@ -99,6 +99,7 @@ mod tests {
                 desired_details: None,
                 state,
                 priority: 0,
+                target_version_id: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             },
