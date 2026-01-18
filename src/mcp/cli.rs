@@ -596,6 +596,11 @@ GUIDELINES:
 - Link commits to document what changed
 
 DISPLAY:
-- When showing feature trees or lists to users, display the output inline in your
-  response text (not just in the collapsed tool result) so users can see it without
-  expanding. Tool results may be truncated in the UI."#;
+Tool results appear as collapsed JSON in the UI. Always summarize results inline for humans:
+- render_feature_tree: Display the ASCII tree in your response
+- search_features: "Found N features: Title1 (state), Title2 (state), ..."
+- list_features: Same as search - summarize titles and states
+- get_feature: "Feature: Title (state)" + key details from specification
+- start_feature: "Started work on 'Title' - now in 'specified' state"
+- complete_feature: "Completed 'Title' - marked as implemented"
+- get_project_context: Summarize project name and any relevant instructions"#;
