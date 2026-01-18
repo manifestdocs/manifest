@@ -12,9 +12,7 @@ info:
 
     - **Project**: Groups features, directories, and git remotes for a codebase
     - **Feature**: A capability of the system, organized hierarchically
-    - **Session**: A work session on a leaf feature (only one active per feature)
-    - **Task**: Work unit within a session, assigned to an AI agent (can have sub-tasks)
-    - **History**: Append-only log of implementation sessions
+    - **History**: Append-only log of work completed on features
   version: 0.1.0
   license:
     name: MIT
@@ -30,12 +28,12 @@ tags:
     description: Project management - groups features and directories
   - name: Directories
     description: Project directory management
+  - name: Versions
+    description: Version management for release planning
   - name: Features
     description: Feature tree management
-  - name: Sessions
-    description: Work session management (on leaf features only)
-  - name: Tasks
-    description: Task management within sessions
+  - name: History
+    description: Feature implementation history
   - name: Health
     description: Server health checks
 
@@ -172,6 +170,59 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /projects/{id}/history:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [History]
+      summary: Get project-wide history
+      description: |
+        Returns history entries across all features in the project, ordered by
+        creation date (newest first). Each entry includes feature and version context.
+        Useful for PMs to see recent changes across the entire project.
+        Filter by version_id to see all work done for a specific release.
+      operationId: getProjectHistory
+      parameters:
+        - name: version_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter to entries for a specific version (useful for release notes).
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+          description: Maximum number of entries to return. Defaults to 50.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of entries to skip for pagination. Defaults to 0.
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Only return entries created after this ISO datetime.
+      responses:
+        "200":
+          description: History entries with feature and version context
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectHistoryEntry"
+
   /projects/{id}/directories:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -207,6 +258,89 @@ paths:
                 $ref: "#/components/schemas/ProjectDirectory"
         "500":
           $ref: "#/components/responses/InternalError"
+
+  /projects/{id}/versions:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Versions]
+      summary: List versions for a project
+      operationId: listProjectVersions
+      responses:
+        "200":
+          description: List of versions ordered by creation date
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Version"
+    post:
+      tags: [Versions]
+      summary: Create a new version
+      operationId: createVersion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVersionInput"
+      responses:
+        "201":
+          description: Version created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Version"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /versions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/VersionId"
+    get:
+      tags: [Versions]
+      summary: Get a version by ID
+      operationId: getVersion
+      responses:
+        "200":
+          description: The version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Version"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Versions]
+      summary: Update a version
+      operationId: updateVersion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVersionInput"
+      responses:
+        "200":
+          description: Version updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Version"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Versions]
+      summary: Delete a version
+      operationId: deleteVersion
+      responses:
+        "204":
+          description: Version deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /projects/{id}/features:
     parameters:
@@ -469,7 +603,7 @@ paths:
     parameters:
       - $ref: "#/components/parameters/FeatureId"
     get:
-      tags: [Features]
+      tags: [History]
       summary: Get feature history
       description: Returns the implementation history log (like git log)
       operationId: getFeatureHistory
@@ -482,6 +616,32 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/FeatureHistory"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [History]
+      summary: Add a history entry to a feature
+      description: |
+        Records work completed on a feature. Each entry captures a summary of changes
+        and optionally links to git commits. Use this when completing work on a feature.
+      operationId: addFeatureHistory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddHistoryInput"
+      responses:
+        "201":
+          description: History entry created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureHistory"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /features/{id}/diff:
     parameters:
@@ -500,239 +660,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FeatureDiff"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
-  /features/{id}/sessions:
-    parameters:
-      - $ref: "#/components/parameters/FeatureId"
-    get:
-      tags: [Features]
-      summary: List sessions for a feature
-      description: Returns all sessions (active and completed) for this feature, ordered by creation date (newest first)
-      operationId: listFeatureSessions
-      responses:
-        "200":
-          description: List of sessions for the feature
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Session"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    post:
-      tags: [Sessions]
-      summary: Create a session on a feature (RESTful)
-      description: |
-        Creates a work session on a leaf feature. This is a RESTful alternative to
-        `POST /sessions` where the feature ID comes from the URL path instead of the request body.
-        Only leaf features (those without children) can have sessions.
-        Only one active session per feature is allowed.
-
-        Side effect: If the feature is in 'proposed' state, it will be auto-transitioned to 'specified'.
-      operationId: createFeatureSession
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateFeatureSessionInput"
-      responses:
-        "201":
-          description: Session created with tasks
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionResponse"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          description: Feature is not a leaf or already has active session
-          content:
-            application/json:
-              schema:
-                type: string
-
-  # ============================================================
-  # Sessions
-  # ============================================================
-  /sessions:
-    post:
-      tags: [Sessions]
-      summary: Create a new session
-      description: |
-        Creates a work session on a leaf feature. Only leaf features (those without children)
-        can have sessions. Only one active session per feature is allowed.
-
-        Side effect: If the feature is in 'proposed' state, it will be auto-transitioned to 'specified'.
-      operationId: createSession
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateSessionInput"
-      responses:
-        "201":
-          description: Session created with tasks
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionResponse"
-        "500":
-          description: Feature is not a leaf or already has active session
-          content:
-            application/json:
-              schema:
-                type: string
-
-  /sessions/{id}:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    get:
-      tags: [Sessions]
-      summary: Get a session by ID
-      operationId: getSession
-      responses:
-        "200":
-          description: The session
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Session"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
-  /sessions/{id}/status:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    get:
-      tags: [Sessions]
-      summary: Get session status with task details
-      operationId: getSessionStatus
-      responses:
-        "200":
-          description: Session status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionStatusResponse"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
-  /sessions/{id}/complete:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    post:
-      tags: [Sessions]
-      summary: Complete a session
-      description: |
-        Completes the session, creates a history entry, and deletes all tasks.
-        The session is marked as completed and cannot be modified further.
-        Optionally updates the feature's state (e.g., to 'implemented').
-      operationId: completeSession
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CompleteSessionInput"
-      responses:
-        "200":
-          description: Session completed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionCompletionResult"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          description: Session already completed
-          content:
-            application/json:
-              schema:
-                type: string
-
-  /sessions/{id}/tasks:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    get:
-      tags: [Sessions]
-      summary: List tasks in a session
-      description: Returns all tasks belonging to this session
-      operationId: listSessionTasks
-      responses:
-        "200":
-          description: List of tasks
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Task"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    post:
-      tags: [Sessions]
-      summary: Create a task in a session
-      description: Adds a new task to an active session
-      operationId: createSessionTask
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateTaskInput"
-      responses:
-        "201":
-          description: Task created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Task"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          description: Session is not active
-          content:
-            application/json:
-              schema:
-                type: string
-
-  # ============================================================
-  # Tasks
-  # ============================================================
-  /tasks/{id}:
-    parameters:
-      - $ref: "#/components/parameters/TaskId"
-    get:
-      tags: [Tasks]
-      summary: Get a task by ID
-      operationId: getTask
-      responses:
-        "200":
-          description: The task
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Task"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    put:
-      tags: [Tasks]
-      summary: Update a task
-      operationId: updateTask
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateTaskInput"
-      responses:
-        "200":
-          description: Task updated
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -765,23 +692,14 @@ components:
         format: uuid
       description: Feature UUID
 
-    SessionId:
+    VersionId:
       name: id
       in: path
       required: true
       schema:
         type: string
         format: uuid
-      description: Session UUID
-
-    TaskId:
-      name: id
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
-      description: Task UUID
+      description: Version UUID
 
     Limit:
       name: limit
@@ -841,6 +759,11 @@ components:
           nullable: true
           description: Project-wide instructions for AI agents (coding guidelines, conventions, etc.)
           example: "Use Result<T,E> for errors. Follow coding-guidelines.md."
+        current_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID of the current/active version for this project
         created_at:
           type: string
           format: date-time
@@ -875,6 +798,11 @@ components:
           type: string
           nullable: true
           description: Project-wide instructions for AI agents
+        current_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set the current/active version for this project
 
     ProjectDirectory:
       type: object
@@ -939,6 +867,11 @@ components:
           type: string
           nullable: true
           description: Project-wide instructions for AI agents
+        current_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID of the current/active version for this project
         created_at:
           type: string
           format: date-time
@@ -985,6 +918,11 @@ components:
           type: integer
           default: 0
           description: Priority for ordering within parent (lower values first)
+        target_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Target version ID for release planning
         created_at:
           type: string
           format: date-time
@@ -1026,6 +964,11 @@ components:
           type: integer
           default: 0
           description: Priority for ordering within parent (lower values first)
+        target_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Target version ID for release planning
 
     CreateFeatureInput:
       type: object
@@ -1043,6 +986,11 @@ components:
           description: Feature specification including user stories, implementation notes, and technical context
         state:
           $ref: "#/components/schemas/FeatureState"
+        target_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Target version for release planning
 
     UpdateFeatureInput:
       type: object
@@ -1062,6 +1010,11 @@ components:
         priority:
           type: integer
           description: Priority for ordering within parent
+        target_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Target version for release planning
 
     BulkCreateFeaturesInput:
       type: object
@@ -1144,7 +1097,7 @@ components:
       type: object
       required: [id, feature_id, summary, created_at]
       description: |
-        Append-only log entry recording what happened during a session.
+        Append-only log entry recording work completed on a feature.
         Similar to git log - records implementation history, not version snapshots.
       properties:
         id:
@@ -1153,10 +1106,51 @@ components:
         feature_id:
           type: string
           format: uuid
-        session_id:
+        version_id:
           type: string
           format: uuid
           nullable: true
+          description: Version this work was done for (captured at time of completion)
+        summary:
+          type: string
+          description: Summary of work completed
+        commits:
+          type: array
+          description: Git commits created during this work
+          items:
+            $ref: "#/components/schemas/CommitRef"
+        created_at:
+          type: string
+          format: date-time
+
+    ProjectHistoryEntry:
+      type: object
+      required: [id, feature_id, feature_title, feature_state, summary, created_at]
+      description: |
+        Project-wide history entry with feature context. Used for the unified
+        project history view, where PMs can see recent changes across all features.
+      properties:
+        id:
+          type: string
+          format: uuid
+        feature_id:
+          type: string
+          format: uuid
+        feature_title:
+          type: string
+          description: Feature title, denormalized for display
+        feature_state:
+          $ref: "#/components/schemas/FeatureState"
+          description: Feature state at time of query
+        version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Version this work was done for
+        version_name:
+          type: string
+          nullable: true
+          description: Version name, denormalized for display
         summary:
           type: string
           description: Summary of work completed
@@ -1189,113 +1183,30 @@ components:
           description: Desired details (what the feature SHOULD be)
 
     # ============================================================
-    # Session schemas
+    # History schemas
     # ============================================================
-    Session:
-      type: object
-      required: [id, feature_id, goal, status, created_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-        feature_id:
-          type: string
-          format: uuid
-        goal:
-          type: string
-          example: "Implement OAuth login with Google"
-        status:
-          $ref: "#/components/schemas/SessionStatus"
-        created_at:
-          type: string
-          format: date-time
-        completed_at:
-          type: string
-          format: date-time
-          nullable: true
-
-    SessionStatus:
-      type: string
-      enum: [active, completed, failed]
-
-    CreateSessionInput:
-      type: object
-      required: [feature_id, goal, tasks]
-      properties:
-        feature_id:
-          type: string
-          format: uuid
-        goal:
-          type: string
-        tasks:
-          type: array
-          items:
-            $ref: "#/components/schemas/CreateTaskInput"
-
-    CreateFeatureSessionInput:
-      type: object
-      description: Input for creating a session via RESTful endpoint (feature_id comes from URL path)
-      required: [goal]
-      properties:
-        goal:
-          type: string
-          description: High-level objective for this work session
-        tasks:
-          type: array
-          description: Initial tasks to create with the session
-          default: []
-          items:
-            $ref: "#/components/schemas/CreateTaskInput"
-
-    SessionResponse:
-      type: object
-      required: [session, tasks]
-      properties:
-        session:
-          $ref: "#/components/schemas/Session"
-        tasks:
-          type: array
-          items:
-            $ref: "#/components/schemas/Task"
-
-    SessionStatusResponse:
-      type: object
-      required: [session, feature, tasks]
-      properties:
-        session:
-          $ref: "#/components/schemas/Session"
-        feature:
-          $ref: "#/components/schemas/SessionFeatureSummary"
-        tasks:
-          type: array
-          items:
-            $ref: "#/components/schemas/Task"
-
-    SessionFeatureSummary:
-      type: object
-      required: [id, title]
-      properties:
-        id:
-          type: string
-          format: uuid
-        title:
-          type: string
-
-    CompleteSessionInput:
+    AddHistoryInput:
       type: object
       required: [summary]
+      description: Input for adding a history entry to a feature
       properties:
         summary:
           type: string
-          description: Summary of work completed in this session
+          description: Summary of work completed
         commits:
           type: array
-          description: Git commits created during this session
+          description: Git commits created during this work
           items:
             $ref: "#/components/schemas/CommitRef"
-        feature_state:
-          $ref: "#/components/schemas/FeatureState"
-          description: Optionally update the feature's state (e.g., to 'implemented')
+        version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Version this work was done for (defaults to feature's target_version_id if not specified)
+        mark_implemented:
+          type: boolean
+          default: false
+          description: If true, also transitions the feature to 'implemented' state
 
     CommitRef:
       type: object
@@ -1315,86 +1226,64 @@ components:
           nullable: true
           description: Commit author (if different from default)
 
-    SessionCompletionResult:
-      type: object
-      required: [session, history_entry]
-      properties:
-        session:
-          $ref: "#/components/schemas/Session"
-        history_entry:
-          $ref: "#/components/schemas/FeatureHistory"
-
     # ============================================================
-    # Task schemas
+    # Version schemas
     # ============================================================
-    Task:
+    Version:
       type: object
-      required: [id, session_id, title, scope, status, agent_type, created_at]
+      required: [id, project_id, name, created_at, updated_at]
+      description: A version for release planning
       properties:
         id:
           type: string
           format: uuid
-        session_id:
+        project_id:
           type: string
           format: uuid
-        parent_id:
+        name:
           type: string
-          format: uuid
-          nullable: true
-          description: Parent task ID for sub-tasks (null for top-level tasks)
-        title:
-          type: string
-        scope:
-          type: string
-          description: Scope description for the agent
-        status:
-          $ref: "#/components/schemas/TaskStatus"
-        agent_type:
-          $ref: "#/components/schemas/AgentType"
-        worktree_path:
+          description: Version name (e.g., "1.0.0", "2.0.0-beta")
+          example: "1.0.0"
+        description:
           type: string
           nullable: true
-          description: Git worktree path for isolated work
-        branch:
+          description: Optional description of the version
+        released_at:
           type: string
+          format: date-time
           nullable: true
-          description: Git branch name
+          description: When this version was released (if released)
         created_at:
           type: string
           format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
-    TaskStatus:
-      type: string
-      enum: [pending, running, completed, failed]
-
-    AgentType:
-      type: string
-      enum: [claude, gemini, codex]
-
-    CreateTaskInput:
+    CreateVersionInput:
       type: object
-      required: [title, scope, agent_type]
+      required: [name]
       properties:
-        parent_id:
+        name:
           type: string
-          format: uuid
+          description: Version name (e.g., "1.0.0", "2.0.0-beta")
+        description:
+          type: string
           nullable: true
-          description: Parent task ID for creating sub-tasks
-        title:
-          type: string
-        scope:
-          type: string
-        agent_type:
-          $ref: "#/components/schemas/AgentType"
+          description: Optional description of the version
 
-    UpdateTaskInput:
+    UpdateVersionInput:
       type: object
       properties:
-        status:
-          $ref: "#/components/schemas/TaskStatus"
-        worktree_path:
+        name:
+          type: string
+          description: Version name
+        description:
           type: string
           nullable: true
-        branch:
+          description: Optional description of the version
+        released_at:
           type: string
+          format: date-time
           nullable: true
+          description: Set to mark the version as released

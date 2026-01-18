@@ -8,7 +8,13 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::db::{Database, ManifestError};
-use crate::models::*;
+use crate::models::{
+    AddDirectoryInput, CommitRef, CreateFeatureInput, CreateHistoryInput, CreateProjectInput,
+    CreateVersionInput, Feature, FeatureDiff, FeatureHistory, FeatureState, FeatureSummary,
+    FeatureTreeNode, HistoryDetails, ListFeaturesQuery, Project, ProjectDirectory,
+    ProjectHistoryEntry, ProjectWithDirectories, UpdateFeatureInput, UpdateProjectInput,
+    UpdateVersionInput, Version,
+};
 
 // Import MCP types for bulk feature creation (re-exported from mcp module)
 use crate::mcp::{PlanFeaturesResponse, ProposedFeature};
@@ -105,6 +111,47 @@ pub async fn delete_project(
     }
 }
 
+/// Query parameters for project history.
+#[derive(Debug, Deserialize)]
+pub struct ProjectHistoryQuery {
+    /// Filter to entries for a specific version (useful for release notes).
+    pub version_id: Option<Uuid>,
+    /// Maximum number of entries to return. Defaults to 50.
+    pub limit: Option<u32>,
+    /// Number of entries to skip for pagination. Defaults to 0.
+    pub offset: Option<u32>,
+    /// Optional ISO datetime to filter entries created after this time.
+    pub since: Option<String>,
+}
+
+/// Get project-wide history across all features.
+///
+/// Returns history entries for all features in the project, ordered by
+/// creation date (newest first). Can be filtered by version_id to generate
+/// release notes. Useful for PMs to see recent changes.
+pub async fn get_project_history(
+    State(db): State<Database>,
+    Path(project_id): Path<Uuid>,
+    Query(query): Query<ProjectHistoryQuery>,
+) -> Result<Json<Vec<ProjectHistoryEntry>>, (StatusCode, String)> {
+    // Parse optional since datetime
+    let since = query
+        .since
+        .as_ref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+
+    db.get_project_history(
+        project_id,
+        query.version_id,
+        query.limit,
+        query.offset,
+        since,
+    )
+    .map(Json)
+    .map_err(internal_error)
+}
+
 // ============================================================
 // Project Directories
 // ============================================================
@@ -136,6 +183,61 @@ pub async fn remove_project_directory(
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err((StatusCode::NOT_FOUND, "Directory not found".to_string()))
+    }
+}
+
+// ============================================================
+// Versions
+// ============================================================
+
+pub async fn list_project_versions(
+    State(db): State<Database>,
+    Path(project_id): Path<Uuid>,
+) -> Result<Json<Vec<Version>>, (StatusCode, String)> {
+    db.get_versions_by_project(project_id)
+        .map(Json)
+        .map_err(internal_error)
+}
+
+pub async fn create_version(
+    State(db): State<Database>,
+    Path(project_id): Path<Uuid>,
+    Json(input): Json<CreateVersionInput>,
+) -> Result<(StatusCode, Json<Version>), (StatusCode, String)> {
+    db.create_version(project_id, input)
+        .map(|v| (StatusCode::CREATED, Json(v)))
+        .map_err(internal_error)
+}
+
+pub async fn get_version(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Version>, (StatusCode, String)> {
+    db.get_version(id)
+        .map_err(internal_error)?
+        .map(Json)
+        .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))
+}
+
+pub async fn update_version(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+    Json(input): Json<UpdateVersionInput>,
+) -> Result<Json<Version>, (StatusCode, String)> {
+    db.update_version(id, input)
+        .map_err(internal_error)?
+        .map(Json)
+        .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))
+}
+
+pub async fn delete_version(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if db.delete_version(id).map_err(internal_error)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err((StatusCode::NOT_FOUND, "Version not found".to_string()))
     }
 }
 
@@ -211,6 +313,9 @@ pub struct CreateFeatureHistoryInput {
     pub summary: String,
     #[serde(default)]
     pub commits: Vec<CommitRef>,
+    /// Version this work was done for.
+    /// If not specified, defaults to the feature's target_version_id.
+    pub version_id: Option<Uuid>,
     /// If true, also update feature state to 'implemented'. Defaults to true.
     #[serde(default = "default_true")]
     pub mark_implemented: bool,
@@ -239,11 +344,12 @@ pub async fn create_feature_history(
         ));
     }
 
-    // Create history entry directly (no session)
+    // Create history entry directly
+    // If version_id not provided, database layer defaults to feature's target_version_id
     let history = db
         .create_history_entry(CreateHistoryInput {
             feature_id,
-            session_id: None,
+            version_id: input.version_id,
             details: HistoryDetails {
                 summary: input.summary,
                 commits: input.commits,
@@ -262,48 +368,13 @@ pub async fn create_feature_history(
                 desired_details: None,
                 state: Some(FeatureState::Implemented),
                 priority: None,
+                target_version_id: None,
             },
         )
         .map_err(internal_error)?;
     }
 
     Ok((StatusCode::CREATED, Json(history)))
-}
-
-pub async fn list_feature_sessions(
-    State(db): State<Database>,
-    Path(feature_id): Path<Uuid>,
-) -> Result<Json<Vec<Session>>, (StatusCode, String)> {
-    // First verify feature exists
-    db.get_feature(feature_id)
-        .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))?;
-
-    db.get_sessions_by_feature(feature_id)
-        .map(Json)
-        .map_err(internal_error)
-}
-
-pub async fn create_feature_session(
-    State(db): State<Database>,
-    Path(feature_id): Path<Uuid>,
-    Json(input): Json<CreateFeatureSessionInput>,
-) -> Result<(StatusCode, Json<SessionResponse>), (StatusCode, String)> {
-    // First verify feature exists
-    db.get_feature(feature_id)
-        .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))?;
-
-    // Convert to CreateSessionInput with feature_id from path
-    let session_input = CreateSessionInput {
-        feature_id,
-        goal: input.goal,
-        tasks: input.tasks,
-    };
-
-    db.create_session(session_input)
-        .map(|s| (StatusCode::CREATED, Json(s)))
-        .map_err(internal_error)
 }
 
 pub async fn get_feature(
@@ -376,105 +447,6 @@ pub async fn search_features(
     Query(query): Query<SearchFeaturesQuery>,
 ) -> Result<Json<Vec<FeatureSummary>>, (StatusCode, String)> {
     db.search_features(&query.q, query.project_id, query.limit)
-        .map(Json)
-        .map_err(internal_error)
-}
-
-// ============================================================
-// Sessions
-// ============================================================
-
-pub async fn create_session(
-    State(db): State<Database>,
-    Json(input): Json<CreateSessionInput>,
-) -> Result<(StatusCode, Json<SessionResponse>), (StatusCode, String)> {
-    db.create_session(input)
-        .map(|s| (StatusCode::CREATED, Json(s)))
-        .map_err(internal_error)
-}
-
-pub async fn get_session(
-    State(db): State<Database>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<Session>, (StatusCode, String)> {
-    db.get_session(id)
-        .map_err(internal_error)?
-        .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Session not found".to_string()))
-}
-
-pub async fn get_session_status(
-    State(db): State<Database>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<SessionStatusResponse>, (StatusCode, String)> {
-    db.get_session_status(id)
-        .map_err(internal_error)?
-        .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Session not found".to_string()))
-}
-
-pub async fn complete_session(
-    State(db): State<Database>,
-    Path(id): Path<Uuid>,
-    Json(input): Json<CompleteSessionInput>,
-) -> Result<Json<SessionCompletionResult>, (StatusCode, String)> {
-    db.complete_session(id, input)
-        .map_err(internal_error)?
-        .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Session not found".to_string()))
-}
-
-// ============================================================
-// Tasks
-// ============================================================
-
-pub async fn get_task(
-    State(db): State<Database>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<Task>, (StatusCode, String)> {
-    db.get_task(id)
-        .map_err(internal_error)?
-        .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Task not found".to_string()))
-}
-
-pub async fn update_task(
-    State(db): State<Database>,
-    Path(id): Path<Uuid>,
-    Json(input): Json<UpdateTaskInput>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    if db.update_task(id, input).map_err(internal_error)? {
-        Ok(StatusCode::OK)
-    } else {
-        Err((StatusCode::NOT_FOUND, "Task not found".to_string()))
-    }
-}
-
-pub async fn create_session_task(
-    State(db): State<Database>,
-    Path(session_id): Path<Uuid>,
-    Json(input): Json<CreateTaskInput>,
-) -> Result<(StatusCode, Json<Task>), (StatusCode, String)> {
-    // First verify session exists
-    db.get_session(session_id)
-        .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Session not found".to_string()))?;
-
-    db.create_task(session_id, input)
-        .map(|t| (StatusCode::CREATED, Json(t)))
-        .map_err(internal_error)
-}
-
-pub async fn list_session_tasks(
-    State(db): State<Database>,
-    Path(session_id): Path<Uuid>,
-) -> Result<Json<Vec<Task>>, (StatusCode, String)> {
-    // First verify session exists
-    db.get_session(session_id)
-        .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Session not found".to_string()))?;
-
-    db.get_tasks_by_session(session_id)
         .map(Json)
         .map_err(internal_error)
 }
@@ -574,6 +546,7 @@ fn flatten_feature_tree(
         details: proposed.details.clone(),
         state: Some(FeatureState::Specified),
         priority: Some(proposed.priority),
+        target_version_id: None,
     });
 
     // Recursively flatten children with this feature's ID as parent

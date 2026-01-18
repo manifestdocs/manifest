@@ -62,6 +62,15 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
             "/projects/{id}/directories",
             post(handlers::add_project_directory),
         )
+        .route("/projects/{id}/history", get(handlers::get_project_history))
+        // Versions
+        .route(
+            "/projects/{id}/versions",
+            get(handlers::list_project_versions).post(handlers::create_version),
+        )
+        .route("/versions/{id}", get(handlers::get_version))
+        .route("/versions/{id}", put(handlers::update_version))
+        .route("/versions/{id}", delete(handlers::delete_version))
         .route(
             "/projects/{id}/features",
             get(handlers::list_project_features),
@@ -95,23 +104,7 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         .route(
             "/features/{id}/history",
             get(handlers::get_feature_history).post(handlers::create_feature_history),
-        )
-        .route(
-            "/features/{id}/sessions",
-            get(handlers::list_feature_sessions).post(handlers::create_feature_session),
-        )
-        // Sessions
-        .route("/sessions", post(handlers::create_session))
-        .route("/sessions/{id}", get(handlers::get_session))
-        .route("/sessions/{id}/status", get(handlers::get_session_status))
-        .route("/sessions/{id}/complete", post(handlers::complete_session))
-        .route(
-            "/sessions/{id}/tasks",
-            get(handlers::list_session_tasks).post(handlers::create_session_task),
-        )
-        // Tasks
-        .route("/tasks/{id}", get(handlers::get_task))
-        .route("/tasks/{id}", put(handlers::update_task));
+        );
 
     // Apply auth middleware to protected routes if API key is configured
     let protected_api = if config.api_key.is_some() {
