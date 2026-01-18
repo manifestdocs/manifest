@@ -104,7 +104,7 @@ impl Database {
     pub fn get_all_projects(&self) -> Result<Vec<Project>> {
         let conn = self.conn.lock().expect("database lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, instructions, created_at, updated_at
+            "SELECT id, name, description, instructions, current_version_id, created_at, updated_at
              FROM projects ORDER BY name",
         )?;
 
@@ -115,8 +115,9 @@ impl Database {
                     name: row.get(1)?,
                     description: row.get(2)?,
                     instructions: row.get(3)?,
-                    created_at: parse_datetime(row.get::<_, String>(4)?),
-                    updated_at: parse_datetime(row.get::<_, String>(5)?),
+                    current_version_id: row.get::<_, Option<String>>(4)?.map(parse_uuid),
+                    created_at: parse_datetime(row.get::<_, String>(5)?),
+                    updated_at: parse_datetime(row.get::<_, String>(6)?),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -127,7 +128,7 @@ impl Database {
     pub fn get_project(&self, id: Uuid) -> Result<Option<Project>> {
         let conn = self.conn.lock().expect("database lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, instructions, created_at, updated_at
+            "SELECT id, name, description, instructions, current_version_id, created_at, updated_at
              FROM projects WHERE id = ?",
         )?;
 
@@ -138,8 +139,9 @@ impl Database {
                 name: row.get(1)?,
                 description: row.get(2)?,
                 instructions: row.get(3)?,
-                created_at: parse_datetime(row.get::<_, String>(4)?),
-                updated_at: parse_datetime(row.get::<_, String>(5)?),
+                current_version_id: row.get::<_, Option<String>>(4)?.map(parse_uuid),
+                created_at: parse_datetime(row.get::<_, String>(5)?),
+                updated_at: parse_datetime(row.get::<_, String>(6)?),
             }))
         } else {
             Ok(None)
@@ -169,6 +171,7 @@ impl Database {
             name: input.name,
             description: input.description,
             instructions: input.instructions,
+            current_version_id: None,
             created_at: now,
             updated_at: now,
         })
@@ -184,13 +187,15 @@ impl Database {
         let name = input.name.unwrap_or(existing.name);
         let description = input.description.or(existing.description);
         let instructions = input.instructions.or(existing.instructions);
+        let current_version_id = input.current_version_id.or(existing.current_version_id);
 
         conn.execute(
-            "UPDATE projects SET name = ?, description = ?, instructions = ?, updated_at = ? WHERE id = ?",
+            "UPDATE projects SET name = ?, description = ?, instructions = ?, current_version_id = ?, updated_at = ? WHERE id = ?",
             (
                 &name,
                 &description,
                 &instructions,
+                current_version_id.map(|u| u.to_string()),
                 now.to_rfc3339(),
                 id.to_string(),
             ),
@@ -201,6 +206,7 @@ impl Database {
             name,
             description,
             instructions,
+            current_version_id,
             created_at: existing.created_at,
             updated_at: now,
         }))
@@ -335,6 +341,134 @@ impl Database {
     }
 
     // ============================================================
+    // Version operations
+    // ============================================================
+
+    /// Get all versions for a project.
+    pub fn get_versions_by_project(&self, project_id: Uuid) -> Result<Vec<Version>> {
+        let conn = self.conn.lock().expect("database lock poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, name, description, released_at, created_at, updated_at
+             FROM versions WHERE project_id = ? ORDER BY created_at",
+        )?;
+
+        let versions = stmt
+            .query_map([project_id.to_string()], |row| {
+                Ok(Version {
+                    id: parse_uuid(row.get::<_, String>(0)?),
+                    project_id: parse_uuid(row.get::<_, String>(1)?),
+                    name: row.get(2)?,
+                    description: row.get(3)?,
+                    released_at: row.get::<_, Option<String>>(4)?.map(parse_datetime),
+                    created_at: parse_datetime(row.get::<_, String>(5)?),
+                    updated_at: parse_datetime(row.get::<_, String>(6)?),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(versions)
+    }
+
+    /// Get a version by ID.
+    pub fn get_version(&self, id: Uuid) -> Result<Option<Version>> {
+        let conn = self.conn.lock().expect("database lock poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, name, description, released_at, created_at, updated_at
+             FROM versions WHERE id = ?",
+        )?;
+
+        let mut rows = stmt.query([id.to_string()])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Version {
+                id: parse_uuid(row.get::<_, String>(0)?),
+                project_id: parse_uuid(row.get::<_, String>(1)?),
+                name: row.get(2)?,
+                description: row.get(3)?,
+                released_at: row.get::<_, Option<String>>(4)?.map(parse_datetime),
+                created_at: parse_datetime(row.get::<_, String>(5)?),
+                updated_at: parse_datetime(row.get::<_, String>(6)?),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Create a new version.
+    pub fn create_version(&self, project_id: Uuid, input: CreateVersionInput) -> Result<Version> {
+        // Verify project exists
+        self.get_project(project_id)?
+            .ok_or_else(|| ManifestError::not_found("Project"))?;
+
+        let conn = self.conn.lock().expect("database lock poisoned");
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+
+        conn.execute(
+            "INSERT INTO versions (id, project_id, name, description, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                id.to_string(),
+                project_id.to_string(),
+                &input.name,
+                &input.description,
+                now.to_rfc3339(),
+                now.to_rfc3339(),
+            ),
+        )?;
+
+        Ok(Version {
+            id,
+            project_id,
+            name: input.name,
+            description: input.description,
+            released_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+    }
+
+    /// Update an existing version.
+    pub fn update_version(&self, id: Uuid, input: UpdateVersionInput) -> Result<Option<Version>> {
+        let Some(existing) = self.get_version(id)? else {
+            return Ok(None);
+        };
+
+        let conn = self.conn.lock().expect("database lock poisoned");
+        let now = Utc::now();
+        let name = input.name.unwrap_or(existing.name);
+        let description = input.description.or(existing.description);
+        let released_at = input.released_at.or(existing.released_at);
+
+        conn.execute(
+            "UPDATE versions SET name = ?, description = ?, released_at = ?, updated_at = ? WHERE id = ?",
+            (
+                &name,
+                &description,
+                released_at.map(|d| d.to_rfc3339()),
+                now.to_rfc3339(),
+                id.to_string(),
+            ),
+        )?;
+
+        Ok(Some(Version {
+            id,
+            project_id: existing.project_id,
+            name,
+            description,
+            released_at,
+            created_at: existing.created_at,
+            updated_at: now,
+        }))
+    }
+
+    /// Delete a version.
+    pub fn delete_version(&self, id: Uuid) -> Result<bool> {
+        let conn = self.conn.lock().expect("database lock poisoned");
+        let rows = conn.execute("DELETE FROM versions WHERE id = ?", [id.to_string()])?;
+        Ok(rows > 0)
+    }
+
+    // ============================================================
     // Feature operations
     // ============================================================
 
@@ -348,22 +482,22 @@ impl Database {
 
         let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = match (limit, offset) {
             (Some(lim), Some(off)) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
                  FROM features ORDER BY priority, title LIMIT ? OFFSET ?".to_string(),
                 vec![Box::new(lim) as Box<dyn rusqlite::ToSql>, Box::new(off)],
             ),
             (Some(lim), None) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
                  FROM features ORDER BY priority, title LIMIT ?".to_string(),
                 vec![Box::new(lim) as Box<dyn rusqlite::ToSql>],
             ),
             (None, Some(off)) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
                  FROM features ORDER BY priority, title LIMIT -1 OFFSET ?".to_string(),
                 vec![Box::new(off) as Box<dyn rusqlite::ToSql>],
             ),
             (None, None) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
                  FROM features ORDER BY priority, title".to_string(),
                 vec![],
             ),
@@ -383,8 +517,9 @@ impl Database {
                     state: FeatureState::from_str(&row.get::<_, String>(6)?)
                         .unwrap_or(FeatureState::Proposed),
                     priority: row.get(7)?,
-                    created_at: parse_datetime(row.get::<_, String>(8)?),
-                    updated_at: parse_datetime(row.get::<_, String>(9)?),
+                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
+                    created_at: parse_datetime(row.get::<_, String>(9)?),
+                    updated_at: parse_datetime(row.get::<_, String>(10)?),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -409,7 +544,7 @@ impl Database {
 
         let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = match (limit, offset) {
             (Some(lim), Some(off)) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
                  FROM features WHERE project_id = ? ORDER BY priority, title LIMIT ? OFFSET ?".to_string(),
                 vec![
                     Box::new(project_id_str.clone()) as Box<dyn rusqlite::ToSql>,
@@ -418,7 +553,7 @@ impl Database {
                 ],
             ),
             (Some(lim), None) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
                  FROM features WHERE project_id = ? ORDER BY priority, title LIMIT ?".to_string(),
                 vec![
                     Box::new(project_id_str.clone()) as Box<dyn rusqlite::ToSql>,
@@ -426,7 +561,7 @@ impl Database {
                 ],
             ),
             (None, Some(off)) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
                  FROM features WHERE project_id = ? ORDER BY priority, title LIMIT -1 OFFSET ?".to_string(),
                 vec![
                     Box::new(project_id_str.clone()) as Box<dyn rusqlite::ToSql>,
@@ -434,7 +569,7 @@ impl Database {
                 ],
             ),
             (None, None) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
                  FROM features WHERE project_id = ? ORDER BY priority, title".to_string(),
                 vec![Box::new(project_id_str.clone()) as Box<dyn rusqlite::ToSql>],
             ),
@@ -454,8 +589,9 @@ impl Database {
                     state: FeatureState::from_str(&row.get::<_, String>(6)?)
                         .unwrap_or(FeatureState::Proposed),
                     priority: row.get(7)?,
-                    created_at: parse_datetime(row.get::<_, String>(8)?),
-                    updated_at: parse_datetime(row.get::<_, String>(9)?),
+                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
+                    created_at: parse_datetime(row.get::<_, String>(9)?),
+                    updated_at: parse_datetime(row.get::<_, String>(10)?),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -471,7 +607,7 @@ impl Database {
     pub fn get_feature(&self, id: Uuid) -> Result<Option<Feature>> {
         let conn = self.conn.lock().expect("database lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+            "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
              FROM features WHERE id = ?",
         )?;
 
@@ -487,8 +623,9 @@ impl Database {
                 state: FeatureState::from_str(&row.get::<_, String>(6)?)
                     .unwrap_or(FeatureState::Proposed),
                 priority: row.get(7)?,
-                created_at: parse_datetime(row.get::<_, String>(8)?),
-                updated_at: parse_datetime(row.get::<_, String>(9)?),
+                target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
+                created_at: parse_datetime(row.get::<_, String>(9)?),
+                updated_at: parse_datetime(row.get::<_, String>(10)?),
             }))
         } else {
             Ok(None)
@@ -524,8 +661,8 @@ impl Database {
         let priority = input.priority.unwrap_or(0);
 
         conn.execute(
-            "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 id.to_string(),
                 project_id.to_string(),
@@ -534,6 +671,7 @@ impl Database {
                 &input.details,
                 state.as_str(),
                 priority,
+                input.target_version_id.map(|u| u.to_string()),
                 now.to_rfc3339(),
                 now.to_rfc3339(),
             ),
@@ -548,6 +686,7 @@ impl Database {
             desired_details: None,
             state,
             priority,
+            target_version_id: input.target_version_id,
             created_at: now,
             updated_at: now,
         })
@@ -576,8 +715,8 @@ impl Database {
             let priority = input.priority.unwrap_or(0);
 
             tx.execute(
-                "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     id.to_string(),
                     project_id.to_string(),
@@ -586,6 +725,7 @@ impl Database {
                     &input.details,
                     state.as_str(),
                     priority,
+                    input.target_version_id.map(|u| u.to_string()),
                     now.to_rfc3339(),
                     now.to_rfc3339(),
                 ),
@@ -600,6 +740,7 @@ impl Database {
                 desired_details: None,
                 state,
                 priority,
+                target_version_id: input.target_version_id,
                 created_at: now,
                 updated_at: now,
             });
@@ -622,9 +763,10 @@ impl Database {
         let state = input.state.unwrap_or(existing.state);
         let parent_id = input.parent_id.or(existing.parent_id);
         let priority = input.priority.unwrap_or(existing.priority);
+        let target_version_id = input.target_version_id.or(existing.target_version_id);
 
         conn.execute(
-            "UPDATE features SET parent_id = ?, title = ?, details = ?, desired_details = ?, state = ?, priority = ?, updated_at = ? WHERE id = ?",
+            "UPDATE features SET parent_id = ?, title = ?, details = ?, desired_details = ?, state = ?, priority = ?, target_version_id = ?, updated_at = ? WHERE id = ?",
             (
                 parent_id.map(|u| u.to_string()),
                 &title,
@@ -632,6 +774,7 @@ impl Database {
                 &desired_details,
                 state.as_str(),
                 priority,
+                target_version_id.map(|u| u.to_string()),
                 now.to_rfc3339(),
                 id.to_string(),
             ),
@@ -646,6 +789,7 @@ impl Database {
             desired_details,
             state,
             priority,
+            target_version_id,
             created_at: existing.created_at,
             updated_at: now,
         }))
@@ -660,7 +804,7 @@ impl Database {
     pub fn get_root_features(&self, project_id: Uuid) -> Result<Vec<Feature>> {
         let conn = self.conn.lock().expect("database lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+            "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
              FROM features WHERE project_id = ? AND parent_id IS NULL ORDER BY priority, title",
         )?;
 
@@ -676,8 +820,9 @@ impl Database {
                     state: FeatureState::from_str(&row.get::<_, String>(6)?)
                         .unwrap_or(FeatureState::Proposed),
                     priority: row.get(7)?,
-                    created_at: parse_datetime(row.get::<_, String>(8)?),
-                    updated_at: parse_datetime(row.get::<_, String>(9)?),
+                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
+                    created_at: parse_datetime(row.get::<_, String>(9)?),
+                    updated_at: parse_datetime(row.get::<_, String>(10)?),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -688,7 +833,7 @@ impl Database {
     pub fn get_children(&self, parent_id: Uuid) -> Result<Vec<Feature>> {
         let conn = self.conn.lock().expect("database lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, created_at, updated_at
+            "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
              FROM features WHERE parent_id = ? ORDER BY priority, title",
         )?;
 
@@ -704,8 +849,9 @@ impl Database {
                     state: FeatureState::from_str(&row.get::<_, String>(6)?)
                         .unwrap_or(FeatureState::Proposed),
                     priority: row.get(7)?,
-                    created_at: parse_datetime(row.get::<_, String>(8)?),
-                    updated_at: parse_datetime(row.get::<_, String>(9)?),
+                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
+                    created_at: parse_datetime(row.get::<_, String>(9)?),
+                    updated_at: parse_datetime(row.get::<_, String>(10)?),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -740,7 +886,7 @@ impl Database {
 
         let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = match project_id {
             Some(pid) => (
-                "SELECT id, project_id, parent_id, title, state, priority
+                "SELECT id, project_id, parent_id, title, state, priority, target_version_id
                  FROM features
                  WHERE project_id = ?1 AND (title LIKE ?2 OR details LIKE ?2)
                  ORDER BY
@@ -756,7 +902,7 @@ impl Database {
                 ],
             ),
             None => (
-                "SELECT id, project_id, parent_id, title, state, priority
+                "SELECT id, project_id, parent_id, title, state, priority, target_version_id
                  FROM features
                  WHERE title LIKE ?1 OR details LIKE ?1
                  ORDER BY
@@ -782,6 +928,7 @@ impl Database {
                     state: FeatureState::from_str(&row.get::<_, String>(4)?)
                         .unwrap_or(FeatureState::Proposed),
                     priority: row.get(5)?,
+                    target_version_id: row.get::<_, Option<String>>(6)?.map(parse_uuid),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -825,449 +972,6 @@ impl Database {
     }
 
     // ============================================================
-    // Session operations
-    // ============================================================
-
-    pub fn get_session(&self, id: Uuid) -> Result<Option<Session>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, feature_id, goal, status, created_at, completed_at
-             FROM sessions WHERE id = ?",
-        )?;
-
-        let mut rows = stmt.query([id.to_string()])?;
-        if let Some(row) = rows.next()? {
-            Ok(Some(Session {
-                id: parse_uuid(row.get::<_, String>(0)?),
-                feature_id: parse_uuid(row.get::<_, String>(1)?),
-                goal: row.get(2)?,
-                status: SessionStatus::from_str(&row.get::<_, String>(3)?)
-                    .unwrap_or(SessionStatus::Active),
-                created_at: parse_datetime(row.get::<_, String>(4)?),
-                completed_at: row.get::<_, Option<String>>(5)?.map(parse_datetime),
-            }))
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Get all sessions for a feature.
-    pub fn get_sessions_by_feature(&self, feature_id: Uuid) -> Result<Vec<Session>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, feature_id, goal, status, created_at, completed_at
-             FROM sessions WHERE feature_id = ? ORDER BY created_at DESC",
-        )?;
-
-        let rows = stmt.query_map([feature_id.to_string()], |row| {
-            Ok(Session {
-                id: parse_uuid(row.get::<_, String>(0)?),
-                feature_id: parse_uuid(row.get::<_, String>(1)?),
-                goal: row.get(2)?,
-                status: SessionStatus::from_str(&row.get::<_, String>(3)?)
-                    .unwrap_or(SessionStatus::Active),
-                created_at: parse_datetime(row.get::<_, String>(4)?),
-                completed_at: row.get::<_, Option<String>>(5)?.map(parse_datetime),
-            })
-        })?;
-
-        let mut sessions = Vec::new();
-        for row in rows {
-            sessions.push(row?);
-        }
-        Ok(sessions)
-    }
-
-    pub fn create_session(&self, input: CreateSessionInput) -> Result<SessionResponse> {
-        let feature = self
-            .get_feature(input.feature_id)?
-            .ok_or_else(|| ManifestError::not_found("Feature"))?;
-
-        // Sessions can only be created on leaf features (no children)
-        if !self.is_leaf(input.feature_id)? {
-            return Err(
-                ManifestError::validation("Sessions can only be created on leaf features").into(),
-            );
-        }
-
-        // Check for existing active session (only one allowed per feature)
-        let existing_sessions = self.get_sessions_by_feature(input.feature_id)?;
-        if let Some(active) = existing_sessions
-            .iter()
-            .find(|s| s.status == SessionStatus::Active)
-        {
-            return Err(ManifestError::invalid_state(format!(
-                "Feature already has an active session (id: {}). Complete or cancel it first.",
-                active.id
-            ))
-            .into());
-        }
-
-        let mut conn = self.conn.lock().expect("database lock poisoned");
-        let tx = conn.transaction()?;
-
-        let session_id = Uuid::new_v4();
-        let now = Utc::now();
-
-        tx.execute(
-            "INSERT INTO sessions (id, feature_id, goal, status, created_at)
-             VALUES (?, ?, ?, 'active', ?)",
-            (
-                session_id.to_string(),
-                input.feature_id.to_string(),
-                &input.goal,
-                now.to_rfc3339(),
-            ),
-        )?;
-
-        // Auto-transition feature from 'proposed' to 'specified'
-        if feature.state == FeatureState::Proposed {
-            tx.execute(
-                "UPDATE features SET state = 'specified', updated_at = ? WHERE id = ?",
-                (now.to_rfc3339(), input.feature_id.to_string()),
-            )?;
-        }
-
-        let session = Session {
-            id: session_id,
-            feature_id: input.feature_id,
-            goal: input.goal.clone(),
-            status: SessionStatus::Active,
-            created_at: now,
-            completed_at: None,
-        };
-
-        // Create tasks within the same transaction
-        let mut tasks = Vec::new();
-        for task_input in input.tasks {
-            let task_id = Uuid::new_v4();
-
-            tx.execute(
-                "INSERT INTO tasks (id, session_id, parent_id, title, scope, status, agent_type, created_at)
-                 VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
-                (
-                    task_id.to_string(),
-                    session_id.to_string(),
-                    task_input.parent_id.map(|u| u.to_string()),
-                    &task_input.title,
-                    &task_input.scope,
-                    task_input.agent_type.as_str(),
-                    now.to_rfc3339(),
-                ),
-            )?;
-
-            tasks.push(Task {
-                id: task_id,
-                session_id,
-                parent_id: task_input.parent_id,
-                title: task_input.title,
-                scope: task_input.scope,
-                status: TaskStatus::Pending,
-                agent_type: task_input.agent_type,
-                worktree_path: None,
-                branch: None,
-                created_at: now,
-            });
-        }
-
-        tx.commit()?;
-        Ok(SessionResponse { session, tasks })
-    }
-
-    pub fn get_session_status(&self, id: Uuid) -> Result<Option<SessionStatusResponse>> {
-        let session = match self.get_session(id)? {
-            Some(s) => s,
-            None => return Ok(None),
-        };
-
-        let feature = self
-            .get_feature(session.feature_id)?
-            .ok_or_else(|| ManifestError::not_found("Feature"))?;
-
-        let tasks = self.get_tasks_by_session(id)?;
-
-        Ok(Some(SessionStatusResponse {
-            session,
-            feature: SessionFeatureSummary {
-                id: feature.id,
-                title: feature.title,
-            },
-            tasks,
-        }))
-    }
-
-    pub fn complete_session(
-        &self,
-        id: Uuid,
-        input: CompleteSessionInput,
-    ) -> Result<Option<SessionCompletionResult>> {
-        let session = match self.get_session(id)? {
-            Some(s) => s,
-            None => return Ok(None),
-        };
-
-        if session.status != SessionStatus::Active {
-            return Err(ManifestError::invalid_state("Session is not active").into());
-        }
-
-        let mut conn = self.conn.lock().expect("database lock poisoned");
-        let tx = conn.transaction()?;
-        let now = Utc::now();
-
-        // Create history entry with structured details (inlined for transaction)
-        let history_id = Uuid::new_v4();
-        let history_details = HistoryDetails {
-            summary: input.summary.clone(),
-            commits: input.commits.clone(),
-        };
-        let details_json = serde_json::to_string(&history_details)?;
-
-        tx.execute(
-            "INSERT INTO feature_history (id, feature_id, session_id, summary, files_changed, author, details, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                history_id.to_string(),
-                session.feature_id.to_string(),
-                Some(id.to_string()),
-                &input.summary,
-                "[]", // deprecated
-                "",   // deprecated
-                &details_json,
-                now.to_rfc3339(),
-            ),
-        )?;
-
-        let history_entry = FeatureHistory {
-            id: history_id,
-            feature_id: session.feature_id,
-            session_id: Some(id),
-            details: history_details,
-            created_at: now,
-        };
-
-        // Delete tasks
-        tx.execute("DELETE FROM tasks WHERE session_id = ?", [id.to_string()])?;
-
-        // Update session status
-        tx.execute(
-            "UPDATE sessions SET status = 'completed', completed_at = ? WHERE id = ?",
-            (now.to_rfc3339(), id.to_string()),
-        )?;
-
-        // Update feature state if provided
-        // When marking as implemented, also promote desired_details → details
-        if let Some(state) = input.feature_state {
-            if state == FeatureState::Implemented {
-                // Promote desired_details to details and clear desired_details
-                tx.execute(
-                    "UPDATE features SET
-                        state = ?,
-                        details = COALESCE(desired_details, details),
-                        desired_details = NULL,
-                        updated_at = ?
-                    WHERE id = ?",
-                    (
-                        state.as_str(),
-                        now.to_rfc3339(),
-                        session.feature_id.to_string(),
-                    ),
-                )?;
-            } else {
-                tx.execute(
-                    "UPDATE features SET state = ?, updated_at = ? WHERE id = ?",
-                    (
-                        state.as_str(),
-                        now.to_rfc3339(),
-                        session.feature_id.to_string(),
-                    ),
-                )?;
-            }
-        }
-
-        tx.commit()?;
-
-        let completed_session = Session {
-            id: session.id,
-            feature_id: session.feature_id,
-            goal: session.goal,
-            status: SessionStatus::Completed,
-            created_at: session.created_at,
-            completed_at: Some(now),
-        };
-
-        Ok(Some(SessionCompletionResult {
-            session: completed_session,
-            history_entry,
-        }))
-    }
-
-    // ============================================================
-    // Task operations
-    // ============================================================
-
-    pub fn get_task(&self, id: Uuid) -> Result<Option<Task>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, parent_id, title, scope, status, agent_type, worktree_path, branch, created_at
-             FROM tasks WHERE id = ?"
-        )?;
-
-        let mut rows = stmt.query([id.to_string()])?;
-        if let Some(row) = rows.next()? {
-            Ok(Some(Task {
-                id: parse_uuid(row.get::<_, String>(0)?),
-                session_id: parse_uuid(row.get::<_, String>(1)?),
-                parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                title: row.get(3)?,
-                scope: row.get(4)?,
-                status: TaskStatus::from_str(&row.get::<_, String>(5)?)
-                    .unwrap_or(TaskStatus::Pending),
-                agent_type: AgentType::from_str(&row.get::<_, String>(6)?)
-                    .unwrap_or(AgentType::Claude),
-                worktree_path: row.get(7)?,
-                branch: row.get(8)?,
-                created_at: parse_datetime(row.get::<_, String>(9)?),
-            }))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn get_tasks_by_session(&self, session_id: Uuid) -> Result<Vec<Task>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, parent_id, title, scope, status, agent_type, worktree_path, branch, created_at
-             FROM tasks WHERE session_id = ? ORDER BY created_at"
-        )?;
-
-        let tasks = stmt
-            .query_map([session_id.to_string()], |row| {
-                Ok(Task {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    session_id: parse_uuid(row.get::<_, String>(1)?),
-                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                    title: row.get(3)?,
-                    scope: row.get(4)?,
-                    status: TaskStatus::from_str(&row.get::<_, String>(5)?)
-                        .unwrap_or(TaskStatus::Pending),
-                    agent_type: AgentType::from_str(&row.get::<_, String>(6)?)
-                        .unwrap_or(AgentType::Claude),
-                    worktree_path: row.get(7)?,
-                    branch: row.get(8)?,
-                    created_at: parse_datetime(row.get::<_, String>(9)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(tasks)
-    }
-
-    pub fn get_task_children(&self, parent_id: Uuid) -> Result<Vec<Task>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, parent_id, title, scope, status, agent_type, worktree_path, branch, created_at
-             FROM tasks WHERE parent_id = ? ORDER BY created_at"
-        )?;
-
-        let tasks = stmt
-            .query_map([parent_id.to_string()], |row| {
-                Ok(Task {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    session_id: parse_uuid(row.get::<_, String>(1)?),
-                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                    title: row.get(3)?,
-                    scope: row.get(4)?,
-                    status: TaskStatus::from_str(&row.get::<_, String>(5)?)
-                        .unwrap_or(TaskStatus::Pending),
-                    agent_type: AgentType::from_str(&row.get::<_, String>(6)?)
-                        .unwrap_or(AgentType::Claude),
-                    worktree_path: row.get(7)?,
-                    branch: row.get(8)?,
-                    created_at: parse_datetime(row.get::<_, String>(9)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(tasks)
-    }
-
-    pub fn create_task(&self, session_id: Uuid, input: CreateTaskInput) -> Result<Task> {
-        // Verify session exists and is active
-        let session = self
-            .get_session(session_id)?
-            .ok_or_else(|| ManifestError::not_found("Session"))?;
-
-        if session.status != SessionStatus::Active {
-            return Err(
-                ManifestError::invalid_state("Cannot add tasks to a completed session").into(),
-            );
-        }
-
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let id = Uuid::new_v4();
-        let now = Utc::now();
-
-        conn.execute(
-            "INSERT INTO tasks (id, session_id, parent_id, title, scope, status, agent_type, created_at)
-             VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
-            (
-                id.to_string(),
-                session_id.to_string(),
-                input.parent_id.map(|u| u.to_string()),
-                &input.title,
-                &input.scope,
-                input.agent_type.as_str(),
-                now.to_rfc3339(),
-            ),
-        )?;
-
-        Ok(Task {
-            id,
-            session_id,
-            parent_id: input.parent_id,
-            title: input.title,
-            scope: input.scope,
-            status: TaskStatus::Pending,
-            agent_type: input.agent_type,
-            worktree_path: None,
-            branch: None,
-            created_at: now,
-        })
-    }
-
-    pub fn update_task(&self, id: Uuid, input: UpdateTaskInput) -> Result<bool> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-
-        let mut updates = Vec::new();
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-        if let Some(status) = input.status {
-            updates.push("status = ?");
-            params.push(Box::new(status.as_str().to_string()));
-        }
-        if let Some(worktree_path) = input.worktree_path {
-            updates.push("worktree_path = ?");
-            params.push(Box::new(worktree_path));
-        }
-        if let Some(branch) = input.branch {
-            updates.push("branch = ?");
-            params.push(Box::new(branch));
-        }
-
-        if updates.is_empty() {
-            return Ok(false);
-        }
-
-        params.push(Box::new(id.to_string()));
-
-        let sql = format!("UPDATE tasks SET {} WHERE id = ?", updates.join(", "));
-        let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let rows = conn.execute(&sql, params_ref.as_slice())?;
-
-        Ok(rows > 0)
-    }
-
-    // ============================================================
     // Feature History operations
     // ============================================================
 
@@ -1276,19 +980,32 @@ impl Database {
         let id = Uuid::new_v4();
         let now = Utc::now();
 
+        // If version_id not provided, use feature's target_version_id
+        let version_id = match input.version_id {
+            Some(vid) => Some(vid),
+            None => {
+                // Look up feature's target_version_id
+                let mut stmt =
+                    conn.prepare("SELECT target_version_id FROM features WHERE id = ?")?;
+                stmt.query_row([input.feature_id.to_string()], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
+                .ok()
+                .flatten()
+                .map(parse_uuid)
+            }
+        };
+
         let details_json = serde_json::to_string(&input.details)?;
 
-        // Note: files_changed and author columns are deprecated but kept for schema compatibility
         conn.execute(
-            "INSERT INTO feature_history (id, feature_id, session_id, summary, files_changed, author, details, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO feature_history (id, feature_id, version_id, summary, details, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
             (
                 id.to_string(),
                 input.feature_id.to_string(),
-                input.session_id.map(|u| u.to_string()),
+                version_id.map(|u| u.to_string()),
                 &input.details.summary,
-                "[]", // deprecated
-                "",   // deprecated
                 &details_json,
                 now.to_rfc3339(),
             ),
@@ -1297,7 +1014,7 @@ impl Database {
         Ok(FeatureHistory {
             id,
             feature_id: input.feature_id,
-            session_id: input.session_id,
+            version_id,
             details: input.details,
             created_at: now,
         })
@@ -1306,7 +1023,7 @@ impl Database {
     pub fn get_feature_history(&self, feature_id: Uuid) -> Result<Vec<FeatureHistory>> {
         let conn = self.conn.lock().expect("database lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, feature_id, session_id, details, created_at
+            "SELECT id, feature_id, version_id, details, created_at
              FROM feature_history WHERE feature_id = ? ORDER BY created_at DESC",
         )?;
 
@@ -1319,9 +1036,100 @@ impl Database {
                 Ok(FeatureHistory {
                     id: parse_uuid(row.get::<_, String>(0)?),
                     feature_id: parse_uuid(row.get::<_, String>(1)?),
-                    session_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
+                    version_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
                     details,
                     created_at: parse_datetime(row.get::<_, String>(4)?),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(entries)
+    }
+
+    /// Get project-wide history with feature context.
+    ///
+    /// Returns history entries across all features in a project, ordered by
+    /// creation date (newest first). Each entry includes the feature title,
+    /// state, and version info for display without additional lookups.
+    ///
+    /// Supports optional filtering by `version_id` (for release notes),
+    /// `since` datetime, and pagination via `limit` and `offset`.
+    pub fn get_project_history(
+        &self,
+        project_id: Uuid,
+        version_id: Option<Uuid>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<ProjectHistoryEntry>> {
+        let conn = self.conn.lock().expect("database lock poisoned");
+
+        // Build query with optional filters
+        // Join with versions to get version_name
+        let base_query = r#"
+            SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
+            FROM feature_history fh
+            INNER JOIN features f ON f.id = fh.feature_id
+            LEFT JOIN versions v ON v.id = fh.version_id
+            WHERE f.project_id = ?1
+        "#;
+
+        let limit_val = limit.unwrap_or(50) as i64;
+        let offset_val = offset.unwrap_or(0) as i64;
+
+        // Build dynamic SQL with optional filters
+        let mut conditions = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(project_id.to_string())];
+        let mut param_idx = 2;
+
+        if let Some(vid) = version_id {
+            conditions.push(format!("fh.version_id = ?{}", param_idx));
+            params.push(Box::new(vid.to_string()));
+            param_idx += 1;
+        }
+
+        if let Some(since_dt) = since {
+            conditions.push(format!("fh.created_at > ?{}", param_idx));
+            params.push(Box::new(since_dt.to_rfc3339()));
+            param_idx += 1;
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" AND {}", conditions.join(" AND "))
+        };
+
+        let sql = format!(
+            "{}{} ORDER BY fh.created_at DESC LIMIT ?{} OFFSET ?{}",
+            base_query,
+            where_clause,
+            param_idx,
+            param_idx + 1
+        );
+        params.push(Box::new(limit_val));
+        params.push(Box::new(offset_val));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+        let entries = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let details_json: String = row.get(6)?;
+                let details: HistoryDetails =
+                    serde_json::from_str(&details_json).unwrap_or_default();
+
+                Ok(ProjectHistoryEntry {
+                    id: parse_uuid(row.get::<_, String>(0)?),
+                    feature_id: parse_uuid(row.get::<_, String>(1)?),
+                    feature_title: row.get(2)?,
+                    feature_state: FeatureState::from_str(&row.get::<_, String>(3)?)
+                        .unwrap_or(FeatureState::Proposed),
+                    version_id: row.get::<_, Option<String>>(4)?.map(parse_uuid),
+                    version_name: row.get(5)?,
+                    summary: details.summary,
+                    commits: details.commits,
+                    created_at: parse_datetime(row.get::<_, String>(7)?),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
