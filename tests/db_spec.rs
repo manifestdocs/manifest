@@ -99,6 +99,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create feature");
 
@@ -165,6 +166,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 };
 
@@ -183,6 +185,7 @@ speculate! {
                     details: Some("As a user, I want to log in with OAuth.\n\n## Technical Notes\n\nUse PKCE flow".to_string()),
                     state: Some(FeatureState::Specified),
                     priority: None,
+                    target_version_id: None,
                 };
 
                 let feature = db.create_feature(project.id, input).expect("Failed to create feature");
@@ -208,6 +211,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 };
                 let created = db.create_feature(project.id, input).expect("Failed to create");
@@ -234,6 +238,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -243,6 +248,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -262,6 +268,7 @@ speculate! {
                     details: None,
                     desired_details: None,
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 };
 
@@ -277,6 +284,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: Some(FeatureState::Proposed),
                 }).expect("Failed to create");
 
@@ -286,6 +294,7 @@ speculate! {
                     details: None,
                     desired_details: None,
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Query failed").expect("Feature not found");
 
@@ -301,6 +310,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: Some(FeatureState::Proposed),
                 }).expect("Failed to create");
 
@@ -310,6 +320,7 @@ speculate! {
                     details: None,
                     desired_details: None,
                     priority: None,
+                    target_version_id: None,
                     state: Some(FeatureState::Implemented),
                 }).expect("Query failed").expect("Feature not found");
 
@@ -331,6 +342,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -350,6 +362,7 @@ speculate! {
                     title: "Feature".to_string(),
                     details: Some("Current details".to_string()),
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -366,6 +379,7 @@ speculate! {
                     title: "Feature".to_string(),
                     details: Some("Current".to_string()),
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -375,6 +389,7 @@ speculate! {
                     details: None,
                     desired_details: Some("Desired".to_string()),
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to update");
 
@@ -398,6 +413,7 @@ speculate! {
                     title: "Feature".to_string(),
                     details: Some("Current".to_string()),
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -407,6 +423,7 @@ speculate! {
                     details: None,
                     desired_details: Some("Desired".to_string()),
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to update").unwrap();
 
@@ -424,6 +441,7 @@ speculate! {
                     title: "User Login".to_string(),
                     details: None,
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -438,6 +456,7 @@ speculate! {
                     title: "User Authentication".to_string(),
                     details: None,
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -456,6 +475,7 @@ speculate! {
                     title: "OAuth Integration".to_string(),
                     details: Some("Implement Google OAuth using PKCE flow".to_string()),
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -471,6 +491,7 @@ speculate! {
                     title: "User Login".to_string(),
                     details: Some("Some login details".to_string()),
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -479,6 +500,7 @@ speculate! {
                     title: "OAuth Flow".to_string(),
                     details: Some("User must click login button".to_string()),
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -508,6 +530,7 @@ speculate! {
                     title: "Auth Feature".to_string(),
                     details: None,
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -516,6 +539,7 @@ speculate! {
                     title: "Auth in Project 2".to_string(),
                     details: None,
                     priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -533,6 +557,7 @@ speculate! {
                         details: None,
                         priority: None,
                         state: None,
+                        target_version_id: None,
                     }).expect("Failed to create");
                 }
 
@@ -549,6 +574,7 @@ speculate! {
                         details: None,
                         priority: None,
                         state: None,
+                        target_version_id: None,
                     }).expect("Failed to create");
                 }
 
@@ -563,6 +589,7 @@ speculate! {
                     title: "Test Feature".to_string(),
                     details: Some("Detailed description".to_string()),
                     priority: Some(5),
+                    target_version_id: None,
                     state: Some(FeatureState::Specified),
                 }).expect("Failed to create");
 
@@ -589,6 +616,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create parent");
 
@@ -598,6 +626,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create child");
 
@@ -612,6 +641,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -621,6 +651,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -630,6 +661,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -649,6 +681,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -658,6 +691,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -667,6 +701,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -686,6 +721,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -701,6 +737,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -710,6 +747,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -719,6 +757,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -737,6 +776,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -746,6 +786,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -755,6 +796,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -773,6 +815,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -787,6 +830,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -796,6 +840,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -812,6 +857,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -821,6 +867,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -828,289 +875,6 @@ speculate! {
 
                 let found = db.get_feature(child.id).expect("Query failed");
                 assert!(found.is_none());
-            }
-        }
-    }
-
-    describe "sessions" {
-        describe "leaf validation" {
-            it "allows session on leaf feature" {
-                let project = create_test_project(&db);
-                let leaf = db.create_feature(project.id, CreateFeatureInput { id: None,
-                    parent_id: None,
-                    title: "Leaf Feature".to_string(),
-
-                    details: None,
-                priority: None,
-                    state: None,
-                }).expect("Failed to create");
-
-                let result = db.create_session(CreateSessionInput {
-                    feature_id: leaf.id,
-                    goal: "Implement feature".to_string(),
-                    tasks: vec![],
-                });
-
-                assert!(result.is_ok());
-            }
-
-            it "rejects session on non-leaf feature" {
-                let project = create_test_project(&db);
-                let parent = db.create_feature(project.id, CreateFeatureInput { id: None,
-                    parent_id: None,
-                    title: "Parent".to_string(),
-
-                    details: None,
-                priority: None,
-                    state: None,
-                }).expect("Failed to create");
-
-                db.create_feature(project.id, CreateFeatureInput { id: None,
-                    parent_id: Some(parent.id),
-                    title: "Child".to_string(),
-
-                    details: None,
-                priority: None,
-                    state: None,
-                }).expect("Failed to create");
-
-                let result = db.create_session(CreateSessionInput {
-                    feature_id: parent.id,
-                    goal: "Implement feature".to_string(),
-                    tasks: vec![],
-                });
-
-                assert!(result.is_err());
-                assert!(result.unwrap_err().to_string().contains("leaf"));
-            }
-        }
-
-        describe "auto_state_transition" {
-            it "transitions proposed feature to specified on session creation" {
-                let project = create_test_project(&db);
-                let feature = db.create_feature(project.id, CreateFeatureInput {
-                    id: None,
-                    parent_id: None,
-                    title: "Proposed Feature".to_string(),
-                    details: None,
-                    priority: None,
-                    state: Some(FeatureState::Proposed),
-                }).expect("Failed to create");
-
-                // Verify initial state is proposed
-                assert_eq!(feature.state, FeatureState::Proposed);
-
-                // Create session
-                db.create_session(CreateSessionInput {
-                    feature_id: feature.id,
-                    goal: "Implement feature".to_string(),
-                    tasks: vec![],
-                }).expect("Failed to create session");
-
-                // Verify state was auto-transitioned to specified
-                let updated_feature = db.get_feature(feature.id).expect("Query failed").unwrap();
-                assert_eq!(updated_feature.state, FeatureState::Specified);
-            }
-
-            it "does not change state of already specified feature" {
-                let project = create_test_project(&db);
-                let feature = db.create_feature(project.id, CreateFeatureInput {
-                    id: None,
-                    parent_id: None,
-                    title: "Specified Feature".to_string(),
-                    details: None,
-                    priority: None,
-                    state: Some(FeatureState::Specified),
-                }).expect("Failed to create");
-
-                // Create session
-                db.create_session(CreateSessionInput {
-                    feature_id: feature.id,
-                    goal: "Implement feature".to_string(),
-                    tasks: vec![],
-                }).expect("Failed to create session");
-
-                // Verify state remains specified
-                let updated_feature = db.get_feature(feature.id).expect("Query failed").unwrap();
-                assert_eq!(updated_feature.state, FeatureState::Specified);
-            }
-
-            it "does not change state of implemented feature" {
-                let project = create_test_project(&db);
-                let feature = db.create_feature(project.id, CreateFeatureInput {
-                    id: None,
-                    parent_id: None,
-                    title: "Implemented Feature".to_string(),
-                    details: None,
-                    priority: None,
-                    state: Some(FeatureState::Implemented),
-                }).expect("Failed to create");
-
-                // Create session
-                db.create_session(CreateSessionInput {
-                    feature_id: feature.id,
-                    goal: "Additional work".to_string(),
-                    tasks: vec![],
-                }).expect("Failed to create session");
-
-                // Verify state remains implemented
-                let updated_feature = db.get_feature(feature.id).expect("Query failed").unwrap();
-                assert_eq!(updated_feature.state, FeatureState::Implemented);
-            }
-        }
-
-        describe "complete_session" {
-            it "returns None for non-existent session" {
-                let result = db.complete_session(Uuid::new_v4(), CompleteSessionInput {
-                    summary: "Done".to_string(),
-                    commits: vec![],
-                    feature_state: None,
-                }).expect("Query failed");
-
-                assert!(result.is_none());
-            }
-
-            it "completes session and creates history entry" {
-                let project = create_test_project(&db);
-                let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
-                    parent_id: None,
-                    title: "Feature".to_string(),
-
-                    details: None,
-                priority: None,
-                    state: None,
-                }).expect("Failed to create");
-
-                let session_response = db.create_session(CreateSessionInput {
-                    feature_id: feature.id,
-                    goal: "Implement feature".to_string(),
-                    tasks: vec![CreateTaskInput {
-                        parent_id: None,
-                        title: "Task".to_string(),
-                        scope: "Scope".to_string(),
-                        agent_type: AgentType::Claude,
-                    }],
-                }).expect("Failed to create");
-
-                let result = db.complete_session(session_response.session.id, CompleteSessionInput {
-                    summary: "Implemented the feature".to_string(),
-                    commits: vec![],
-                    feature_state: None,
-                }).expect("Query failed").expect("Session not found");
-
-                assert_eq!(result.session.status, SessionStatus::Completed);
-                assert!(result.session.completed_at.is_some());
-                assert_eq!(result.history_entry.details.summary, "Implemented the feature");
-                assert_eq!(result.history_entry.session_id, Some(session_response.session.id));
-            }
-
-            it "deletes tasks on completion" {
-                let project = create_test_project(&db);
-                let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
-                    parent_id: None,
-                    title: "Feature".to_string(),
-
-                    details: None,
-                priority: None,
-                    state: None,
-                }).expect("Failed to create");
-
-                let session_response = db.create_session(CreateSessionInput {
-                    feature_id: feature.id,
-                    goal: "Goal".to_string(),
-                    tasks: vec![CreateTaskInput {
-                        parent_id: None,
-                        title: "Task".to_string(),
-                        scope: "Scope".to_string(),
-                        agent_type: AgentType::Claude,
-                    }],
-                }).expect("Failed to create");
-
-                let task_id = session_response.tasks[0].id;
-
-                db.complete_session(session_response.session.id, CompleteSessionInput {
-                    summary: "Done".to_string(),
-                    commits: vec![],
-                    feature_state: None,
-                }).expect("Failed to complete");
-
-                // Task should be deleted
-                let task = db.get_task(task_id).expect("Query failed");
-                assert!(task.is_none());
-            }
-
-            it "rejects completing already completed session" {
-                let project = create_test_project(&db);
-                let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
-                    parent_id: None,
-                    title: "Feature".to_string(),
-
-                    details: None,
-                priority: None,
-                    state: None,
-                }).expect("Failed to create");
-
-                let session_response = db.create_session(CreateSessionInput {
-                    feature_id: feature.id,
-                    goal: "Goal".to_string(),
-                    tasks: vec![],
-                }).expect("Failed to create");
-
-                db.complete_session(session_response.session.id, CompleteSessionInput {
-                    summary: "First completion".to_string(),
-                    commits: vec![],
-                    feature_state: None,
-                }).expect("Failed to complete");
-
-                // Try to complete again
-                let result = db.complete_session(session_response.session.id, CompleteSessionInput {
-                    summary: "Second completion".to_string(),
-                    commits: vec![],
-                    feature_state: None,
-                });
-
-                assert!(result.is_err());
-                assert!(result.unwrap_err().to_string().contains("not active"));
-            }
-
-            it "promotes desired_details to details when marking implemented" {
-                let project = create_test_project(&db);
-                let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
-                    parent_id: None,
-                    title: "Feature".to_string(),
-                    details: Some("Original details".to_string()),
-                    priority: None,
-                    state: Some(FeatureState::Specified),
-                }).expect("Failed to create");
-
-                // Set desired_details
-                db.update_feature(feature.id, UpdateFeatureInput {
-                    parent_id: None,
-                    title: None,
-                    details: None,
-                    desired_details: Some("New desired details".to_string()),
-                    priority: None,
-                    state: None,
-                }).expect("Failed to update");
-
-                let session_response = db.create_session(CreateSessionInput {
-                    feature_id: feature.id,
-                    goal: "Implement feature".to_string(),
-                    tasks: vec![],
-                }).expect("Failed to create session");
-
-                // Complete session with mark_implemented (default behavior)
-                db.complete_session(session_response.session.id, CompleteSessionInput {
-                    summary: "Implemented".to_string(),
-                    commits: vec![],
-                    feature_state: Some(FeatureState::Implemented),
-                }).expect("Failed to complete");
-
-                // Check that desired_details was promoted to details
-                let updated_feature = db.get_feature(feature.id).expect("Query failed").unwrap();
-                assert_eq!(updated_feature.details, Some("New desired details".to_string()));
-                assert!(updated_feature.desired_details.is_none());
-                assert_eq!(updated_feature.state, FeatureState::Implemented);
             }
         }
     }
@@ -1125,13 +889,19 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create feature");
 
-                let session_id = Uuid::new_v4();
+                // Create a version to link the history entry to
+                let version = db.create_version(project.id, CreateVersionInput {
+                    name: "v1.0.0".to_string(),
+                    description: None,
+                }).expect("Failed to create version");
+
                 let entry = db.create_history_entry(CreateHistoryInput {
                     feature_id: feature.id,
-                    session_id: Some(session_id),
+                    version_id: Some(version.id),
                     details: HistoryDetails {
                         summary: "Implemented login flow".to_string(),
                         commits: vec![],
@@ -1139,11 +909,11 @@ speculate! {
                 }).expect("Failed to create history entry");
 
                 assert_eq!(entry.feature_id, feature.id);
-                assert_eq!(entry.session_id, Some(session_id));
+                assert_eq!(entry.version_id, Some(version.id));
                 assert_eq!(entry.details.summary, "Implemented login flow");
             }
 
-            it "creates entry without session_id" {
+            it "creates entry without version_id" {
                 let project = create_test_project(&db);
                 let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
                     parent_id: None,
@@ -1151,19 +921,20 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create feature");
 
                 let entry = db.create_history_entry(CreateHistoryInput {
                     feature_id: feature.id,
-                    session_id: None,
+                    version_id: None,
                     details: HistoryDetails {
                         summary: "Manual update".to_string(),
                         commits: vec![],
                     },
                 }).expect("Failed to create history entry");
 
-                assert!(entry.session_id.is_none());
+                assert!(entry.version_id.is_none());
             }
         }
 
@@ -1176,6 +947,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create feature");
 
@@ -1191,12 +963,13 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create feature");
 
                 db.create_history_entry(CreateHistoryInput {
                     feature_id: feature.id,
-                    session_id: None,
+                    version_id: None,
                     details: HistoryDetails {
                         summary: "First change".to_string(),
                         commits: vec![],
@@ -1205,7 +978,7 @@ speculate! {
 
                 db.create_history_entry(CreateHistoryInput {
                     feature_id: feature.id,
-                    session_id: None,
+                    version_id: None,
                     details: HistoryDetails {
                         summary: "Second change".to_string(),
                         commits: vec![],
@@ -1227,6 +1000,7 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
@@ -1236,12 +1010,13 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
                 db.create_history_entry(CreateHistoryInput {
                     feature_id: feature1.id,
-                    session_id: None,
+                    version_id: None,
                     details: HistoryDetails {
                         summary: "Change to feature 1".to_string(),
                         commits: vec![],
@@ -1250,7 +1025,7 @@ speculate! {
 
                 db.create_history_entry(CreateHistoryInput {
                     feature_id: feature2.id,
-                    session_id: None,
+                    version_id: None,
                     details: HistoryDetails {
                         summary: "Change to feature 2".to_string(),
                         commits: vec![],
@@ -1273,12 +1048,13 @@ speculate! {
 
                     details: None,
                 priority: None,
+                    target_version_id: None,
                     state: None,
                 }).expect("Failed to create");
 
                 db.create_history_entry(CreateHistoryInput {
                     feature_id: feature.id,
-                    session_id: None,
+                    version_id: None,
                     details: HistoryDetails {
                         summary: "Some work".to_string(),
                         commits: vec![],
@@ -1290,6 +1066,231 @@ speculate! {
                 // History should be gone (cascade delete)
                 let history = db.get_feature_history(feature.id).expect("Query failed");
                 assert!(history.is_empty());
+            }
+        }
+
+        describe "get_project_history" {
+            it "returns empty list when no history exists" {
+                let project = create_test_project(&db);
+                let history = db.get_project_history(project.id, None, None, None, None).expect("Query failed");
+                assert!(history.is_empty());
+            }
+
+            it "returns history entries across all project features" {
+                let project = create_test_project(&db);
+                let feature1 = db.create_feature(project.id, CreateFeatureInput { id: None,
+                    parent_id: None,
+                    title: "Feature 1".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                }).expect("Failed to create");
+
+                let feature2 = db.create_feature(project.id, CreateFeatureInput { id: None,
+                    parent_id: None,
+                    title: "Feature 2".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                }).expect("Failed to create");
+
+                db.create_history_entry(CreateHistoryInput {
+                    feature_id: feature1.id,
+                    version_id: None,
+                    details: HistoryDetails {
+                        summary: "Work on feature 1".to_string(),
+                        commits: vec![],
+                    },
+                }).expect("Failed to create");
+
+                db.create_history_entry(CreateHistoryInput {
+                    feature_id: feature2.id,
+                    version_id: None,
+                    details: HistoryDetails {
+                        summary: "Work on feature 2".to_string(),
+                        commits: vec![],
+                    },
+                }).expect("Failed to create");
+
+                let history = db.get_project_history(project.id, None, None, None, None).expect("Query failed");
+                assert_eq!(history.len(), 2);
+            }
+
+            it "includes feature title and state in entries" {
+                let project = create_test_project(&db);
+                let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
+                    parent_id: None,
+                    title: "User Authentication".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: Some(FeatureState::Implemented),
+                }).expect("Failed to create");
+
+                db.create_history_entry(CreateHistoryInput {
+                    feature_id: feature.id,
+                    version_id: None,
+                    details: HistoryDetails {
+                        summary: "Implemented OAuth flow".to_string(),
+                        commits: vec![],
+                    },
+                }).expect("Failed to create");
+
+                let history = db.get_project_history(project.id, None, None, None, None).expect("Query failed");
+                assert_eq!(history.len(), 1);
+                assert_eq!(history[0].feature_title, "User Authentication");
+                assert_eq!(history[0].feature_state, FeatureState::Implemented);
+                assert_eq!(history[0].summary, "Implemented OAuth flow");
+            }
+
+            it "returns entries in reverse chronological order" {
+                let project = create_test_project(&db);
+                let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
+                    parent_id: None,
+                    title: "Feature".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                }).expect("Failed to create");
+
+                db.create_history_entry(CreateHistoryInput {
+                    feature_id: feature.id,
+                    version_id: None,
+                    details: HistoryDetails {
+                        summary: "First change".to_string(),
+                        commits: vec![],
+                    },
+                }).expect("Failed to create");
+
+                db.create_history_entry(CreateHistoryInput {
+                    feature_id: feature.id,
+                    version_id: None,
+                    details: HistoryDetails {
+                        summary: "Second change".to_string(),
+                        commits: vec![],
+                    },
+                }).expect("Failed to create");
+
+                let history = db.get_project_history(project.id, None, None, None, None).expect("Query failed");
+                assert_eq!(history.len(), 2);
+                assert_eq!(history[0].summary, "Second change");
+                assert_eq!(history[1].summary, "First change");
+            }
+
+            it "respects limit parameter" {
+                let project = create_test_project(&db);
+                let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
+                    parent_id: None,
+                    title: "Feature".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                }).expect("Failed to create");
+
+                for i in 1..=5 {
+                    db.create_history_entry(CreateHistoryInput {
+                        feature_id: feature.id,
+                        version_id: None,
+                        details: HistoryDetails {
+                            summary: format!("Change {}", i),
+                            commits: vec![],
+                        },
+                    }).expect("Failed to create");
+                }
+
+                let history = db.get_project_history(project.id, None, Some(2), None, None).expect("Query failed");
+                assert_eq!(history.len(), 2);
+            }
+
+            it "respects offset parameter" {
+                let project = create_test_project(&db);
+                let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
+                    parent_id: None,
+                    title: "Feature".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                }).expect("Failed to create");
+
+                for i in 1..=5 {
+                    db.create_history_entry(CreateHistoryInput {
+                        feature_id: feature.id,
+                        version_id: None,
+                        details: HistoryDetails {
+                            summary: format!("Change {}", i),
+                            commits: vec![],
+                        },
+                    }).expect("Failed to create");
+                }
+
+                let history = db.get_project_history(project.id, None, Some(2), Some(2), None).expect("Query failed");
+                assert_eq!(history.len(), 2);
+                // Should skip the 2 most recent entries (5 and 4) and return 3 and 2
+                assert_eq!(history[0].summary, "Change 3");
+                assert_eq!(history[1].summary, "Change 2");
+            }
+
+            it "excludes history from other projects" {
+                let project1 = db.create_project(CreateProjectInput {
+                    name: "Project 1".to_string(),
+                    description: None,
+                    instructions: None,
+                }).expect("Failed to create");
+
+                let project2 = db.create_project(CreateProjectInput {
+                    name: "Project 2".to_string(),
+                    description: None,
+                    instructions: None,
+                }).expect("Failed to create");
+
+                let feature1 = db.create_feature(project1.id, CreateFeatureInput { id: None,
+                    parent_id: None,
+                    title: "Feature in P1".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                }).expect("Failed to create");
+
+                let feature2 = db.create_feature(project2.id, CreateFeatureInput { id: None,
+                    parent_id: None,
+                    title: "Feature in P2".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                }).expect("Failed to create");
+
+                db.create_history_entry(CreateHistoryInput {
+                    feature_id: feature1.id,
+                    version_id: None,
+                    details: HistoryDetails {
+                        summary: "Work in project 1".to_string(),
+                        commits: vec![],
+                    },
+                }).expect("Failed to create");
+
+                db.create_history_entry(CreateHistoryInput {
+                    feature_id: feature2.id,
+                    version_id: None,
+                    details: HistoryDetails {
+                        summary: "Work in project 2".to_string(),
+                        commits: vec![],
+                    },
+                }).expect("Failed to create");
+
+                let history1 = db.get_project_history(project1.id, None, None, None, None).expect("Query failed");
+                assert_eq!(history1.len(), 1);
+                assert_eq!(history1[0].summary, "Work in project 1");
+
+                let history2 = db.get_project_history(project2.id, None, None, None, None).expect("Query failed");
+                assert_eq!(history2.len(), 1);
+                assert_eq!(history2[0].summary, "Work in project 2");
             }
         }
     }
