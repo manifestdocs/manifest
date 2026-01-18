@@ -9,14 +9,16 @@ use uuid::Uuid;
 /// the feature content itself (which is mutable); rather, it answers
 /// "what work was done on this feature and when?"
 ///
-/// History entries are typically created automatically when a session completes,
-/// summarizing the tasks that were completed.
+/// History can be viewed chronologically (by date) or grouped by version
+/// (for release notes).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureHistory {
     pub id: Uuid,
     pub feature_id: Uuid,
-    /// The session that generated this history entry, if any.
-    pub session_id: Option<Uuid>,
+    /// The version this work was done for (captured at time of completion).
+    /// Enables grouping history by release version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<Uuid>,
     /// Structured details about the work done.
     pub details: HistoryDetails,
     pub created_at: DateTime<Utc>,
@@ -47,12 +49,39 @@ pub struct CommitRef {
 }
 
 /// Input for creating a history entry.
-///
-/// Typically history entries are created automatically when sessions complete,
-/// but this input allows manual creation for migrations or special cases.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateHistoryInput {
     pub feature_id: Uuid,
-    pub session_id: Option<Uuid>,
+    /// The version this work was done for.
+    /// If not specified, defaults to the feature's target_version_id.
+    #[serde(default)]
+    pub version_id: Option<Uuid>,
     pub details: HistoryDetails,
+}
+
+/// A project-wide history entry that includes feature context.
+///
+/// Used for the unified project history view, where PMs can see recent
+/// changes across all features in a project. Can be filtered by version
+/// to generate release notes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectHistoryEntry {
+    pub id: Uuid,
+    pub feature_id: Uuid,
+    /// Feature title, denormalized for display.
+    pub feature_title: String,
+    /// Feature state at time of query.
+    pub feature_state: super::FeatureState,
+    /// The version this work was done for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<Uuid>,
+    /// Version name, denormalized for display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_name: Option<String>,
+    /// Summary of the work done.
+    pub summary: String,
+    /// Git commits created during this work.
+    #[serde(default)]
+    pub commits: Vec<CommitRef>,
+    pub created_at: DateTime<Utc>,
 }
