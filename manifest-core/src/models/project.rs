@@ -14,6 +14,8 @@ pub struct Project {
     pub description: Option<String>,
     /// Project-wide instructions for AI agents (coding guidelines, conventions, etc.).
     pub instructions: Option<String>,
+    /// The current/active version for this project (explicitly set by user).
+    pub current_version_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -51,6 +53,8 @@ pub struct UpdateProjectInput {
     pub name: Option<String>,
     pub description: Option<String>,
     pub instructions: Option<String>,
+    /// Set the current/active version for this project.
+    pub current_version_id: Option<Uuid>,
 }
 
 /// Input for adding a directory to a project.

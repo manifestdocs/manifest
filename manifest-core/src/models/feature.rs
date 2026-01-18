@@ -31,6 +31,9 @@ pub struct Feature {
     /// Priority for ordering features within a parent. Lower values appear first.
     /// Use this to indicate implementation order without polluting feature titles.
     pub priority: i32,
+    /// Target version for this feature (for release planning).
+    /// Null for implemented features or features not yet assigned to a version.
+    pub target_version_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -91,6 +94,8 @@ pub struct CreateFeatureInput {
     pub state: Option<FeatureState>,
     /// Priority for ordering within parent. Lower values first. Defaults to 0.
     pub priority: Option<i32>,
+    /// Target version for release planning.
+    pub target_version_id: Option<Uuid>,
 }
 
 /// Input for updating an existing feature. All fields are optional for partial updates.
@@ -105,6 +110,8 @@ pub struct UpdateFeatureInput {
     pub state: Option<FeatureState>,
     /// Update priority for ordering within parent.
     pub priority: Option<i32>,
+    /// Target version for release planning.
+    pub target_version_id: Option<Uuid>,
 }
 
 /// A feature with its nested children, used for tree responses.
@@ -140,6 +147,8 @@ pub struct FeatureSummary {
     pub title: String,
     pub state: FeatureState,
     pub priority: i32,
+    /// Target version for release planning.
+    pub target_version_id: Option<Uuid>,
 }
 
 impl From<Feature> for FeatureSummary {
@@ -151,6 +160,7 @@ impl From<Feature> for FeatureSummary {
             title: f.title,
             state: f.state,
             priority: f.priority,
+            target_version_id: f.target_version_id,
         }
     }
 }

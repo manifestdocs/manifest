@@ -48,6 +48,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "remove_history_legacy_columns",
         sql: include_str!("migrations/008_remove_history_legacy_columns.sql"),
     },
+    Migration {
+        version: "009",
+        name: "versions",
+        sql: include_str!("migrations/009_versions.sql"),
+    },
+    Migration {
+        version: "010",
+        name: "history_versions",
+        sql: include_str!("migrations/010_history_versions.sql"),
+    },
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
@@ -164,7 +174,7 @@ mod tests {
         let versions = get_applied_migrations(&conn).unwrap();
         assert_eq!(
             versions,
-            vec!["001", "002", "003", "004", "005", "006", "007", "008"]
+            vec!["001", "002", "003", "004", "005", "006", "007", "008", "009", "010"]
         );
     }
 
@@ -177,7 +187,7 @@ mod tests {
         let versions = get_applied_migrations(&conn).unwrap();
         assert_eq!(
             versions,
-            vec!["001", "002", "003", "004", "005", "006", "007", "008"]
+            vec!["001", "002", "003", "004", "005", "006", "007", "008", "009", "010"]
         );
     }
 
@@ -213,7 +223,7 @@ mod tests {
         let versions = get_applied_migrations(&conn).unwrap();
         assert_eq!(
             versions,
-            vec!["001", "002", "003", "004", "005", "006", "007", "008"]
+            vec!["001", "002", "003", "004", "005", "006", "007", "008", "009", "010"]
         );
     }
 }
