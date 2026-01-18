@@ -593,4 +593,9 @@ GUIDELINES:
 - Read feature details before coding
 - Only call complete_feature when work is verified
 - Keep summaries concise but meaningful
-- Link commits to document what changed"#;
+- Link commits to document what changed
+
+DISPLAY:
+- When showing feature trees or lists to users, display the output inline in your
+  response text (not just in the collapsed tool result) so users can see it without
+  expanding. Tool results may be truncated in the UI."#;
