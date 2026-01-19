@@ -337,6 +337,53 @@ impl ManifestClient {
             .await?;
         self.handle_response(response).await
     }
+
+    // ============================================================
+    // Version Operations
+    // ============================================================
+
+    /// List versions for a project.
+    pub async fn list_versions(&self, project_id: Uuid) -> Result<Vec<Version>, ClientError> {
+        let response = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/projects/{}/versions", project_id),
+            )
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+
+    /// Create a version.
+    pub async fn create_version(
+        &self,
+        project_id: Uuid,
+        input: &CreateVersionInput,
+    ) -> Result<Version, ClientError> {
+        let response = self
+            .request(
+                reqwest::Method::POST,
+                &format!("/projects/{}/versions", project_id),
+            )
+            .json(input)
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+
+    /// Update a version.
+    pub async fn update_version(
+        &self,
+        id: Uuid,
+        input: &UpdateVersionInput,
+    ) -> Result<Version, ClientError> {
+        let response = self
+            .request(reqwest::Method::PUT, &format!("/versions/{}", id))
+            .json(input)
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
 }
 
 // ============================================================

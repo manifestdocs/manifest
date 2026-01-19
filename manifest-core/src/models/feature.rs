@@ -4,6 +4,52 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Serde helper for Option<Option<T>> - distinguishes "field absent" from "field is null".
+/// - JSON field absent → None (don't update)
+/// - JSON field is null → Some(None) (set to null)
+/// - JSON field has value → Some(Some(value)) (set to value)
+mod double_option {
+    use serde::{Deserialize, Deserializer};
+
+    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+    where
+        T: Deserialize<'de>,
+        D: Deserializer<'de>,
+    {
+        // If this function is called, the field was present in JSON
+        // Deserialize the value (which may be null)
+        Ok(Some(Option::deserialize(deserializer)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_update_feature_input_deserialize_with_version() {
+        let json = r#"{"target_version_id": "fb5e9bc0-6202-4617-92f0-3eb6d943bc4f"}"#;
+        let input: UpdateFeatureInput = serde_json::from_str(json).unwrap();
+        assert!(input.target_version_id.is_some());
+        assert!(input.target_version_id.unwrap().is_some());
+    }
+
+    #[test]
+    fn test_update_feature_input_deserialize_with_null() {
+        let json = r#"{"target_version_id": null}"#;
+        let input: UpdateFeatureInput = serde_json::from_str(json).unwrap();
+        assert!(input.target_version_id.is_some());
+        assert!(input.target_version_id.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_update_feature_input_deserialize_without_field() {
+        let json = r#"{}"#;
+        let input: UpdateFeatureInput = serde_json::from_str(json).unwrap();
+        assert!(input.target_version_id.is_none());
+    }
+}
+
 /// A living description of a system capability.
 ///
 /// Unlike traditional issue trackers where items are "closed" and forgotten,
@@ -111,7 +157,9 @@ pub struct UpdateFeatureInput {
     /// Update priority for ordering within parent.
     pub priority: Option<i32>,
     /// Target version for release planning.
-    pub target_version_id: Option<Uuid>,
+    /// Uses double Option to distinguish "field absent" (None) from "set to null" (Some(None)).
+    #[serde(default, deserialize_with = "double_option::deserialize")]
+    pub target_version_id: Option<Option<Uuid>>,
 }
 
 /// A feature with its nested children, used for tree responses.

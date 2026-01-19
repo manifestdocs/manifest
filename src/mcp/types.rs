@@ -70,7 +70,7 @@ pub struct CompleteSessionRequest {
     #[schemars(description = "The UUID of the session to complete")]
     pub session_id: String,
     #[schemars(
-        description = "Summary of work done during this session - becomes the feature history entry"
+        description = "Summary of work done (git-style format). First line is a concise headline shown in list views. Add details after a blank line if needed."
     )]
     pub summary: String,
     #[schemars(description = "Git commits created during this session")]
@@ -400,6 +400,34 @@ pub struct PlanFeaturesResponse {
     pub created_feature_ids: Vec<String>,
 }
 
+// ============================================================
+// Version Response Types
+// ============================================================
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VersionListResponse {
+    pub versions: Vec<VersionInfo>,
+    /// ID of the first unreleased version (current focus)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
+    /// ID of the second unreleased version (queued up)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VersionInfo {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// When this version was released, or null if unreleased
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub released_at: Option<String>,
+    /// Number of features targeting this version
+    pub feature_count: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ProposedFeature {
     /// Short capability name (2-5 words). What users can DO.
@@ -466,4 +494,39 @@ pub struct BreakdownFeatureResponse {
 pub struct RenderFeatureTreeRequest {
     #[schemars(description = "The UUID of the project to render the feature tree for")]
     pub project_id: String,
+}
+
+// ============================================================
+// Version Request Types
+// ============================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListVersionsRequest {
+    #[schemars(description = "The UUID of the project to list versions for")]
+    pub project_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateVersionRequest {
+    #[schemars(description = "The UUID of the project")]
+    pub project_id: String,
+    #[schemars(description = "Version name (e.g., 'v0.2', '2024.1', 'MVP')")]
+    pub name: String,
+    #[schemars(description = "Optional description of what this version includes")]
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetFeatureVersionRequest {
+    #[schemars(description = "The UUID of the feature to update")]
+    pub feature_id: String,
+    #[schemars(description = "The UUID of the target version, or null to unassign")]
+    pub version_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReleaseVersionRequest {
+    #[schemars(description = "The UUID of the version to release")]
+    pub version_id: String,
 }

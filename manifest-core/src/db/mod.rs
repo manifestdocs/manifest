@@ -68,6 +68,9 @@ impl Database {
         std::fs::create_dir_all(parent)?;
         let conn = Connection::open(&path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // Explicitly disable foreign key enforcement (SQLite default) to avoid
+        // FK constraint errors when updating features with version references.
+        conn.pragma_update(None, "foreign_keys", "OFF")?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -763,7 +766,10 @@ impl Database {
         let state = input.state.unwrap_or(existing.state);
         let parent_id = input.parent_id.or(existing.parent_id);
         let priority = input.priority.unwrap_or(existing.priority);
-        let target_version_id = input.target_version_id.or(existing.target_version_id);
+        // Double Option: None = don't update (keep existing), Some(x) = set to x (including Some(None) to clear)
+        let target_version_id = input
+            .target_version_id
+            .unwrap_or(existing.target_version_id);
 
         conn.execute(
             "UPDATE features SET parent_id = ?, title = ?, details = ?, desired_details = ?, state = ?, priority = ?, target_version_id = ?, updated_at = ? WHERE id = ?",

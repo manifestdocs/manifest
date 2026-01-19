@@ -1,9 +1,10 @@
 //! CLI mode MCP server - simplified tools for single-agent CLI workflows.
 //!
-//! This mode exposes 12 tools optimized for CLI agents like Claude Code:
+//! This mode exposes 16 tools optimized for CLI agents like Claude Code:
 //! - Discovery: get_project_context, list_features, search_features, get_feature, get_feature_history, render_feature_tree
 //! - Setup: create_project, add_project_directory, create_feature, plan_features
 //! - Work: start_feature, complete_feature
+//! - Versions: list_versions, create_version, set_feature_version, release_version
 
 use std::str::FromStr;
 
@@ -35,7 +36,9 @@ pub struct StartFeatureRequest {
 pub struct CompleteFeatureRequest {
     #[schemars(description = "The UUID of the feature to complete")]
     pub feature_id: String,
-    #[schemars(description = "Summary of work done - becomes the history entry")]
+    #[schemars(
+        description = "Summary of work done (git-style format). First line is a concise headline shown in list views. Add details after a blank line if needed (bullet points, technical notes). Example:\n\nImplemented OAuth login flow\n\n- Added Google OAuth provider\n- Created session management\n- Updated user model with provider field"
+    )]
     pub summary: String,
     #[schemars(description = "Git commits created during this work")]
     #[serde(default)]
@@ -528,6 +531,186 @@ impl CliMcpServer {
 
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
+
+    // ============================================================
+    // Version Tools
+    // ============================================================
+
+    #[tool(
+        description = "List versions for a project with release planning context. Returns versions with feature counts, plus 'now' (first unreleased) and 'next' (second unreleased) IDs for planning."
+    )]
+    async fn list_versions(
+        &self,
+        params: Parameters<ListVersionsRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = params.0;
+        let project_id = Self::parse_uuid(&req.project_id)?;
+
+        // Get versions and features in parallel
+        let versions = self
+            .client
+            .list_versions(project_id)
+            .await
+            .map_err(Self::client_err)?;
+
+        let features = self
+            .client
+            .list_features(Some(project_id), None, None, None)
+            .await
+            .map_err(Self::client_err)?;
+
+        // Count features per version
+        let mut version_feature_counts: std::collections::HashMap<Uuid, u32> =
+            std::collections::HashMap::new();
+        for feature in &features {
+            if let Some(vid) = feature.target_version_id {
+                *version_feature_counts.entry(vid).or_insert(0) += 1;
+            }
+        }
+
+        // Find unreleased versions for Now/Next
+        let mut unreleased: Vec<_> = versions
+            .iter()
+            .filter(|v| v.released_at.is_none())
+            .collect();
+        unreleased.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+
+        let now = unreleased.first().map(|v| v.id.to_string());
+        let next = unreleased.get(1).map(|v| v.id.to_string());
+
+        // Build response
+        let result = VersionListResponse {
+            versions: versions
+                .into_iter()
+                .map(|v| VersionInfo {
+                    id: v.id.to_string(),
+                    name: v.name,
+                    description: v.description,
+                    released_at: v.released_at.map(|dt| dt.to_rfc3339()),
+                    feature_count: version_feature_counts.get(&v.id).copied().unwrap_or(0),
+                })
+                .collect(),
+            now,
+            next,
+        };
+
+        let json = serde_json::to_string_pretty(&result)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Create a new version for release planning. Use this to define milestones like 'v0.2', 'MVP', or '2024.1'."
+    )]
+    async fn create_version(
+        &self,
+        params: Parameters<CreateVersionRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = params.0;
+        let project_id = Self::parse_uuid(&req.project_id)?;
+
+        let version = self
+            .client
+            .create_version(
+                project_id,
+                &CreateVersionInput {
+                    name: req.name,
+                    description: req.description,
+                },
+            )
+            .await
+            .map_err(Self::client_err)?;
+
+        let result = VersionInfo {
+            id: version.id.to_string(),
+            name: version.name,
+            description: version.description,
+            released_at: version.released_at.map(|dt| dt.to_rfc3339()),
+            feature_count: 0, // New version has no features yet
+        };
+
+        let json = serde_json::to_string_pretty(&result)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Assign a feature to a target version for release planning. Use this to express 'put this feature in v0.2'. Pass null for version_id to unassign."
+    )]
+    async fn set_feature_version(
+        &self,
+        params: Parameters<SetFeatureVersionRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = params.0;
+        let feature_id = Self::parse_uuid(&req.feature_id)?;
+        let version_id = match req.version_id {
+            Some(ref vid) => Some(Some(Self::parse_uuid(vid)?)),
+            None => Some(None), // Explicitly unassign
+        };
+
+        let feature = self
+            .client
+            .update_feature(
+                feature_id,
+                &UpdateFeatureInput {
+                    parent_id: None,
+                    title: None,
+                    details: None,
+                    desired_details: None,
+                    state: None,
+                    priority: None,
+                    target_version_id: version_id,
+                },
+            )
+            .await
+            .map_err(Self::client_err)?;
+
+        let result = ManifestClient::feature_to_info(&feature);
+
+        let json = serde_json::to_string_pretty(&result)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Mark a version as released. Sets released_at to now. Use this when you ship a version."
+    )]
+    async fn release_version(
+        &self,
+        params: Parameters<ReleaseVersionRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = params.0;
+        let version_id = Self::parse_uuid(&req.version_id)?;
+
+        let version = self
+            .client
+            .update_version(
+                version_id,
+                &UpdateVersionInput {
+                    name: None,
+                    description: None,
+                    released_at: Some(chrono::Utc::now()),
+                },
+            )
+            .await
+            .map_err(Self::client_err)?;
+
+        let result = VersionInfo {
+            id: version.id.to_string(),
+            name: version.name,
+            description: version.description,
+            released_at: version.released_at.map(|dt| dt.to_rfc3339()),
+            feature_count: 0, // Would need to fetch features to count
+        };
+
+        let json = serde_json::to_string_pretty(&result)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
 }
 
 #[tool_handler]
@@ -587,15 +770,28 @@ WORKFLOW:
    - complete_feature: Records summary + commits, marks implemented
    - Creates history entry for future reference
 
+VERSIONS & PLANNING:
+Versions represent planned releases (v0.1, v0.2, MVP, etc.):
+- list_versions: See all versions with feature counts and Now/Next/Later context
+- create_version: Define a new milestone for planning
+- set_feature_version: Assign a feature to a version ("put this in v0.2")
+- release_version: Mark a version as shipped
+
+Planning context:
+- Now = first unreleased version (current focus)
+- Next = second unreleased version (queued up)
+- Later = all other unreleased versions (backlog)
+
 SETUP (one-time):
 1. create_project - name and coding guidelines
 2. add_project_directory - associate your codebase
 3. create_feature or plan_features - define capabilities
+4. create_version - define release milestones (optional)
 
 GUIDELINES:
 - Read feature details before coding
 - Only call complete_feature when work is verified
-- Keep summaries concise but meaningful
+- Write summaries in git-style format: first line is a concise headline, details after a blank line
 - Link commits to document what changed
 
 DISPLAY:
@@ -606,4 +802,8 @@ Tool results appear as collapsed JSON in the UI. Always summarize results inline
 - get_feature: "Feature: Title (state)" + key details from specification
 - start_feature: "Started work on 'Title' - now in 'specified' state"
 - complete_feature: "Completed 'Title' - marked as implemented"
-- get_project_context: Summarize project name and any relevant instructions"#;
+- get_project_context: Summarize project name and any relevant instructions
+- list_versions: "Versions: v0.1 (released), v0.2 (now, 3 features), v0.3 (next, 1 feature)"
+- create_version: "Created version 'v0.2'"
+- set_feature_version: "Assigned 'Feature Name' to v0.2"
+- release_version: "Released v0.1""#;
