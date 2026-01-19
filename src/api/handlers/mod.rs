@@ -1186,24 +1186,24 @@ fn generate_feature_hints(
     }
 
     // Check for specific files that indicate features
-    if root.join("Dockerfile").exists() || root.join("docker-compose.yml").exists() {
-        if !seen_hints.contains_key("Container Deployment") {
-            hints.push(FeatureHint {
-                title: "Container Deployment".to_string(),
-                reason: "Docker configuration found".to_string(),
-                paths: vec!["Dockerfile".to_string()],
-            });
-        }
+    if (root.join("Dockerfile").exists() || root.join("docker-compose.yml").exists())
+        && !seen_hints.contains_key("Container Deployment")
+    {
+        hints.push(FeatureHint {
+            title: "Container Deployment".to_string(),
+            reason: "Docker configuration found".to_string(),
+            paths: vec!["Dockerfile".to_string()],
+        });
     }
 
-    if root.join("openapi.yaml").exists() || root.join("openapi.json").exists() {
-        if !seen_hints.contains_key("API Documentation") {
-            hints.push(FeatureHint {
-                title: "API Documentation".to_string(),
-                reason: "OpenAPI spec found".to_string(),
-                paths: vec!["openapi.yaml".to_string()],
-            });
-        }
+    if (root.join("openapi.yaml").exists() || root.join("openapi.json").exists())
+        && !seen_hints.contains_key("API Documentation")
+    {
+        hints.push(FeatureHint {
+            title: "API Documentation".to_string(),
+            reason: "OpenAPI spec found".to_string(),
+            paths: vec!["openapi.yaml".to_string()],
+        });
     }
 
     hints

@@ -1,8 +1,8 @@
 //! MCP server for AI-assisted feature development.
 //!
 //! Supports two modes:
-//! - CLI mode (default): 12 tools optimized for single-agent CLI workflows
-//! - IDE mode: 21 tools for multi-agent orchestration and IDE integration
+//! - CLI mode (default): 17 tools optimized for single-agent CLI workflows
+//! - IDE mode: 12 tools for simplified IDE integration
 //!
 //! Set `MANIFEST_MODE=ide` to use IDE mode.
 
