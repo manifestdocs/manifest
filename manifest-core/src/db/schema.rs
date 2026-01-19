@@ -63,6 +63,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "rename_specified_to_in_progress",
         sql: include_str!("migrations/011_rename_specified_to_in_progress.sql"),
     },
+    Migration {
+        version: "012",
+        name: "root_feature",
+        sql: include_str!("migrations/012_root_feature.sql"),
+    },
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
@@ -179,7 +184,9 @@ mod tests {
         let versions = get_applied_migrations(&conn).unwrap();
         assert_eq!(
             versions,
-            vec!["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011"]
+            vec![
+                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"
+            ]
         );
     }
 
@@ -192,7 +199,9 @@ mod tests {
         let versions = get_applied_migrations(&conn).unwrap();
         assert_eq!(
             versions,
-            vec!["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011"]
+            vec![
+                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"
+            ]
         );
     }
 
@@ -228,7 +237,9 @@ mod tests {
         let versions = get_applied_migrations(&conn).unwrap();
         assert_eq!(
             versions,
-            vec!["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011"]
+            vec![
+                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"
+            ]
         );
     }
 }

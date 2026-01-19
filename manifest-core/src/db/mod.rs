@@ -82,6 +82,14 @@ impl std::error::Error for ManifestError {}
 /// Channel capacity for feature events. Small is fine since clients just refetch.
 const EVENT_CHANNEL_CAPACITY: usize = 16;
 
+/// Migration report for root feature migration.
+#[derive(Debug, Clone, Default)]
+pub struct RootFeatureMigrationReport {
+    pub projects_migrated: usize,
+    pub features_reparented: usize,
+    pub projects_skipped: usize,
+}
+
 pub struct Database {
     conn: Arc<Mutex<Connection>>,
     /// Broadcast channel for feature change notifications.
@@ -121,6 +129,9 @@ impl Database {
 
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
+        // Explicitly disable foreign key enforcement (SQLite default) to avoid
+        // FK constraint errors when creating projects with root features.
+        conn.pragma_update(None, "foreign_keys", "OFF")?;
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -146,7 +157,7 @@ impl Database {
     pub fn get_all_projects(&self) -> Result<Vec<Project>> {
         let conn = self.conn.lock().expect("database lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, instructions, current_version_id, created_at, updated_at
+            "SELECT id, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
              FROM projects ORDER BY name",
         )?;
 
@@ -158,8 +169,9 @@ impl Database {
                     description: row.get(2)?,
                     instructions: row.get(3)?,
                     current_version_id: row.get::<_, Option<String>>(4)?.map(parse_uuid),
-                    created_at: parse_datetime(row.get::<_, String>(5)?),
-                    updated_at: parse_datetime(row.get::<_, String>(6)?),
+                    root_feature_id: row.get::<_, Option<String>>(5)?.map(parse_uuid),
+                    created_at: parse_datetime(row.get::<_, String>(6)?),
+                    updated_at: parse_datetime(row.get::<_, String>(7)?),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -170,7 +182,7 @@ impl Database {
     pub fn get_project(&self, id: Uuid) -> Result<Option<Project>> {
         let conn = self.conn.lock().expect("database lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, instructions, current_version_id, created_at, updated_at
+            "SELECT id, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
              FROM projects WHERE id = ?",
         )?;
 
@@ -182,8 +194,9 @@ impl Database {
                 description: row.get(2)?,
                 instructions: row.get(3)?,
                 current_version_id: row.get::<_, Option<String>>(4)?.map(parse_uuid),
-                created_at: parse_datetime(row.get::<_, String>(5)?),
-                updated_at: parse_datetime(row.get::<_, String>(6)?),
+                root_feature_id: row.get::<_, Option<String>>(5)?.map(parse_uuid),
+                created_at: parse_datetime(row.get::<_, String>(6)?),
+                updated_at: parse_datetime(row.get::<_, String>(7)?),
             }))
         } else {
             Ok(None)
@@ -191,29 +204,50 @@ impl Database {
     }
 
     pub fn create_project(&self, input: CreateProjectInput) -> Result<Project> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let id = Uuid::new_v4();
+        let mut conn = self.conn.lock().expect("database lock poisoned");
+        let tx = conn.transaction()?;
+        let project_id = Uuid::new_v4();
+        let root_feature_id = Uuid::new_v4();
         let now = Utc::now();
 
-        conn.execute(
-            "INSERT INTO projects (id, name, description, instructions, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
+        // Create project with root_feature_id
+        tx.execute(
+            "INSERT INTO projects (id, name, description, instructions, root_feature_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
-                id.to_string(),
+                project_id.to_string(),
                 &input.name,
                 &input.description,
                 &input.instructions,
+                root_feature_id.to_string(),
                 now.to_rfc3339(),
                 now.to_rfc3339(),
             ),
         )?;
 
+        // Create root feature (title = project name, details = project description, state = implemented)
+        tx.execute(
+            "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, created_at, updated_at)
+             VALUES (?, ?, NULL, ?, ?, 'implemented', 0, ?, ?)",
+            (
+                root_feature_id.to_string(),
+                project_id.to_string(),
+                &input.name,
+                &input.description,
+                now.to_rfc3339(),
+                now.to_rfc3339(),
+            ),
+        )?;
+
+        tx.commit()?;
+
         Ok(Project {
-            id,
+            id: project_id,
             name: input.name,
             description: input.description,
             instructions: input.instructions,
             current_version_id: None,
+            root_feature_id: Some(root_feature_id),
             created_at: now,
             updated_at: now,
         })
@@ -249,14 +283,47 @@ impl Database {
             description,
             instructions,
             current_version_id,
+            root_feature_id: existing.root_feature_id,
             created_at: existing.created_at,
             updated_at: now,
         }))
     }
 
     pub fn delete_project(&self, id: Uuid) -> Result<bool> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let rows = conn.execute("DELETE FROM projects WHERE id = ?", [id.to_string()])?;
+        let mut conn = self.conn.lock().expect("database lock poisoned");
+        let tx = conn.transaction()?;
+
+        // Since FK enforcement is OFF, we need to manually cascade deletes
+        // Delete in reverse dependency order
+
+        // Delete feature history for features in this project
+        tx.execute(
+            "DELETE FROM feature_history WHERE feature_id IN (SELECT id FROM features WHERE project_id = ?)",
+            [id.to_string()],
+        )?;
+
+        // Delete features
+        tx.execute(
+            "DELETE FROM features WHERE project_id = ?",
+            [id.to_string()],
+        )?;
+
+        // Delete project directories
+        tx.execute(
+            "DELETE FROM project_directories WHERE project_id = ?",
+            [id.to_string()],
+        )?;
+
+        // Delete versions
+        tx.execute(
+            "DELETE FROM versions WHERE project_id = ?",
+            [id.to_string()],
+        )?;
+
+        // Delete the project itself
+        let rows = tx.execute("DELETE FROM projects WHERE id = ?", [id.to_string()])?;
+
+        tx.commit()?;
         Ok(rows > 0)
     }
 
@@ -691,10 +758,19 @@ impl Database {
         }))
     }
 
+    /// Create a new feature.
+    ///
+    /// If `parent_id` is None and the project has a root feature, the new feature
+    /// will be parented under the root feature. This makes features appear as
+    /// "top level" in the UI while maintaining the root feature hierarchy.
     pub fn create_feature(&self, project_id: Uuid, input: CreateFeatureInput) -> Result<Feature> {
-        // Verify project exists
-        self.get_project(project_id)?
+        // Verify project exists and get root_feature_id
+        let project = self
+            .get_project(project_id)?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
+
+        // Default parent_id to root_feature_id if not specified
+        let parent_id = input.parent_id.or(project.root_feature_id);
 
         let conn = self.conn.lock().expect("database lock poisoned");
         let id = input.id.unwrap_or_else(Uuid::new_v4);
@@ -708,7 +784,7 @@ impl Database {
             (
                 id.to_string(),
                 project_id.to_string(),
-                input.parent_id.map(|u| u.to_string()),
+                parent_id.map(|u| u.to_string()),
                 &input.title,
                 &input.details,
                 state.as_str(),
@@ -725,7 +801,7 @@ impl Database {
         Ok(Feature {
             id,
             project_id,
-            parent_id: input.parent_id,
+            parent_id,
             title: input.title,
             details: input.details,
             desired_details: None,
@@ -739,13 +815,17 @@ impl Database {
 
     /// Create multiple features in a single transaction.
     /// All features are created atomically - if any fails, all are rolled back.
+    ///
+    /// If `parent_id` is None and the project has a root feature, features without
+    /// an explicit parent will be parented under the root feature.
     pub fn create_features_bulk(
         &self,
         project_id: Uuid,
         inputs: Vec<CreateFeatureInput>,
     ) -> Result<Vec<Feature>> {
-        // Verify project exists
-        self.get_project(project_id)?
+        // Verify project exists and get root_feature_id
+        let project = self
+            .get_project(project_id)?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
 
         let mut conn = self.conn.lock().expect("database lock poisoned");
@@ -758,6 +838,8 @@ impl Database {
             let id = input.id.unwrap_or_else(Uuid::new_v4);
             let state = input.state.unwrap_or(FeatureState::Proposed);
             let priority = input.priority.unwrap_or(0);
+            // Default parent_id to root_feature_id if not specified
+            let parent_id = input.parent_id.or(project.root_feature_id);
 
             tx.execute(
                 "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
@@ -765,7 +847,7 @@ impl Database {
                 (
                     id.to_string(),
                     project_id.to_string(),
-                    input.parent_id.map(|u| u.to_string()),
+                    parent_id.map(|u| u.to_string()),
                     &input.title,
                     &input.details,
                     state.as_str(),
@@ -779,7 +861,7 @@ impl Database {
             features.push(Feature {
                 id,
                 project_id,
-                parent_id: input.parent_id,
+                parent_id,
                 title: input.title,
                 details: input.details,
                 desired_details: None,
@@ -865,8 +947,42 @@ impl Database {
             .map(parse_uuid)
         };
 
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let rows = conn.execute("DELETE FROM features WHERE id = ?", [id.to_string()])?;
+        let mut conn = self.conn.lock().expect("database lock poisoned");
+        let tx = conn.transaction()?;
+
+        // Since FK enforcement is OFF, we need to manually cascade deletes
+        // Use recursive CTE to find all descendants
+        let id_str = id.to_string();
+
+        // Delete feature history for this feature and all descendants
+        tx.execute(
+            "DELETE FROM feature_history WHERE feature_id IN (
+                WITH RECURSIVE descendants AS (
+                    SELECT id FROM features WHERE id = ?1
+                    UNION ALL
+                    SELECT f.id FROM features f
+                    INNER JOIN descendants d ON f.parent_id = d.id
+                )
+                SELECT id FROM descendants
+            )",
+            [&id_str],
+        )?;
+
+        // Delete all descendant features and the feature itself
+        let rows = tx.execute(
+            "DELETE FROM features WHERE id IN (
+                WITH RECURSIVE descendants AS (
+                    SELECT id FROM features WHERE id = ?1
+                    UNION ALL
+                    SELECT f.id FROM features f
+                    INNER JOIN descendants d ON f.parent_id = d.id
+                )
+                SELECT id FROM descendants
+            )",
+            [&id_str],
+        )?;
+
+        tx.commit()?;
 
         // Notify subscribers if we deleted something
         if rows > 0 {
@@ -878,31 +994,73 @@ impl Database {
         Ok(rows > 0)
     }
 
+    /// Get "root" features for a project (actually children of the root feature).
+    ///
+    /// With the root feature model, this returns features whose parent_id equals
+    /// the project's root_feature_id. This makes the root feature invisible to
+    /// the UI while its children appear as "top level" features.
+    ///
+    /// Falls back to parent_id IS NULL for projects without root_feature_id (legacy).
     pub fn get_root_features(&self, project_id: Uuid) -> Result<Vec<Feature>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-             FROM features WHERE project_id = ? AND parent_id IS NULL ORDER BY priority, title",
-        )?;
+        // Get project to find root_feature_id
+        let project = self.get_project(project_id)?;
 
-        let features = stmt
-            .query_map([project_id.to_string()], |row| {
-                Ok(Feature {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    project_id: parse_uuid(row.get::<_, String>(1)?),
-                    parent_id: None,
-                    title: row.get(3)?,
-                    details: row.get(4)?,
-                    desired_details: row.get(5)?,
-                    state: FeatureState::from_str(&row.get::<_, String>(6)?)
-                        .unwrap_or(FeatureState::Proposed),
-                    priority: row.get(7)?,
-                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
-                    created_at: parse_datetime(row.get::<_, String>(9)?),
-                    updated_at: parse_datetime(row.get::<_, String>(10)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+        let conn = self.conn.lock().expect("database lock poisoned");
+
+        // Use root_feature_id if available, otherwise fall back to parent_id IS NULL
+        let (sql, parent_param): (&str, Option<String>) = match project.and_then(|p| p.root_feature_id) {
+            Some(root_id) => (
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                 FROM features WHERE project_id = ? AND parent_id = ? ORDER BY priority, title",
+                Some(root_id.to_string()),
+            ),
+            None => (
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                 FROM features WHERE project_id = ? AND parent_id IS NULL ORDER BY priority, title",
+                None,
+            ),
+        };
+
+        let mut stmt = conn.prepare(sql)?;
+
+        let features = match parent_param {
+            Some(ref parent_id) => stmt
+                .query_map([project_id.to_string(), parent_id.clone()], |row| {
+                    Ok(Feature {
+                        id: parse_uuid(row.get::<_, String>(0)?),
+                        project_id: parse_uuid(row.get::<_, String>(1)?),
+                        parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
+                        title: row.get(3)?,
+                        details: row.get(4)?,
+                        desired_details: row.get(5)?,
+                        state: FeatureState::from_str(&row.get::<_, String>(6)?)
+                            .unwrap_or(FeatureState::Proposed),
+                        priority: row.get(7)?,
+                        target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
+                        created_at: parse_datetime(row.get::<_, String>(9)?),
+                        updated_at: parse_datetime(row.get::<_, String>(10)?),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?,
+            None => stmt
+                .query_map([project_id.to_string()], |row| {
+                    Ok(Feature {
+                        id: parse_uuid(row.get::<_, String>(0)?),
+                        project_id: parse_uuid(row.get::<_, String>(1)?),
+                        parent_id: None,
+                        title: row.get(3)?,
+                        details: row.get(4)?,
+                        desired_details: row.get(5)?,
+                        state: FeatureState::from_str(&row.get::<_, String>(6)?)
+                            .unwrap_or(FeatureState::Proposed),
+                        priority: row.get(7)?,
+                        target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
+                        created_at: parse_datetime(row.get::<_, String>(9)?),
+                        updated_at: parse_datetime(row.get::<_, String>(10)?),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?,
+        };
 
         Ok(features)
     }
@@ -1013,20 +1171,33 @@ impl Database {
         Ok(features)
     }
 
+    /// Get the feature tree for a project, excluding the root feature.
+    ///
+    /// With the root feature model, the tree starts from the root's children,
+    /// making them appear as "top level" features in the UI.
+    ///
+    /// Falls back to parent_id IS NULL for projects without root_feature_id (legacy).
     pub fn get_feature_tree(&self, project_id: Uuid) -> Result<Vec<FeatureTreeNode>> {
+        let project = self.get_project(project_id)?;
+        let root_feature_id = project.and_then(|p| p.root_feature_id);
+
         let features = self.get_features_by_project(project_id)?;
 
         // Group features by parent_id
         let mut children_map: std::collections::HashMap<Option<Uuid>, Vec<Feature>> =
             std::collections::HashMap::new();
         for feature in features {
+            // Skip the root feature itself
+            if Some(feature.id) == root_feature_id {
+                continue;
+            }
             children_map
                 .entry(feature.parent_id)
                 .or_default()
                 .push(feature);
         }
 
-        // Recursively build tree starting from roots (parent_id = None)
+        // Recursively build tree starting from the appropriate root
         fn build_subtree(
             parent_id: Option<Uuid>,
             children_map: &std::collections::HashMap<Option<Uuid>, Vec<Feature>>,
@@ -1045,7 +1216,9 @@ impl Database {
                 .unwrap_or_default()
         }
 
-        Ok(build_subtree(None, &children_map))
+        // Start from root_feature_id's children if available, else from NULL parent
+        let tree_root = root_feature_id.map(Some).unwrap_or(None);
+        Ok(build_subtree(tree_root, &children_map))
     }
 
     // ============================================================
@@ -1212,6 +1385,76 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(entries)
+    }
+
+    // ============================================================
+    // Data Migration
+    // ============================================================
+
+    /// Migrate existing projects to use root features.
+    ///
+    /// For each project without a root_feature_id:
+    /// 1. Creates a root feature (title=project.name, details=project.description, state=implemented)
+    /// 2. Re-parents existing root features (parent_id=NULL) to the new root
+    /// 3. Sets project.root_feature_id
+    ///
+    /// This migration is idempotent - running it multiple times is safe.
+    pub fn migrate_to_root_features(&self) -> Result<RootFeatureMigrationReport> {
+        let mut report = RootFeatureMigrationReport::default();
+        let projects = self.get_all_projects()?;
+
+        for project in projects {
+            // Skip if already has root feature
+            if project.root_feature_id.is_some() {
+                report.projects_skipped += 1;
+                continue;
+            }
+
+            let mut conn = self.conn.lock().expect("database lock poisoned");
+            let tx = conn.transaction()?;
+            let now = Utc::now();
+
+            // Create root feature
+            let root_feature_id = Uuid::new_v4();
+            tx.execute(
+                "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, created_at, updated_at)
+                 VALUES (?, ?, NULL, ?, ?, 'implemented', 0, ?, ?)",
+                (
+                    root_feature_id.to_string(),
+                    project.id.to_string(),
+                    &project.name,
+                    &project.description,
+                    now.to_rfc3339(),
+                    now.to_rfc3339(),
+                ),
+            )?;
+
+            // Re-parent existing root features to the new root
+            let reparented = tx.execute(
+                "UPDATE features SET parent_id = ? WHERE project_id = ? AND parent_id IS NULL AND id != ?",
+                (
+                    root_feature_id.to_string(),
+                    project.id.to_string(),
+                    root_feature_id.to_string(),
+                ),
+            )?;
+            report.features_reparented += reparented;
+
+            // Update project with root_feature_id
+            tx.execute(
+                "UPDATE projects SET root_feature_id = ?, updated_at = ? WHERE id = ?",
+                (
+                    root_feature_id.to_string(),
+                    now.to_rfc3339(),
+                    project.id.to_string(),
+                ),
+            )?;
+
+            tx.commit()?;
+            report.projects_migrated += 1;
+        }
+
+        Ok(report)
     }
 }
 

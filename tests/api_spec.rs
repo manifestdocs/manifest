@@ -84,7 +84,9 @@ mod feature_roots {
         let features: Vec<Feature> = response.json();
         assert_eq!(features.len(), 1);
         assert_eq!(features[0].title, "Root");
-        assert!(features[0].parent_id.is_none());
+        // With the root feature model, "root" features are children of the project's
+        // root_feature, so they have parent_id = root_feature_id (not None)
+        assert_eq!(features[0].parent_id, project.root_feature_id);
     }
 }
 

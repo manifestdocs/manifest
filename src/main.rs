@@ -53,6 +53,8 @@ enum Commands {
     Status,
     /// Stop the daemon
     Stop,
+    /// Migrate existing projects to use root features
+    MigrateRoots,
 }
 
 /// Initialize tracing with output to stderr (for MCP mode) or stdout
@@ -126,6 +128,20 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Stop) => {
             println!("Stopping Manifest server...");
             // TODO: Stop daemon
+        }
+        Some(Commands::MigrateRoots) => {
+            println!("Migrating existing projects to use root features...");
+            let db = db::Database::open_default()?;
+            db.migrate()?;
+
+            let report = db.migrate_to_root_features()?;
+            println!("Migration complete:");
+            println!("  Projects migrated: {}", report.projects_migrated);
+            println!("  Features reparented: {}", report.features_reparented);
+            println!(
+                "  Projects skipped (already migrated): {}",
+                report.projects_skipped
+            );
         }
         None => {
             // Default: start server

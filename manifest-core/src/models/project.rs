@@ -16,6 +16,10 @@ pub struct Project {
     pub instructions: Option<String>,
     /// The current/active version for this project (explicitly set by user).
     pub current_version_id: Option<Uuid>,
+    /// The root feature for this project. All other features are descendants of this.
+    /// The root feature's title = project name, details = project documentation,
+    /// and its history tracks project-level events (version releases, etc.).
+    pub root_feature_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

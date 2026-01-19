@@ -254,9 +254,12 @@ speculate! {
 
                 let features = db.get_all_features().expect("Query failed");
 
-                assert_eq!(features.len(), 2);
+                // With the root feature model, each project has a root feature
+                // So we have: project root + 2 created = 3 features
+                assert_eq!(features.len(), 3);
                 assert_eq!(features[0].title, "Alpha Feature");
-                assert_eq!(features[1].title, "Zebra Feature");
+                assert_eq!(features[1].title, "Test Project"); // Root feature has project name
+                assert_eq!(features[2].title, "Zebra Feature");
             }
         }
 
@@ -586,19 +589,20 @@ speculate! {
                 let project = create_test_project(&db);
                 let feature = db.create_feature(project.id, CreateFeatureInput { id: None,
                     parent_id: None,
-                    title: "Test Feature".to_string(),
+                    title: "Unique Feature Title".to_string(),
                     details: Some("Detailed description".to_string()),
                     priority: Some(5),
                     target_version_id: None,
                     state: Some(FeatureState::Implemented),
                 }).expect("Failed to create");
 
-                let results = db.search_features("Test", None, None).expect("Query failed");
+                // Search for something specific to avoid matching root feature ("Test Project")
+                let results = db.search_features("Unique Feature", None, None).expect("Query failed");
                 assert_eq!(results.len(), 1);
 
                 let summary = &results[0];
                 assert_eq!(summary.id, feature.id);
-                assert_eq!(summary.title, "Test Feature");
+                assert_eq!(summary.title, "Unique Feature Title");
                 assert_eq!(summary.state, FeatureState::Implemented);
                 assert_eq!(summary.priority, 5);
                 // FeatureSummary doesn't have details field - that's the point!
@@ -708,7 +712,9 @@ speculate! {
                 let roots = db.get_root_features(project.id).expect("Query failed");
 
                 assert_eq!(roots.len(), 2);
-                assert!(roots.iter().all(|f| f.parent_id.is_none()));
+                // With the root feature model, "root" features are children of the project's
+                // root_feature, so they have parent_id = root_feature_id (not None)
+                assert!(roots.iter().all(|f| f.parent_id == project.root_feature_id));
             }
         }
 
