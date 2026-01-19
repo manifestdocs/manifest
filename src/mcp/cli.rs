@@ -437,7 +437,7 @@ impl CliMcpServer {
     // ============================================================
 
     #[tool(
-        description = "Signal that you are starting work on a feature. Sets state to 'specified' if currently 'proposed'. Returns the feature details so you know what to implement."
+        description = "Signal that a feature is ready to implement. Sets state to 'specified' if currently 'proposed'. Only call this after confirming the feature has enough detail in its specification. Returns the feature details so you know what to implement."
     )]
     async fn start_feature(
         &self,
@@ -745,10 +745,13 @@ Before creating a feature, complete: "As a [user], I can [feature]..."
 - Bad: "As a user, I can Persistence" → quality attribute, not capability
 
 FEATURE STATES:
-- proposed (◇): Idea in backlog
-- specified (○): Work in progress
+- proposed (◇): Idea in backlog, NOT ready to implement yet
+- specified (○): Has enough detail to implement, ready for agents
 - implemented (●): Complete and documented
 - deprecated (✗): No longer active
+
+The key distinction: PROPOSED features need specification work before implementation.
+SPECIFIED features have clear requirements and can be built immediately.
 
 WORKFLOW:
 
@@ -758,9 +761,12 @@ WORKFLOW:
    - render_feature_tree: Visualize the hierarchy
    - get_feature: Read full specification
 
-2. START work:
-   - start_feature: Transitions proposed → specified
-   - Returns feature details for implementation
+2. CHECK READINESS (important!):
+   - If feature is PROPOSED: Review the details field
+     - Are requirements clear enough to implement?
+     - If NO: Ask the user for clarification, or help write the spec
+     - If YES: Call start_feature to mark it ready (proposed → specified)
+   - If feature is SPECIFIED: Proceed to implement
 
 3. IMPLEMENT:
    - Write code, run tests, verify
@@ -800,7 +806,7 @@ Tool results appear as collapsed JSON in the UI. Always summarize results inline
 - search_features: "Found N features: Title1 (state), Title2 (state), ..."
 - list_features: Same as search - summarize titles and states
 - get_feature: "Feature: Title (state)" + key details from specification
-- start_feature: "Started work on 'Title' - now in 'specified' state"
+- start_feature: "'Title' is ready to implement - marked as 'specified'"
 - complete_feature: "Completed 'Title' - marked as implemented"
 - get_project_context: Summarize project name and any relevant instructions
 - list_versions: "Versions: v0.1 (released), v0.2 (now, 3 features), v0.3 (next, 1 feature)"
