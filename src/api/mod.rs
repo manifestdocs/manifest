@@ -44,6 +44,8 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
 
     // Protected API routes
     let protected_api = Router::new()
+        // Codebase analysis (separate path to avoid {id} conflicts)
+        .route("/codebase/analyze", get(handlers::analyze_project))
         // Projects
         .route("/projects", get(handlers::list_projects))
         .route("/projects", post(handlers::create_project))
@@ -87,6 +89,11 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         .route(
             "/projects/{id}/features/tree",
             get(handlers::get_feature_tree),
+        )
+        // SSE subscription for real-time feature updates
+        .route(
+            "/projects/{id}/subscribe",
+            get(handlers::subscribe_project_features),
         )
         // Directories (for delete by directory id)
         .route(

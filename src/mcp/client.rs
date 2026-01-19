@@ -13,8 +13,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::mcp::{
-    DirectoryInfo, FeatureInfo, PlanFeaturesResponse, ProjectContextResponse, ProjectInfo,
-    ProposedFeature,
+    DirectoryInfo, FeatureInfo, PlanFeaturesResponse, ProjectAnalysis, ProjectContextResponse,
+    ProjectInfo, ProposedFeature,
 };
 use crate::models::*;
 
@@ -382,6 +382,30 @@ impl ManifestClient {
             .json(input)
             .send()
             .await?;
+        self.handle_response(response).await
+    }
+
+    // ============================================================
+    // Project Analysis
+    // ============================================================
+
+    /// Analyze a project directory to discover structure and suggest features.
+    pub async fn analyze_project(
+        &self,
+        directory_path: &str,
+        include_docs: bool,
+        max_depth: u32,
+    ) -> Result<ProjectAnalysis, ClientError> {
+        let url = format!("{}/codebase/analyze", self.base_url);
+        let mut req = self.client.get(&url).query(&[
+            ("path", directory_path),
+            ("include_docs", &include_docs.to_string()),
+            ("max_depth", &max_depth.to_string()),
+        ]);
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let response = req.send().await?;
         self.handle_response(response).await
     }
 }

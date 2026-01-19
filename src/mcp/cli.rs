@@ -1,8 +1,8 @@
 //! CLI mode MCP server - simplified tools for single-agent CLI workflows.
 //!
-//! This mode exposes 16 tools optimized for CLI agents like Claude Code:
+//! This mode exposes 17 tools optimized for CLI agents like Claude Code:
 //! - Discovery: get_project_context, list_features, search_features, get_feature, get_feature_history, render_feature_tree
-//! - Setup: create_project, add_project_directory, create_feature, plan_features
+//! - Setup: analyze_project, create_project, add_project_directory, create_feature, plan_features
 //! - Work: start_feature, complete_feature
 //! - Versions: list_versions, create_version, set_feature_version, release_version
 
@@ -268,7 +268,7 @@ impl CliMcpServer {
     }
 
     #[tool(
-        description = "Render a project's feature tree as ASCII art with status symbols. Returns a visual tree showing feature hierarchy and states (◇ proposed, ○ specified, ● implemented, ✗ deprecated)."
+        description = "Render a project's feature tree as ASCII art with status symbols. Returns a visual tree showing feature hierarchy and states (◇ proposed, ○ in_progress, ● implemented, ✗ deprecated)."
     )]
     async fn render_feature_tree(
         &self,
@@ -291,6 +291,27 @@ impl CliMcpServer {
     // ============================================================
     // Setup Tools
     // ============================================================
+
+    #[tool(
+        description = "Analyze a codebase directory to discover project structure and suggest features. Returns detected language, frameworks, modules, and documentation. Use before plan_features to understand what capabilities exist."
+    )]
+    async fn analyze_project(
+        &self,
+        params: Parameters<AnalyzeProjectRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = params.0;
+
+        let result = self
+            .client
+            .analyze_project(&req.directory_path, req.include_docs, req.max_depth)
+            .await
+            .map_err(Self::client_err)?;
+
+        let json = serde_json::to_string_pretty(&result)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
 
     #[tool(
         description = "Create a new project. Projects are containers for features and can have multiple directories (e.g., monorepo subdirectories). Use this when starting work on a new codebase. After creating, use add_project_directory to associate directories."
@@ -378,7 +399,7 @@ impl CliMcpServer {
         let state = FeatureState::from_str(&req.state).map_err(|_| {
             McpError::invalid_params(
                 format!(
-                    "Invalid state '{}'. Must be: proposed, specified, implemented, or deprecated",
+                    "Invalid state '{}'. Must be: proposed, in_progress, implemented, or deprecated",
                     req.state
                 ),
                 None,
@@ -437,7 +458,7 @@ impl CliMcpServer {
     // ============================================================
 
     #[tool(
-        description = "Signal that a feature is ready to implement. Sets state to 'specified' if currently 'proposed'. Only call this after confirming the feature has enough detail in its specification. Returns the feature details so you know what to implement."
+        description = "Signal that you are starting work on a feature. Sets state to 'in_progress' if currently 'proposed'. Returns the feature details so you know what to implement."
     )]
     async fn start_feature(
         &self,
@@ -453,7 +474,7 @@ impl CliMcpServer {
             .await
             .map_err(Self::client_err)?;
 
-        // Transition to specified if proposed
+        // Transition to in_progress if proposed
         let feature = if feature.state == FeatureState::Proposed {
             self.client
                 .update_feature(
@@ -463,7 +484,7 @@ impl CliMcpServer {
                         title: None,
                         details: None,
                         desired_details: None,
-                        state: Some(FeatureState::Specified),
+                        state: Some(FeatureState::InProgress),
                         priority: None,
                         target_version_id: None,
                     },
@@ -745,13 +766,10 @@ Before creating a feature, complete: "As a [user], I can [feature]..."
 - Bad: "As a user, I can Persistence" → quality attribute, not capability
 
 FEATURE STATES:
-- proposed (◇): Idea in backlog, NOT ready to implement yet
-- specified (○): Has enough detail to implement, ready for agents
+- proposed (◇): Idea in backlog
+- in_progress (○): Actively being worked on
 - implemented (●): Complete and documented
 - deprecated (✗): No longer active
-
-The key distinction: PROPOSED features need specification work before implementation.
-SPECIFIED features have clear requirements and can be built immediately.
 
 WORKFLOW:
 
@@ -761,12 +779,9 @@ WORKFLOW:
    - render_feature_tree: Visualize the hierarchy
    - get_feature: Read full specification
 
-2. CHECK READINESS (important!):
-   - If feature is PROPOSED: Review the details field
-     - Are requirements clear enough to implement?
-     - If NO: Ask the user for clarification, or help write the spec
-     - If YES: Call start_feature to mark it ready (proposed → specified)
-   - If feature is SPECIFIED: Proceed to implement
+2. START work:
+   - start_feature: Transitions proposed → in_progress
+   - Returns feature details for implementation
 
 3. IMPLEMENT:
    - Write code, run tests, verify
@@ -789,10 +804,11 @@ Planning context:
 - Later = all other unreleased versions (backlog)
 
 SETUP (one-time):
-1. create_project - name and coding guidelines
-2. add_project_directory - associate your codebase
-3. create_feature or plan_features - define capabilities
-4. create_version - define release milestones (optional)
+1. analyze_project - scan codebase to understand structure and get feature hints
+2. create_project - name and coding guidelines
+3. add_project_directory - associate your codebase
+4. plan_features - use analysis hints to propose feature tree
+5. create_version - define release milestones (optional)
 
 GUIDELINES:
 - Read feature details before coding
@@ -802,11 +818,12 @@ GUIDELINES:
 
 DISPLAY:
 Tool results appear as collapsed JSON in the UI. Always summarize results inline for humans:
+- analyze_project: "Detected [language] project with [frameworks]. Found N modules, M directories. Hints: [list hints]"
 - render_feature_tree: Display the ASCII tree in your response
 - search_features: "Found N features: Title1 (state), Title2 (state), ..."
 - list_features: Same as search - summarize titles and states
 - get_feature: "Feature: Title (state)" + key details from specification
-- start_feature: "'Title' is ready to implement - marked as 'specified'"
+- start_feature: "Started work on 'Title' - now in 'in_progress' state"
 - complete_feature: "Completed 'Title' - marked as implemented"
 - get_project_context: Summarize project name and any relevant instructions
 - list_versions: "Versions: v0.1 (released), v0.2 (now, 3 features), v0.3 (next, 1 feature)"

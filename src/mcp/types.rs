@@ -104,7 +104,7 @@ pub struct ListFeaturesRequest {
     #[schemars(description = "Optional project UUID to filter features by project")]
     pub project_id: Option<String>,
     #[schemars(
-        description = "Optional state filter: 'proposed', 'specified', 'implemented', or 'deprecated'"
+        description = "Optional state filter: 'proposed', 'in_progress', 'implemented', or 'deprecated'"
     )]
     pub state: Option<String>,
     #[schemars(description = "Maximum number of features to return. Defaults to no limit.")]
@@ -154,7 +154,7 @@ pub struct UpdateFeatureStateRequest {
     #[schemars(description = "The UUID of the feature to update")]
     pub feature_id: String,
     #[schemars(
-        description = "The new state: 'proposed', 'specified', 'implemented', or 'deprecated'"
+        description = "The new state: 'proposed', 'in_progress', 'implemented', or 'deprecated'"
     )]
     #[serde(default)]
     pub state: Option<String>,
@@ -218,7 +218,7 @@ pub struct CreateFeatureRequest {
     #[serde(default)]
     pub details: Option<String>,
     #[schemars(
-        description = "Initial state: 'proposed' (default), 'specified', 'implemented', or 'deprecated'"
+        description = "Initial state: 'proposed' (default), 'in_progress', 'implemented', or 'deprecated'"
     )]
     #[serde(default = "default_proposed")]
     pub state: String,
@@ -529,4 +529,96 @@ pub struct SetFeatureVersionRequest {
 pub struct ReleaseVersionRequest {
     #[schemars(description = "The UUID of the version to release")]
     pub version_id: String,
+}
+
+// ============================================================
+// Project Analysis (for AI feature planning)
+// ============================================================
+
+fn default_depth() -> u32 {
+    3
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AnalyzeProjectRequest {
+    #[schemars(description = "Absolute path to the directory to analyze")]
+    pub directory_path: String,
+
+    #[schemars(
+        description = "Include documentation content (README, CLAUDE.md). Defaults to true."
+    )]
+    #[serde(default = "default_true")]
+    pub include_docs: bool,
+
+    #[schemars(description = "Maximum directory depth to scan. Defaults to 3.")]
+    #[serde(default = "default_depth")]
+    pub max_depth: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ProjectAnalysis {
+    /// Detected project name (from package.json/Cargo.toml)
+    pub name: Option<String>,
+    /// Detected project description
+    pub description: Option<String>,
+    /// Detected project type (language, frameworks, build tool)
+    pub project_type: ProjectType,
+    /// Git remote URL if available
+    pub git_remote: Option<String>,
+    /// Significant directories in the project
+    pub directories: Vec<DirectorySignal>,
+    /// Detected modules/components
+    pub modules: Vec<ModuleSignal>,
+    /// Documentation content (README, CLAUDE.md)
+    pub documentation: Option<DocumentationContent>,
+    /// AI-friendly hints for feature suggestions
+    pub hints: Vec<FeatureHint>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ProjectType {
+    /// Primary language (rust, typescript, fsharp, python, go, etc.)
+    pub language: String,
+    /// Detected frameworks (axum, sveltekit, react, etc.)
+    pub frameworks: Vec<String>,
+    /// Build tool (cargo, pnpm, npm, dotnet, etc.)
+    pub build_tool: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DirectorySignal {
+    /// Path relative to project root
+    pub path: String,
+    /// Kind of directory (source, tests, docs, config, unknown)
+    pub kind: String,
+    /// Number of files in this directory (non-recursive)
+    pub file_count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ModuleSignal {
+    /// Module name
+    pub name: String,
+    /// Path relative to project root
+    pub path: String,
+    /// Whether this appears to be a major module (by file count or naming)
+    pub is_major: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DocumentationContent {
+    /// README content (truncated to ~500 lines)
+    pub readme: Option<String>,
+    /// CLAUDE.md content if present
+    pub claude_md: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct FeatureHint {
+    /// Suggested feature name
+    pub title: String,
+    /// Why this was detected
+    pub reason: String,
+    /// Related paths in the project
+    pub paths: Vec<String>,
 }
