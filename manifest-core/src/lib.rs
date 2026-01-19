@@ -20,4 +20,4 @@ pub mod db;
 pub mod models;
 
 // Re-export commonly used types at crate root
-pub use db::Database;
+pub use db::{Database, FeatureEvent};

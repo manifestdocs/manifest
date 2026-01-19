@@ -8,9 +8,32 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::models::*;
+
+// ============================================================
+// Feature Events (for SSE)
+// ============================================================
+
+/// Events emitted when features change, used for SSE notifications.
+#[derive(Debug, Clone)]
+pub enum FeatureEvent {
+    Created { project_id: Uuid },
+    Updated { project_id: Uuid },
+    Deleted { project_id: Uuid },
+}
+
+impl FeatureEvent {
+    pub fn project_id(&self) -> Uuid {
+        match self {
+            FeatureEvent::Created { project_id } => *project_id,
+            FeatureEvent::Updated { project_id } => *project_id,
+            FeatureEvent::Deleted { project_id } => *project_id,
+        }
+    }
+}
 
 /// Domain errors that can be meaningfully handled by callers.
 /// These are distinct from infrastructure errors (SQLite failures, etc.)
@@ -56,8 +79,14 @@ impl fmt::Display for ManifestError {
 
 impl std::error::Error for ManifestError {}
 
+/// Channel capacity for feature events. Small is fine since clients just refetch.
+const EVENT_CHANNEL_CAPACITY: usize = 16;
+
 pub struct Database {
     conn: Arc<Mutex<Connection>>,
+    /// Broadcast channel for feature change notifications.
+    /// Subscribers use this to know when to refetch data.
+    events: broadcast::Sender<FeatureEvent>,
 }
 
 impl Database {
@@ -71,8 +100,10 @@ impl Database {
         // Explicitly disable foreign key enforcement (SQLite default) to avoid
         // FK constraint errors when updating features with version references.
         conn.pragma_update(None, "foreign_keys", "OFF")?;
+        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            events,
         })
     }
 
@@ -90,9 +121,17 @@ impl Database {
 
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
+        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            events,
         })
+    }
+
+    /// Subscribe to feature change events.
+    /// Returns a receiver that will get notified when features are created, updated, or deleted.
+    pub fn subscribe(&self) -> broadcast::Receiver<FeatureEvent> {
+        self.events.subscribe()
     }
 
     pub fn migrate(&self) -> Result<()> {
@@ -680,6 +719,9 @@ impl Database {
             ),
         )?;
 
+        // Notify subscribers (ignore errors - no subscribers is fine)
+        let _ = self.events.send(FeatureEvent::Created { project_id });
+
         Ok(Feature {
             id,
             project_id,
@@ -750,6 +792,10 @@ impl Database {
         }
 
         tx.commit()?;
+
+        // Notify subscribers after successful commit
+        let _ = self.events.send(FeatureEvent::Created { project_id });
+
         Ok(features)
     }
 
@@ -786,6 +832,11 @@ impl Database {
             ),
         )?;
 
+        // Notify subscribers
+        let _ = self.events.send(FeatureEvent::Updated {
+            project_id: existing.project_id,
+        });
+
         Ok(Some(Feature {
             id,
             project_id: existing.project_id,
@@ -802,8 +853,28 @@ impl Database {
     }
 
     pub fn delete_feature(&self, id: Uuid) -> Result<bool> {
+        // Get project_id before deleting (for event notification)
+        let project_id = {
+            let conn = self.conn.lock().expect("database lock poisoned");
+            conn.query_row(
+                "SELECT project_id FROM features WHERE id = ?",
+                [id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .map(parse_uuid)
+        };
+
         let conn = self.conn.lock().expect("database lock poisoned");
         let rows = conn.execute("DELETE FROM features WHERE id = ?", [id.to_string()])?;
+
+        // Notify subscribers if we deleted something
+        if rows > 0 {
+            if let Some(project_id) = project_id {
+                let _ = self.events.send(FeatureEvent::Deleted { project_id });
+            }
+        }
+
         Ok(rows > 0)
     }
 
@@ -1148,6 +1219,7 @@ impl Clone for Database {
     fn clone(&self) -> Self {
         Self {
             conn: self.conn.clone(),
+            events: self.events.clone(),
         }
     }
 }

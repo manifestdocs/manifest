@@ -18,6 +18,8 @@ path = "src/main.rs"
 manifest-core = { path = "manifest-core" }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures-util = "0.3"
 
 # HTTP server
 axum = "0.8"
