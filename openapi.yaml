@@ -932,10 +932,10 @@ components:
 
     FeatureState:
       type: string
-      enum: [proposed, specified, implemented, deprecated]
+      enum: [proposed, in_progress, implemented, deprecated]
       description: |
-        - proposed: Initial state, idea captured
-        - specified: Requirements defined
+        - proposed: Initial state, in backlog
+        - in_progress: Actively being worked on
         - implemented: Feature is live in codebase
         - deprecated: Feature marked for removal
 

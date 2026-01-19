@@ -86,15 +86,15 @@ pub struct Feature {
 
 /// The lifecycle state of a feature.
 ///
-/// - `Proposed`: Initial idea, not yet fully specified
-/// - `Specified`: Requirements defined, ready for implementation
+/// - `Proposed`: Initial idea, in backlog
+/// - `InProgress`: Actively being worked on
 /// - `Implemented`: Built and deployed (enters "living" phase)
 /// - `Deprecated`: No longer active, kept for historical reference
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FeatureState {
     Proposed,
-    Specified,
+    InProgress,
     Implemented,
     Deprecated,
 }
@@ -103,7 +103,7 @@ impl FeatureState {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Proposed => "proposed",
-            Self::Specified => "specified",
+            Self::InProgress => "in_progress",
             Self::Implemented => "implemented",
             Self::Deprecated => "deprecated",
         }
@@ -116,7 +116,7 @@ impl FromStr for FeatureState {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "proposed" => Ok(Self::Proposed),
-            "specified" => Ok(Self::Specified),
+            "in_progress" => Ok(Self::InProgress),
             "implemented" => Ok(Self::Implemented),
             "deprecated" => Ok(Self::Deprecated),
             _ => Err(()),

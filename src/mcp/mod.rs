@@ -247,7 +247,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Render a project's feature tree as ASCII art with status symbols. Returns a visual tree showing feature hierarchy and states (◇ proposed, ○ specified, ● implemented, ✗ deprecated)."
+        description = "Render a project's feature tree as ASCII art with status symbols. Returns a visual tree showing feature hierarchy and states (◇ proposed, ○ in_progress, ● implemented, ✗ deprecated)."
     )]
     async fn render_feature_tree(
         &self,
@@ -309,7 +309,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Update a feature's state, title, or details. Use this to transition features through their lifecycle (proposed → specified → implemented → deprecated) or to update living documentation when implementation reveals new information. At least one field (state, title, or details) must be provided."
+        description = "Update a feature's state, title, or details. Use this to transition features through their lifecycle (proposed → in_progress → implemented → deprecated) or to update living documentation when implementation reveals new information. At least one field (state, title, or details) must be provided."
     )]
     async fn update_feature_state(
         &self,
@@ -333,7 +333,7 @@ impl McpServer {
                 FeatureState::from_str(&s).map_err(|_| {
                     McpError::invalid_params(
                         format!(
-                            "Invalid state '{}'. Must be: proposed, specified, implemented, or deprecated",
+                            "Invalid state '{}'. Must be: proposed, in_progress, implemented, or deprecated",
                             s
                         ),
                         None,
@@ -457,7 +457,7 @@ impl McpServer {
         let state = FeatureState::from_str(&req.state).map_err(|_| {
             McpError::invalid_params(
                 format!(
-                    "Invalid state '{}'. Must be: proposed, specified, implemented, or deprecated",
+                    "Invalid state '{}'. Must be: proposed, in_progress, implemented, or deprecated",
                     req.state
                 ),
                 None,
@@ -584,17 +584,17 @@ FEATURE FIELDS:
 - title: Short capability name (2-5 words). What users can DO.
 - details: Feature specification including user stories, technical notes, constraints, acceptance criteria.
           User stories can follow "As a [user], I can [capability] so that [benefit]" format.
-- state: Auto-managed lifecycle (proposed → specified → implemented → deprecated)
+- state: Auto-managed lifecycle (proposed → in_progress → implemented → deprecated)
 - priority: Lower number = implement first. Use for sequencing.
 
 FEATURE STATES (auto-managed):
-- 'proposed': Initial idea, no active work
-- 'specified': Has an active session (auto-set when session is created)
+- 'proposed': Initial idea, in backlog
+- 'in_progress': Actively being worked on (auto-set when session is created)
 - 'implemented': Session completed (auto-set by complete_session with mark_implemented=true)
 - 'deprecated': Manually set only via update_feature_state
 
 State transitions happen automatically:
-- create_session on a 'proposed' feature → transitions to 'specified'
+- create_session on a 'proposed' feature → transitions to 'in_progress'
 - complete_session with mark_implemented=true → transitions to 'implemented'
 
 FEATURE vs TASK:
@@ -662,7 +662,7 @@ Process:
 - Make incremental commits; small, verified changes over large batches
 
 ORCHESTRATOR WORKFLOW (when managing a feature):
-1. Call list_features with state='specified' to find work
+1. Call list_features with state='in_progress' to find work
 2. Call get_feature to read the full specification
 3. Call create_session on a leaf feature to start work
 4. Call create_task to break down work into agent-sized units

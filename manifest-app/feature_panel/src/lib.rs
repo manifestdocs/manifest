@@ -69,7 +69,7 @@ mod colors {
         } // #f8be53 - warning
     }
 
-    pub fn specified_green() -> Rgba {
+    pub fn in_progress_green() -> Rgba {
         Rgba {
             r: 0.765,
             g: 0.910,
@@ -329,9 +329,9 @@ impl FeaturePanel {
             )
     }
 
-    /// Render a specified state icon: green donut/ring.
+    /// Render an in_progress state icon: green donut/ring.
     /// Using a simple single div with border for performance.
-    fn render_specified_icon() -> impl IntoElement {
+    fn render_in_progress_icon() -> impl IntoElement {
         div()
             .w(px(16.0))
             .h(px(16.0))
@@ -344,12 +344,12 @@ impl FeaturePanel {
                     .h(px(12.0))
                     .rounded(px(6.0))
                     .border_2()
-                    .border_color(colors::specified_green()),
+                    .border_color(colors::in_progress_green()),
             )
     }
 
     /// Render an implemented state icon: solid light blue circle.
-    /// Same radius as specified icon (12x12).
+    /// Same radius as in_progress icon (12x12).
     fn render_implemented_icon() -> impl IntoElement {
         div()
             .w(px(16.0))
@@ -469,8 +469,8 @@ impl Render for FeaturePanel {
                                             FeatureState::Proposed => {
                                                 Self::render_proposed_icon().into_any_element()
                                             }
-                                            FeatureState::Specified => {
-                                                Self::render_specified_icon().into_any_element()
+                                            FeatureState::InProgress => {
+                                                Self::render_in_progress_icon().into_any_element()
                                             }
                                             FeatureState::Implemented => {
                                                 Self::render_implemented_icon().into_any_element()

@@ -183,7 +183,7 @@ speculate! {
                     parent_id: None,
                     title: "OAuth Integration".to_string(),
                     details: Some("As a user, I want to log in with OAuth.\n\n## Technical Notes\n\nUse PKCE flow".to_string()),
-                    state: Some(FeatureState::Specified),
+                    state: Some(FeatureState::Implemented),
                     priority: None,
                     target_version_id: None,
                 };
@@ -191,7 +191,7 @@ speculate! {
                 let feature = db.create_feature(project.id, input).expect("Failed to create feature");
 
                 assert_eq!(feature.title, "OAuth Integration");
-                assert_eq!(feature.state, FeatureState::Specified);
+                assert_eq!(feature.state, FeatureState::Implemented);
                 assert!(feature.details.as_ref().unwrap().contains("As a user"));
                 assert!(feature.details.as_ref().unwrap().contains("PKCE"));
             }
@@ -590,7 +590,7 @@ speculate! {
                     details: Some("Detailed description".to_string()),
                     priority: Some(5),
                     target_version_id: None,
-                    state: Some(FeatureState::Specified),
+                    state: Some(FeatureState::Implemented),
                 }).expect("Failed to create");
 
                 let results = db.search_features("Test", None, None).expect("Query failed");
@@ -599,7 +599,7 @@ speculate! {
                 let summary = &results[0];
                 assert_eq!(summary.id, feature.id);
                 assert_eq!(summary.title, "Test Feature");
-                assert_eq!(summary.state, FeatureState::Specified);
+                assert_eq!(summary.state, FeatureState::Implemented);
                 assert_eq!(summary.priority, 5);
                 // FeatureSummary doesn't have details field - that's the point!
             }

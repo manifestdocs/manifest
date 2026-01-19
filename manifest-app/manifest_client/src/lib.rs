@@ -17,10 +17,10 @@ pub enum ClientError {
 
 /// Feature state in the Manifest system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum FeatureState {
     Proposed,
-    Specified,
+    InProgress,
     Implemented,
     Deprecated,
 }

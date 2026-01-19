@@ -3,7 +3,7 @@
 use crate::models::{FeatureState, FeatureTreeNode};
 
 const PROPOSED: char = '◇';
-const SPECIFIED: char = '○';
+const IN_PROGRESS: char = '○';
 const IMPLEMENTED: char = '●';
 const DEPRECATED: char = '✗';
 
@@ -11,7 +11,7 @@ const DEPRECATED: char = '✗';
 fn state_symbol(state: FeatureState) -> char {
     match state {
         FeatureState::Proposed => PROPOSED,
-        FeatureState::Specified => SPECIFIED,
+        FeatureState::InProgress => IN_PROGRESS,
         FeatureState::Implemented => IMPLEMENTED,
         FeatureState::Deprecated => DEPRECATED,
     }
@@ -121,7 +121,7 @@ mod tests {
             FeatureState::Proposed,
             vec![
                 make_node("Password Login", FeatureState::Implemented, vec![]),
-                make_node("OAuth", FeatureState::Specified, vec![]),
+                make_node("OAuth", FeatureState::InProgress, vec![]),
             ],
         )];
         let output = render_tree(&tree);
@@ -140,7 +140,7 @@ mod tests {
                 make_node("Password Login", FeatureState::Implemented, vec![]),
                 make_node(
                     "OAuth Integration",
-                    FeatureState::Specified,
+                    FeatureState::InProgress,
                     vec![
                         make_node("Google Provider", FeatureState::Proposed, vec![]),
                         make_node("GitHub Provider", FeatureState::Proposed, vec![]),

@@ -383,7 +383,7 @@ mod tool_calls {
                 "project_id": project_id,
                 "title": "User Authentication",
                 "details": "As a user, I want to log in",
-                "state": "specified"
+                "state": "in_progress"
             }),
         );
         assert!(feature_response.error.is_none());
@@ -422,7 +422,7 @@ mod tool_calls {
             json!({
                 "project_id": project_id,
                 "title": "Test Feature",
-                "state": "specified"
+                "state": "in_progress"
             }),
         ));
         let feature: Value = serde_json::from_str(&feature_text).unwrap();

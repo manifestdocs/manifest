@@ -37,7 +37,7 @@ mod convert {
     fn convert_state(state: CoreState) -> FeatureState {
         match state {
             CoreState::Proposed => FeatureState::Proposed,
-            CoreState::Specified => FeatureState::Specified,
+            CoreState::InProgress => FeatureState::InProgress,
             CoreState::Implemented => FeatureState::Implemented,
             CoreState::Deprecated => FeatureState::Deprecated,
         }
