@@ -268,13 +268,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Get the currently active feature selected in the Manifest desktop app for the current project. Returns the feature ID, title, and details if a feature is selected, or null if no feature is selected. The context is per-project, stored in .manifest/active_context.json in the current working directory."
+        description = "Get the currently active feature for the current project. Returns the feature ID, title, and details if a feature is selected, or null if no feature is selected. The context is per-project, stored in .manifest/active_context.json in the current working directory."
     )]
     async fn get_active_feature(
         &self,
         _params: Parameters<GetActiveFeatureRequest>,
     ) -> Result<CallToolResult, McpError> {
-        // Read active context from project directory (shared with manifest-app)
+        // Read active context from project directory
         let cwd = std::env::current_dir().map_err(|e| {
             McpError::internal_error(
                 format!("Could not determine current directory: {}", e),
@@ -286,7 +286,7 @@ impl McpServer {
 
         if !context_path.exists() {
             return Ok(CallToolResult::success(vec![Content::text(
-                r#"{"active_feature": null, "message": "No feature is currently selected in the Manifest app for this project"}"#.to_string()
+                r#"{"active_feature": null, "message": "No feature is currently selected for this project"}"#.to_string()
             )]));
         }
 
