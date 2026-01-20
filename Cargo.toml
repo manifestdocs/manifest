@@ -3,7 +3,7 @@ members = ["manifest-core"]
 
 [package]
 name = "manifest"
-version = "0.1.26"
+version = "0.1.27"
 edition = "2021"
 description = "Living feature documentation server for AI-assisted development"
 license = "BUSL-1.1"
