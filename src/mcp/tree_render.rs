@@ -17,7 +17,7 @@ fn state_symbol(state: FeatureState) -> char {
     }
 }
 
-/// Render a feature tree as ASCII art with status symbols.
+/// Render a feature tree as ASCII art with status symbols (unlimited depth).
 ///
 /// Example output:
 /// ```text

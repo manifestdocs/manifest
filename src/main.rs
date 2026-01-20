@@ -113,12 +113,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Mcp) => {
             // MCP server uses HTTP client to connect to the API
             // No local database needed - configure via MANIFEST_URL env var
-            let mode = if mcp::is_ide_mode() {
-                "MCP (IDE)"
-            } else {
-                "MCP (CLI)"
-            };
-            print_banner(std::io::stderr(), mode);
+            print_banner(std::io::stderr(), "MCP");
             mcp::run_stdio_server().await?;
         }
         Some(Commands::Status) => {

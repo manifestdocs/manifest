@@ -1,0 +1,296 @@
+//! MCP server for AI-assisted feature development.
+//!
+//! Exposes tools optimized for CLI agents like Claude Code:
+//! - Discovery: list_projects, list_features, get_feature, render_feature_tree
+//! - Setup: init_project, add_project_directory, plan, create_feature
+//! - Work: start_feature, complete_feature, get_next_feature
+//! - Versions: list_versions, create_version, set_feature_version, release_version
+
+use super::tools;
+use super::types::*;
+use super::ManifestClient;
+use rmcp::{
+    handler::server::{tool::ToolRouter, wrapper::Parameters},
+    model::{CallToolResult, ServerInfo},
+    tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
+};
+
+// ============================================================
+// Server Implementation
+// ============================================================
+
+pub struct McpServer {
+    client: ManifestClient,
+    tool_router: ToolRouter<Self>,
+}
+
+impl McpServer {
+    pub fn new(client: ManifestClient) -> Self {
+        Self {
+            client,
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    pub fn from_env() -> Self {
+        Self::new(ManifestClient::from_env())
+    }
+}
+
+#[tool_router]
+impl McpServer {
+    // ============================================================
+    // Discovery Tools
+    // ============================================================
+
+    #[tool(
+        description = "List projects. If directory_path is provided, returns only the project containing that directory. Otherwise returns all projects."
+    )]
+    async fn list_projects(
+        &self,
+        params: Parameters<ListProjectsRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::projects::list_projects(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "List features, optionally filtered by project, state, or search query. Returns summaries only (id, title, state, priority, parent_id). Use get_feature for full details."
+    )]
+    async fn list_features(
+        &self,
+        params: Parameters<ListFeaturesRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::list_features(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Get detailed information about a specific feature by ID. Returns the feature's title, details, and current state. Optionally includes implementation history. Use this to understand what needs to be built before starting work."
+    )]
+    async fn get_feature(
+        &self,
+        params: Parameters<GetFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::get_feature(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Render a project's feature tree as ASCII art with status symbols. Returns a visual tree showing feature hierarchy and states (◇ proposed, ○ in_progress, ● implemented, ✗ deprecated)."
+    )]
+    async fn render_feature_tree(
+        &self,
+        params: Parameters<RenderFeatureTreeRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::render_feature_tree(&self.client, params.0).await
+    }
+
+    // ============================================================
+    // Setup Tools
+    // ============================================================
+
+    #[tool(
+        description = "Initialize a project from a directory. Analyzes the codebase, creates a new project (or links to existing by name/ID), and returns project info with analysis results for use with plan_features."
+    )]
+    async fn init_project(
+        &self,
+        params: Parameters<InitProjectRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::projects::init_project(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Associate an additional directory with an existing project. Use this for monorepos where multiple directories belong to the same project. The first directory should be added via init_project."
+    )]
+    async fn add_project_directory(
+        &self,
+        params: Parameters<AddProjectDirectoryRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::projects::add_project_directory(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Turn a PRD, spec, or product vision into a feature tree. Apply the user story test: 'As a [user], I can [feature]...' With confirm=false (default), returns proposal for review. With confirm=true, creates all features."
+    )]
+    async fn plan(
+        &self,
+        params: Parameters<PlanFeaturesRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::plan(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Create a feature (system capability) within a project. Name by capability, not by task - e.g., 'Router' not 'Implement Routing'. Use parent_id for domain grouping. Use priority field for sequencing."
+    )]
+    async fn create_feature(
+        &self,
+        params: Parameters<CreateFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::create_feature(&self.client, params.0).await
+    }
+
+    // ============================================================
+    // Work Tools
+    // ============================================================
+
+    #[tool(
+        description = "Signal that you are starting work on a feature. Sets state to 'in_progress' if currently 'proposed'. Returns the feature details so you know what to implement."
+    )]
+    async fn start_feature(
+        &self,
+        params: Parameters<StartFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::start_feature(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Complete work on a feature. Creates a history entry with your summary and commits, then marks the feature as 'implemented'. Call this when work is done and verified."
+    )]
+    async fn complete_feature(
+        &self,
+        params: Parameters<CompleteFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::complete_feature(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Get the next workable feature for a project. Returns the single highest-priority feature that is proposed or in_progress. Prioritizes features targeting the 'now' version (first unreleased), then backlog features. Returns null if no workable features exist."
+    )]
+    async fn get_next_feature(
+        &self,
+        params: Parameters<GetNextFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::get_next_feature(&self.client, params.0).await
+    }
+
+    // ============================================================
+    // Version Tools
+    // ============================================================
+
+    #[tool(
+        description = "List versions for a project. Returns versions with feature counts, plus 'now' (current focus) and 'next' (upcoming) indicators."
+    )]
+    async fn list_versions(
+        &self,
+        params: Parameters<ListVersionsRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::versions::list_versions(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Create a new version for release planning. Use this to define milestones like 'v0.2', 'MVP', or '2024.1'."
+    )]
+    async fn create_version(
+        &self,
+        params: Parameters<CreateVersionRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::versions::create_version(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Assign a feature to a target version for release planning. Use this to express 'put this feature in v0.2'. Pass null for version_id to unassign."
+    )]
+    async fn set_feature_version(
+        &self,
+        params: Parameters<SetFeatureVersionRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::versions::set_feature_version(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "Mark a version as released. Sets released_at to now. Use this when you ship a version."
+    )]
+    async fn release_version(
+        &self,
+        params: Parameters<ReleaseVersionRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::versions::release_version(&self.client, params.0).await
+    }
+}
+
+#[tool_handler]
+impl ServerHandler for McpServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            server_info: rmcp::model::Implementation {
+                name: "manifest".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                title: None,
+                icons: None,
+                website_url: None,
+            },
+            capabilities: rmcp::model::ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
+            instructions: Some(INSTRUCTIONS.into()),
+            ..Default::default()
+        }
+    }
+}
+
+const INSTRUCTIONS: &str = r#"Manifest is living documentation for the software we are building in this project.
+
+HOW TO USE MANIFEST:
+Manifest provides context: what the system does, what has been built, what needs work, and why decisions were made. Read feature specs before implementing. Check history to see prior work. Update features when you complete work.
+
+THE FEATURE TREE:
+Every project has a feature tree—a hierarchy of capabilities the system provides. The tree structure groups related features (e.g., Auth > Login > OAuth). Each feature has a state:
+
+◇ proposed — in the backlog, not yet started
+○ in_progress — actively being worked on
+● implemented — complete and documented
+✗ deprecated — no longer active
+
+DISCOVERING FEATURES:
+- list_features — query features by project, state, or search term
+- get_feature — get full details and history for a specific feature
+- get_next_feature — get the highest priority proposed or in_progress feature
+- render_feature_tree — display the full tree as ASCII art for the user
+
+VERSIONS:
+Versions use semantic versioning e.g., 0.1.0, 0.2.0, 1.0.0), and organize features into releases. The first unreleased version is "now"—the current focus. The second unreleased version is "next". Everything after that is "later". Features in "now" are highest priority.
+
+FEATURES AS LIVING DOCUMENTATION:
+Features describe system capabilities, not work items to close. A feature titled "Router" should make sense years from now. Before creating one, apply the user story test: "As a [user], I can [capability] so that [benefit]."
+- Good: "As a developer, I can match dynamic URL paths so that I can build REST APIs" → Router
+- Bad: "As a user, I can have data persistence" → quality attribute, not capability
+
+WORKFLOW:
+
+1. ORIENT — understand what exists and what's needed:
+   - list_projects (filter by directory_path to find project for your CWD)
+   - render_feature_tree — see the full picture
+   - get_feature (include_history=true) — read the spec AND what's been done before
+   - get_next_feature — find highest-priority work
+
+2. CLAIM — signal you're starting:
+   - start_feature — transitions proposed → in_progress, returns full spec
+
+3. BUILD — implement against the spec:
+   - The feature details ARE your specification
+   - Write tests first, then implement, then verify
+
+4. DOCUMENT — record what you did:
+   - complete_feature — provide summary + commit SHAs
+   - This creates a history entry so future agents (or future you) know what happened
+
+VERSIONS & PLANNING:
+- list_versions — see Now (current focus), Next (queued), Later (backlog)
+- create_version — define milestones like "v0.2.0"
+- set_feature_version — assign features to releases
+- release_version — mark a version as shipped
+
+When all features in the "now" version are implemented, ask the user before calling release_version. Releasing shifts "next" to become the new "now".
+
+SETUP (when starting fresh):
+1. init_project — analyze codebase, create project, link directory
+2. add_project_directory — for projects that may have directories in different locations
+3. plan — break down a PRD, tech spec, or vision into a feature tree
+4. create_version — define release milestones
+
+DISPLAY GUIDELINES:
+Tool results are collapsed JSON. Always summarize for humans:
+- render_feature_tree: Show the ASCII tree directly
+- get_feature: "Feature: Title (state)" + key spec details + relevant history
+- get_next_feature: "Next up: Title" or "No workable features"
+- start_feature: "Started 'Title' — now in_progress"
+- complete_feature: "Completed 'Title' — recorded N commits"
+- list_versions: "0.1.0 (released), 0.2.0 (now, 3 features), 0.3.0 (next)""#;

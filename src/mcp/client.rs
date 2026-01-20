@@ -13,8 +13,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::mcp::{
-    DirectoryInfo, FeatureInfo, PlanFeaturesResponse, ProjectAnalysis, ProjectContextResponse,
-    ProjectInfo, ProposedFeature,
+    DirectoryInfo, PlanFeaturesResponse, ProjectAnalysis, ProjectContextResponse, ProjectInfo,
+    ProposedFeature,
 };
 use crate::models::*;
 
@@ -229,32 +229,19 @@ impl ManifestClient {
         project_id: Option<Uuid>,
         limit: Option<u32>,
     ) -> Result<Vec<FeatureSummary>, ClientError> {
-        let mut url = "/features/search".to_string();
-
-        // Build query string with manual percent-encoding for the query
-        let encoded_query: String = query
-            .chars()
-            .map(|c| match c {
-                ' ' => "%20".to_string(),
-                '&' => "%26".to_string(),
-                '=' => "%3D".to_string(),
-                '?' => "%3F".to_string(),
-                '#' => "%23".to_string(),
-                '%' => "%25".to_string(),
-                _ => c.to_string(),
-            })
-            .collect();
-        let mut params = vec![format!("q={}", encoded_query)];
+        let mut params: Vec<(&str, String)> = vec![("q", query.to_string())];
         if let Some(pid) = project_id {
-            params.push(format!("project_id={}", pid));
+            params.push(("project_id", pid.to_string()));
         }
         if let Some(l) = limit {
-            params.push(format!("limit={}", l));
+            params.push(("limit", l.to_string()));
         }
-        url.push('?');
-        url.push_str(&params.join("&"));
 
-        let response = self.request(reqwest::Method::GET, &url).send().await?;
+        let response = self
+            .request(reqwest::Method::GET, "/features/search")
+            .query(&params)
+            .send()
+            .await?;
         self.handle_response(response).await
     }
 
@@ -328,12 +315,11 @@ impl ManifestClient {
         &self,
         path: &str,
     ) -> Result<ProjectWithDirectories, ClientError> {
-        let url = format!("{}/projects/by-directory", self.base_url);
-        let mut req = self.client.get(&url).query(&[("path", path)]);
-        if let Some(ref key) = self.api_key {
-            req = req.bearer_auth(key);
-        }
-        let response = req.send().await?;
+        let response = self
+            .request(reqwest::Method::GET, "/projects/by-directory")
+            .query(&[("path", path)])
+            .send()
+            .await?;
         self.handle_response(response).await
     }
 
@@ -431,16 +417,15 @@ impl ManifestClient {
         include_docs: bool,
         max_depth: u32,
     ) -> Result<ProjectAnalysis, ClientError> {
-        let url = format!("{}/codebase/analyze", self.base_url);
-        let mut req = self.client.get(&url).query(&[
-            ("path", directory_path),
-            ("include_docs", &include_docs.to_string()),
-            ("max_depth", &max_depth.to_string()),
-        ]);
-        if let Some(ref key) = self.api_key {
-            req = req.bearer_auth(key);
-        }
-        let response = req.send().await?;
+        let response = self
+            .request(reqwest::Method::GET, "/codebase/analyze")
+            .query(&[
+                ("path", directory_path),
+                ("include_docs", &include_docs.to_string()),
+                ("max_depth", &max_depth.to_string()),
+            ])
+            .send()
+            .await?;
         self.handle_response(response).await
     }
 }
@@ -468,78 +453,18 @@ impl ManifestClient {
 
         Ok(ProjectContextResponse {
             project: ProjectInfo {
-                id: project_with_dirs.project.id.to_string(),
+                id: project_with_dirs.project.id,
                 name: project_with_dirs.project.name,
                 description: project_with_dirs.project.description,
                 instructions: project_with_dirs.project.instructions,
             },
             directory: DirectoryInfo {
-                id: matching_dir.id.to_string(),
+                id: matching_dir.id,
                 path: matching_dir.path.clone(),
                 git_remote: matching_dir.git_remote.clone(),
                 is_primary: matching_dir.is_primary,
                 instructions: matching_dir.instructions.clone(),
             },
         })
-    }
-
-    /// Convert Feature to FeatureInfo for MCP response.
-    pub fn feature_to_info(feature: &Feature) -> FeatureInfo {
-        FeatureInfo {
-            id: feature.id.to_string(),
-            title: feature.title.clone(),
-            details: feature.details.clone(),
-            desired_details: feature.desired_details.clone(),
-            state: feature.state.as_str().to_string(),
-            priority: feature.priority,
-        }
-    }
-
-    /// Convert FeatureWithContext to FeatureInfoWithContext for MCP response.
-    pub fn feature_with_context_to_info(
-        feature_ctx: &FeatureWithContext,
-    ) -> crate::mcp::FeatureInfoWithContext {
-        crate::mcp::FeatureInfoWithContext {
-            id: feature_ctx.feature.id.to_string(),
-            title: feature_ctx.feature.title.clone(),
-            details: feature_ctx.feature.details.clone(),
-            desired_details: feature_ctx.feature.desired_details.clone(),
-            state: feature_ctx.feature.state.as_str().to_string(),
-            priority: feature_ctx.feature.priority,
-            parent: feature_ctx
-                .parent
-                .as_ref()
-                .map(|p| crate::mcp::FeatureSummaryContextInfo {
-                    id: p.id.to_string(),
-                    title: p.title.clone(),
-                    state: p.state.as_str().to_string(),
-                }),
-            siblings: feature_ctx
-                .siblings
-                .iter()
-                .map(|s| crate::mcp::FeatureSummaryContextInfo {
-                    id: s.id.to_string(),
-                    title: s.title.clone(),
-                    state: s.state.as_str().to_string(),
-                })
-                .collect(),
-            children: feature_ctx
-                .children
-                .iter()
-                .map(|c| crate::mcp::FeatureSummaryContextInfo {
-                    id: c.id.to_string(),
-                    title: c.title.clone(),
-                    state: c.state.as_str().to_string(),
-                })
-                .collect(),
-            breadcrumb: feature_ctx
-                .breadcrumb
-                .iter()
-                .map(|b| crate::mcp::BreadcrumbItemInfo {
-                    id: b.id.to_string(),
-                    title: b.title.clone(),
-                })
-                .collect(),
-        }
     }
 }

@@ -2,88 +2,38 @@
 
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::models::{BreadcrumbItem, Feature, FeatureSummaryContext, FeatureWithContext};
+use crate::serde_helpers::default_true;
 
 // ============================================================
 // Request Types
 // ============================================================
 
+/// A reference to a git commit for MCP input.
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct GetTaskContextRequest {
-    #[schemars(description = "The UUID of the task assigned to you")]
-    pub task_id: String,
+pub struct StartFeatureRequest {
+    #[schemars(description = "The UUID of the feature to start working on")]
+    pub feature_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct StartTaskRequest {
-    #[schemars(description = "The UUID of the task to start working on")]
-    pub task_id: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct CompleteTaskRequest {
-    #[schemars(description = "The UUID of the task to mark as complete")]
-    pub task_id: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct CreateSessionRequest {
+pub struct CompleteFeatureRequest {
+    #[schemars(description = "The UUID of the feature to complete")]
+    pub feature_id: Uuid,
     #[schemars(
-        description = "The UUID of the feature to start a session on (must be a leaf feature with no children)"
-    )]
-    pub feature_id: String,
-    #[schemars(
-        description = "The goal of this session - what will be accomplished when the session ends"
-    )]
-    pub goal: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct CreateTaskRequest {
-    #[schemars(description = "The UUID of the session to create the task in")]
-    pub session_id: String,
-    #[schemars(description = "Short title describing what this task accomplishes")]
-    pub title: String,
-    #[schemars(
-        description = "Detailed scope of work - be specific about what to implement, test, or verify"
-    )]
-    pub scope: String,
-    #[schemars(
-        description = "Which agent type should handle this task: 'claude', 'gemini', or 'codex'"
-    )]
-    pub agent_type: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct ListSessionTasksRequest {
-    #[schemars(description = "The UUID of the session to list tasks for")]
-    pub session_id: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct GetFeatureSessionRequest {
-    #[schemars(description = "The UUID of the feature to get the active session for")]
-    pub feature_id: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct CompleteSessionRequest {
-    #[schemars(description = "The UUID of the session to complete")]
-    pub session_id: String,
-    #[schemars(
-        description = "Summary of work done (git-style format). First line is a concise headline shown in list views. Add details after a blank line if needed."
+        description = "Summary of work done (git-style format). First line is a concise headline shown in list views. Add details after a blank line if needed (bullet points, technical notes). Example:\n\nImplemented OAuth login flow\n\n- Added Google OAuth provider\n- Created session management\n- Updated user model with provider field"
     )]
     pub summary: String,
-    #[schemars(description = "Git commits created during this session")]
+    #[schemars(description = "Git commits created during this work")]
     #[serde(default)]
     pub commits: Vec<CommitRefInput>,
-    #[schemars(
-        description = "Whether to mark the feature as 'implemented'. Defaults to true. Set to false if work is partial or feature needs more sessions."
-    )]
+    #[schemars(description = "Whether to mark the feature as 'implemented'. Defaults to true.")]
     #[serde(default = "default_true")]
     pub mark_implemented: bool,
 }
 
-/// A reference to a git commit for MCP input.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CommitRefInput {
     #[schemars(description = "The commit SHA (short or full)")]
@@ -95,18 +45,18 @@ pub struct CommitRefInput {
     pub author: Option<String>,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListFeaturesRequest {
     #[schemars(description = "Optional project UUID to filter features by project")]
-    pub project_id: Option<String>,
+    pub project_id: Option<Uuid>,
     #[schemars(
         description = "Optional state filter: 'proposed', 'in_progress', 'implemented', or 'deprecated'"
     )]
     pub state: Option<String>,
+    #[schemars(
+        description = "Optional search query to match against title and details. When provided, returns features ranked by relevance."
+    )]
+    pub query: Option<String>,
     #[schemars(description = "Maximum number of features to return. Defaults to no limit.")]
     pub limit: Option<u32>,
     #[schemars(description = "Number of features to skip for pagination. Defaults to 0.")]
@@ -114,45 +64,20 @@ pub struct ListFeaturesRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct SearchFeaturesRequest {
-    #[schemars(description = "Search term to match against title and details")]
-    pub query: String,
-    #[schemars(description = "Optional project UUID to limit search to a specific project")]
-    pub project_id: Option<String>,
-    #[schemars(description = "Maximum number of results to return. Defaults to 10.")]
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetFeatureRequest {
     #[schemars(description = "The UUID of the feature to retrieve")]
-    pub feature_id: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct GetFeatureHistoryRequest {
-    #[schemars(description = "The UUID of the feature to get history for")]
-    pub feature_id: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct GetProjectContextRequest {
+    pub feature_id: Uuid,
     #[schemars(
-        description = "The directory path to look up (e.g., current working directory). Returns the project that contains this directory."
+        description = "Include implementation history (past work summaries and commits). Defaults to false."
     )]
-    pub directory_path: String,
+    #[serde(default)]
+    pub include_history: bool,
 }
-
-/// Request to get the active feature from the Manifest desktop app.
-/// This is a parameterless request - the active feature is determined by
-/// the desktop app's current selection, stored in ~/.manifest/active_context.json.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct GetActiveFeatureRequest {}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UpdateFeatureStateRequest {
     #[schemars(description = "The UUID of the feature to update")]
-    pub feature_id: String,
+    pub feature_id: Uuid,
     #[schemars(
         description = "The new state: 'proposed', 'in_progress', 'implemented', or 'deprecated'"
     )]
@@ -185,7 +110,7 @@ pub struct CreateProjectRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct AddProjectDirectoryRequest {
     #[schemars(description = "The UUID of the project to add this directory to")]
-    pub project_id: String,
+    pub project_id: Uuid,
     #[schemars(description = "Absolute path to the directory (e.g., '/Users/me/projects/myapp')")]
     pub path: String,
     #[schemars(description = "Optional git remote URL (e.g., 'git@github.com:org/repo.git')")]
@@ -206,10 +131,10 @@ pub struct AddProjectDirectoryRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreateFeatureRequest {
     #[schemars(description = "The UUID of the project this feature belongs to")]
-    pub project_id: String,
+    pub project_id: Uuid,
     #[schemars(description = "Optional parent feature UUID for hierarchical features")]
     #[serde(default)]
-    pub parent_id: Option<String>,
+    pub parent_id: Option<Uuid>,
     #[schemars(description = "Short title for the feature (e.g., 'User Authentication')")]
     pub title: String,
     #[schemars(
@@ -236,7 +161,7 @@ fn default_proposed() -> String {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PlanFeaturesRequest {
     #[schemars(description = "The UUID of the project to plan features for")]
-    pub project_id: String,
+    pub project_id: Uuid,
     #[schemars(
         description = "The proposed feature tree. Apply the user story test before proposing: 'As a [user], I can [feature]...'"
     )]
@@ -253,27 +178,8 @@ pub struct PlanFeaturesRequest {
 // ============================================================
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct TaskContextResponse {
-    /// The task you are assigned to complete
-    pub task: TaskInfo,
-    /// The feature this task implements
-    pub feature: FeatureInfo,
-    /// The session goal describing the overall objective
-    pub session_goal: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct TaskInfo {
-    pub id: String,
-    pub title: String,
-    pub scope: String,
-    pub status: String,
-    pub agent_type: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FeatureInfo {
-    pub id: String,
+    pub id: Uuid,
     pub title: String,
     /// Feature details including user stories, implementation notes, and technical context.
     pub details: Option<String>,
@@ -285,53 +191,22 @@ pub struct FeatureInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SessionInfo {
-    pub id: String,
-    pub feature_id: String,
-    pub goal: String,
-    pub status: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct TaskListResponse {
-    pub session_id: String,
-    pub tasks: Vec<TaskInfo>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct FeatureSessionResponse {
-    pub feature_id: String,
-    /// The active session for this feature, or null if no active session exists
-    pub session: Option<SessionInfo>,
-    /// Message explaining the result
-    pub message: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct CompleteSessionResponse {
-    pub session_id: String,
-    pub feature_id: String,
-    pub feature_state: String,
-    pub history_entry_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FeatureListResponse {
     pub features: Vec<FeatureInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FeatureHistoryResponse {
-    pub feature_id: String,
+    pub feature_id: Uuid,
     pub entries: Vec<HistoryEntryInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct HistoryEntryInfo {
-    pub id: String,
+    pub id: Uuid,
     /// The version this work was done for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version_id: Option<String>,
+    pub version_id: Option<Uuid>,
     /// Version name for display.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version_name: Option<String>,
@@ -348,14 +223,13 @@ pub struct CommitInfo {
 }
 
 /// Lightweight feature summary without details (used for MCP list operations).
-/// Uses string IDs to match MCP convention.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FeatureSummaryInfo {
-    pub id: String,
+    pub id: Uuid,
     pub title: String,
     pub state: String,
     pub priority: i32,
-    pub parent_id: Option<String>,
+    pub parent_id: Option<Uuid>,
 }
 
 /// Response for list_features in summary mode (default).
@@ -367,7 +241,7 @@ pub struct FeatureListSummaryResponse {
 /// Lightweight feature summary for context (parent, siblings, children).
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FeatureSummaryContextInfo {
-    pub id: String,
+    pub id: Uuid,
     pub title: String,
     pub state: String,
 }
@@ -375,7 +249,7 @@ pub struct FeatureSummaryContextInfo {
 /// Breadcrumb item for navigation path (root → feature).
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BreadcrumbItemInfo {
-    pub id: String,
+    pub id: Uuid,
     pub title: String,
 }
 
@@ -384,7 +258,7 @@ pub struct BreadcrumbItemInfo {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FeatureInfoWithContext {
     /// The feature itself with all details.
-    pub id: String,
+    pub id: Uuid,
     pub title: String,
     /// Feature details including user stories, implementation notes, and technical context.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -414,7 +288,7 @@ pub struct ProjectContextResponse {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ProjectInfo {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
     /// Project-wide instructions for AI agents (coding guidelines, conventions).
@@ -423,7 +297,7 @@ pub struct ProjectInfo {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DirectoryInfo {
-    pub id: String,
+    pub id: Uuid,
     pub path: String,
     pub git_remote: Option<String>,
     pub is_primary: bool,
@@ -439,7 +313,7 @@ pub struct PlanFeaturesResponse {
     pub created: bool,
     /// IDs of created features (only populated if created=true)
     #[serde(default)]
-    pub created_feature_ids: Vec<String>,
+    pub created_feature_ids: Vec<Uuid>,
 }
 
 // ============================================================
@@ -451,15 +325,15 @@ pub struct VersionListResponse {
     pub versions: Vec<VersionInfo>,
     /// ID of the first unreleased version (current focus)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub now: Option<String>,
+    pub now: Option<Uuid>,
     /// ID of the second unreleased version (queued up)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub next: Option<String>,
+    pub next: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VersionInfo {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -486,52 +360,6 @@ pub struct ProposedFeature {
     pub children: Vec<ProposedFeature>,
 }
 
-// ============================================================
-// Breakdown Feature (Session + Tasks in one call)
-// ============================================================
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct BreakdownFeatureRequest {
-    #[schemars(description = "The UUID of the feature to break down into tasks")]
-    pub feature_id: String,
-    #[schemars(
-        description = "The session goal - what will be accomplished when all tasks are complete"
-    )]
-    pub goal: String,
-    #[schemars(
-        description = "The tasks to create. Each task should be completable by one agent (1-3 story points)."
-    )]
-    pub tasks: Vec<TaskInputItem>,
-}
-
-/// A task to create as part of feature breakdown.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct TaskInputItem {
-    #[schemars(description = "Short title describing what this task accomplishes (2-5 words)")]
-    pub title: String,
-    #[schemars(
-        description = "Detailed scope of work - be specific about what to implement, test, or verify"
-    )]
-    pub scope: String,
-    #[schemars(
-        description = "Which agent type should handle this task: 'claude', 'gemini', or 'codex'. Defaults to 'claude'."
-    )]
-    #[serde(default = "default_claude")]
-    pub agent_type: String,
-}
-
-fn default_claude() -> String {
-    "claude".to_string()
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct BreakdownFeatureResponse {
-    /// The created session
-    pub session: SessionInfo,
-    /// The created tasks, ready for agent assignment
-    pub tasks: Vec<TaskInfo>,
-}
-
 fn default_max_depth() -> u32 {
     3
 }
@@ -539,7 +367,7 @@ fn default_max_depth() -> u32 {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RenderFeatureTreeRequest {
     #[schemars(description = "The UUID of the project to render the feature tree for")]
-    pub project_id: String,
+    pub project_id: Uuid,
     #[schemars(
         description = "Maximum depth of the tree to render. Default is 3. Use 0 for unlimited depth."
     )]
@@ -550,11 +378,11 @@ pub struct RenderFeatureTreeRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetNextFeatureRequest {
     #[schemars(description = "The UUID of the project to get the next feature for")]
-    pub project_id: String,
+    pub project_id: Uuid,
     #[schemars(
         description = "Optional version ID to filter features. If not provided, prioritizes the 'now' version (first unreleased)."
     )]
-    pub version_id: Option<String>,
+    pub version_id: Option<Uuid>,
 }
 
 // ============================================================
@@ -564,13 +392,13 @@ pub struct GetNextFeatureRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListVersionsRequest {
     #[schemars(description = "The UUID of the project to list versions for")]
-    pub project_id: String,
+    pub project_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreateVersionRequest {
     #[schemars(description = "The UUID of the project")]
-    pub project_id: String,
+    pub project_id: Uuid,
     #[schemars(description = "Version name (e.g., 'v0.2', '2024.1', 'MVP')")]
     pub name: String,
     #[schemars(description = "Optional description of what this version includes")]
@@ -581,23 +409,32 @@ pub struct CreateVersionRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SetFeatureVersionRequest {
     #[schemars(description = "The UUID of the feature to update")]
-    pub feature_id: String,
+    pub feature_id: Uuid,
     #[schemars(description = "The UUID of the target version, or null to unassign")]
-    pub version_id: Option<String>,
+    pub version_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReleaseVersionRequest {
     #[schemars(description = "The UUID of the version to release")]
-    pub version_id: String,
+    pub version_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct ListProjectsRequest {}
+pub struct ListProjectsRequest {
+    #[schemars(
+        description = "Optional directory path to filter by. If provided, returns only the project containing this directory. If the directory is not linked to any project, returns an empty list with a hint to use init_project."
+    )]
+    #[serde(default)]
+    pub directory_path: Option<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ProjectListResponse {
     pub projects: Vec<ProjectInfo>,
+    /// Hint message when directory_path filter finds no project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -620,26 +457,6 @@ pub struct InitProjectRequest {
 // ============================================================
 // Project Analysis (for AI feature planning)
 // ============================================================
-
-fn default_depth() -> u32 {
-    3
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct AnalyzeProjectRequest {
-    #[schemars(description = "Absolute path to the directory to analyze")]
-    pub directory_path: String,
-
-    #[schemars(
-        description = "Include documentation content (README, CLAUDE.md). Defaults to true."
-    )]
-    #[serde(default = "default_true")]
-    pub include_docs: bool,
-
-    #[schemars(description = "Maximum directory depth to scan. Defaults to 3.")]
-    #[serde(default = "default_depth")]
-    pub max_depth: u32,
-}
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ProjectAnalysis {
@@ -707,4 +524,57 @@ pub struct FeatureHint {
     pub reason: String,
     /// Related paths in the project
     pub paths: Vec<String>,
+}
+
+// ============================================================
+// Type Conversions (models → MCP types)
+// ============================================================
+
+impl From<&Feature> for FeatureInfo {
+    fn from(f: &Feature) -> Self {
+        Self {
+            id: f.id,
+            title: f.title.clone(),
+            details: f.details.clone(),
+            desired_details: f.desired_details.clone(),
+            state: f.state.as_str().to_string(),
+            priority: f.priority,
+        }
+    }
+}
+
+impl From<&FeatureSummaryContext> for FeatureSummaryContextInfo {
+    fn from(f: &FeatureSummaryContext) -> Self {
+        Self {
+            id: f.id,
+            title: f.title.clone(),
+            state: f.state.as_str().to_string(),
+        }
+    }
+}
+
+impl From<&BreadcrumbItem> for BreadcrumbItemInfo {
+    fn from(b: &BreadcrumbItem) -> Self {
+        Self {
+            id: b.id,
+            title: b.title.clone(),
+        }
+    }
+}
+
+impl From<&FeatureWithContext> for FeatureInfoWithContext {
+    fn from(ctx: &FeatureWithContext) -> Self {
+        Self {
+            id: ctx.feature.id,
+            title: ctx.feature.title.clone(),
+            details: ctx.feature.details.clone(),
+            desired_details: ctx.feature.desired_details.clone(),
+            state: ctx.feature.state.as_str().to_string(),
+            priority: ctx.feature.priority,
+            parent: ctx.parent.as_ref().map(Into::into),
+            siblings: ctx.siblings.iter().map(Into::into).collect(),
+            children: ctx.children.iter().map(Into::into).collect(),
+            breadcrumb: ctx.breadcrumb.iter().map(Into::into).collect(),
+        }
+    }
 }
