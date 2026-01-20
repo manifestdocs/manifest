@@ -44,7 +44,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "List projects. If directory_path is provided, returns only the project containing that directory. Otherwise returns all projects."
+        description = "ORIENT: List projects. If directory_path is provided, finds the project containing that directory (useful for auto-discovery). Otherwise lists all projects."
     )]
     async fn list_projects(
         &self,
@@ -54,7 +54,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "List features, optionally filtered by project, state, or search query. Returns summaries only (id, title, state, priority, parent_id). Use get_feature for full details."
+        description = "ORIENT: List features, optionally filtered by project, state, or search query. Returns summaries only. Use get_feature for full details."
     )]
     async fn list_features(
         &self,
@@ -64,7 +64,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Get detailed information about a specific feature by ID. Returns the feature's title, details, and current state. Optionally includes implementation history. Use this to understand what needs to be built before starting work."
+        description = "ORIENT/BUILD: Get detailed feature spec. Returns title, description, acceptance criteria, and state. Set include_history=true to see implementation history. READ THIS before starting work."
     )]
     async fn get_feature(
         &self,
@@ -74,7 +74,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Render a project's feature tree as ASCII art with status symbols. Returns a visual tree showing feature hierarchy and states (◇ proposed, ○ in_progress, ● implemented, ✗ deprecated)."
+        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (◇ proposed, ○ in_progress, ● implemented)."
     )]
     async fn render_feature_tree(
         &self,
@@ -88,7 +88,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "Initialize a project from a directory. Analyzes the codebase, creates a new project (or links to existing by name/ID), and returns project info with analysis results for use with plan_features."
+        description = "SETUP: Initialize a project from a directory. Analyzes codebase, creates project (or links to existing), and returns analysis. Use this before `plan`."
     )]
     async fn init_project(
         &self,
@@ -98,7 +98,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Associate an additional directory with an existing project. Use this for monorepos where multiple directories belong to the same project. The first directory should be added via init_project."
+        description = "SETUP: Associate an additional directory with an existing project. Use this for monorepos. First directory should be added via `init_project`."
     )]
     async fn add_project_directory(
         &self,
@@ -108,7 +108,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Turn a PRD, spec, or product vision into a feature tree. Apply the user story test: 'As a [user], I can [feature]...' With confirm=false (default), returns proposal for review. With confirm=true, creates all features."
+        description = "SETUP: Decompose a PRD or vision into a feature tree. With confirm=false, returns a proposal. With confirm=true, creates the features."
     )]
     async fn plan(
         &self,
@@ -118,7 +118,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Create a feature (system capability) within a project. Name by capability, not by task - e.g., 'Router' not 'Implement Routing'. Use parent_id for domain grouping. Use priority field for sequencing."
+        description = "SETUP: Create a single feature. Name by capability (e.g., 'Router') not task. Use parent_id for grouping. Use `plan` for bulk creation."
     )]
     async fn create_feature(
         &self,
@@ -132,7 +132,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "Signal that you are starting work on a feature. Sets state to 'in_progress' if currently 'proposed'. Returns the feature details so you know what to implement."
+        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement."
     )]
     async fn start_feature(
         &self,
@@ -142,7 +142,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Complete work on a feature. Creates a history entry with your summary and commits, then marks the feature as 'implemented'. Call this when work is done and verified."
+        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Call this only after verification."
     )]
     async fn complete_feature(
         &self,
@@ -152,7 +152,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Get the next workable feature for a project. Returns the single highest-priority feature that is proposed or in_progress. Prioritizes features targeting the 'now' version (first unreleased), then backlog features. Returns null if no workable features exist."
+        description = "ORIENT: Get the next workable feature. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'now' version. Use this to find what to work on."
     )]
     async fn get_next_feature(
         &self,
@@ -166,7 +166,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "List versions for a project. Returns versions with feature counts, plus 'now' (current focus) and 'next' (upcoming) indicators."
+        description = "ORIENT: List versions. Returns release milestones with status indicators: 'now' (current focus), 'next' (upcoming), and 'later'."
     )]
     async fn list_versions(
         &self,
@@ -176,7 +176,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Create a new version for release planning. Use this to define milestones like 'v0.2', 'MVP', or '2024.1'."
+        description = "PLAN: Create a release milestone (e.g., 'v0.2', 'MVP'). Defines the target for a group of features."
     )]
     async fn create_version(
         &self,
@@ -186,7 +186,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Assign a feature to a target version for release planning. Use this to express 'put this feature in v0.2'. Pass null for version_id to unassign."
+        description = "PLAN: Assign a feature to a release version. Use this to schedule features for specific milestones. Pass null to unassign."
     )]
     async fn set_feature_version(
         &self,
@@ -196,7 +196,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Mark a version as released. Sets released_at to now. Use this when you ship a version."
+        description = "DOCUMENT: Mark a version as shipped. Sets released_at timestamp. Use this when a milestone is complete and deployed."
     )]
     async fn release_version(
         &self,
