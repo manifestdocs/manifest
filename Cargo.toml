@@ -41,7 +41,7 @@ clap = { version = "4", features = ["derive"] }
 
 # MCP Server
 rmcp = { version = "0.13", features = ["server", "transport-streamable-http-server"] }
-schemars = "1"
+schemars = { version = "1", features = ["uuid1"] }
 
 # Logging
 tracing = "0.1"
