@@ -1,6 +1,14 @@
 # Rust build artifacts
 /target/
+**/target/
 Cargo.lock
+
+# Distribution builds
+/dist/
+
+# Design artifacts (keep .md files)
+/design/*
+!/design/*.md
 
 # IDE
 .idea/
