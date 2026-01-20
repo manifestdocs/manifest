@@ -1,8 +1,8 @@
 //! CLI mode MCP server - simplified tools for single-agent CLI workflows.
 //!
-//! This mode exposes 17 tools optimized for CLI agents like Claude Code:
+//! This mode exposes 15 tools optimized for CLI agents like Claude Code:
 //! - Discovery: get_project_context, list_features, search_features, get_feature, get_feature_history, render_feature_tree
-//! - Setup: analyze_project, create_project, add_project_directory, create_feature, plan_features
+//! - Setup: init_project, add_project_directory, create_feature, plan_features
 //! - Work: start_feature, complete_feature
 //! - Versions: list_versions, create_version, set_feature_version, release_version
 
@@ -97,6 +97,37 @@ impl CliMcpServer {
     // ============================================================
     // Discovery Tools
     // ============================================================
+
+    #[tool(
+        description = "List all projects. Returns project summaries including name, description, and instructions."
+    )]
+    async fn list_projects(
+        &self,
+        _params: Parameters<ListProjectsRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let projects = self
+            .client
+            .list_projects()
+            .await
+            .map_err(Self::client_err)?;
+
+        let result = ProjectListResponse {
+            projects: projects
+                .into_iter()
+                .map(|p| ProjectInfo {
+                    id: p.id.to_string(),
+                    name: p.name,
+                    description: p.description,
+                    instructions: p.instructions,
+                })
+                .collect(),
+        };
+
+        let json = serde_json::to_string_pretty(&result)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
 
     #[tool(
         description = "Get project context for a directory path. Given a directory (e.g., your current working directory), returns the associated project with its instructions and coding guidelines. Use this to understand project conventions before starting work."
@@ -293,52 +324,107 @@ impl CliMcpServer {
     // ============================================================
 
     #[tool(
-        description = "Analyze a codebase directory to discover project structure and suggest features. Returns detected language, frameworks, modules, and documentation. Use before plan_features to understand what capabilities exist."
+        description = "Initialize a project from a directory. Either creates a new project (analyzing the codebase to derive name and structure) or links to an existing project by name/ID. Returns project info and analysis results for use with plan_features."
     )]
-    async fn analyze_project(
+    async fn init_project(
         &self,
-        params: Parameters<AnalyzeProjectRequest>,
+        params: Parameters<InitProjectRequest>,
     ) -> Result<CallToolResult, McpError> {
         let req = params.0;
 
-        let result = self
+        // Always analyze the directory first
+        let analysis = self
             .client
-            .analyze_project(&req.directory_path, req.include_docs, req.max_depth)
+            .analyze_project(&req.directory_path, req.include_docs, 3)
             .await
             .map_err(Self::client_err)?;
 
-        let json = serde_json::to_string_pretty(&result)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let project = if let Some(ref project_ref) = req.project {
+            // Try to find existing project by ID or name
+            let projects = self
+                .client
+                .list_projects()
+                .await
+                .map_err(Self::client_err)?;
 
-        Ok(CallToolResult::success(vec![Content::text(json)]))
-    }
+            // Try as UUID first
+            let found = if let Ok(uuid) = Uuid::from_str(project_ref) {
+                projects.iter().find(|p| p.id == uuid).cloned()
+            } else {
+                // Try exact name match
+                projects.iter().find(|p| p.name == *project_ref).cloned()
+            };
 
-    #[tool(
-        description = "Create a new project. Projects are containers for features and can have multiple directories (e.g., monorepo subdirectories). Use this when starting work on a new codebase. After creating, use add_project_directory to associate directories."
-    )]
-    async fn create_project(
-        &self,
-        params: Parameters<CreateProjectRequest>,
-    ) -> Result<CallToolResult, McpError> {
-        let req = params.0;
+            match found {
+                Some(p) => p,
+                None => {
+                    // Return helpful error with existing project names
+                    let existing: Vec<String> = projects.iter().map(|p| p.name.clone()).collect();
+                    let msg = if existing.is_empty() {
+                        format!("No project '{}' found. No projects exist yet.", project_ref)
+                    } else {
+                        format!(
+                            "No project '{}' found. Existing projects: {}",
+                            project_ref,
+                            existing.join(", ")
+                        )
+                    };
+                    return Err(McpError::invalid_params(msg, None));
+                }
+            }
+        } else {
+            // Create new project from analysis
+            let name = analysis.name.clone().unwrap_or_else(|| {
+                // Derive from directory name
+                std::path::Path::new(&req.directory_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Untitled")
+                    .to_string()
+            });
 
-        let project = self
-            .client
-            .create_project(&CreateProjectInput {
-                name: req.name,
-                description: req.description,
-                instructions: req.instructions,
-            })
-            .await
-            .map_err(Self::client_err)?;
-
-        let result = ProjectInfo {
-            id: project.id.to_string(),
-            name: project.name,
-            description: project.description,
-            instructions: project.instructions,
+            self.client
+                .create_project(&CreateProjectInput {
+                    name,
+                    description: analysis.description.clone(),
+                    instructions: None,
+                })
+                .await
+                .map_err(Self::client_err)?
         };
 
+        // Add directory to project
+        let directory = self
+            .client
+            .add_project_directory(
+                project.id,
+                &AddDirectoryInput {
+                    path: req.directory_path.clone(),
+                    git_remote: analysis.git_remote.clone(),
+                    is_primary: true,
+                    instructions: None,
+                },
+            )
+            .await
+            .map_err(Self::client_err)?;
+
+        // Build response with project info and analysis
+        let result = serde_json::json!({
+            "project": {
+                "id": project.id.to_string(),
+                "name": project.name,
+                "description": project.description,
+                "instructions": project.instructions,
+            },
+            "directory": {
+                "id": directory.id.to_string(),
+                "path": directory.path,
+                "git_remote": directory.git_remote,
+                "is_primary": directory.is_primary,
+            },
+            "analysis": analysis,
+        });
+
         let json = serde_json::to_string_pretty(&result)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
@@ -346,7 +432,7 @@ impl CliMcpServer {
     }
 
     #[tool(
-        description = "Associate a directory with a project. This enables get_project_context to find the project when given a directory path. Use after create_project. Mark one directory as is_primary=true for the main project location."
+        description = "Associate an additional directory with an existing project. Use this for monorepos where multiple directories belong to the same project. The first directory should be added via init_project."
     )]
     async fn add_project_directory(
         &self,

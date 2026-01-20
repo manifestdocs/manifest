@@ -673,6 +673,17 @@ pub async fn analyze_project(
 ) -> Result<Json<ProjectAnalysis>, (StatusCode, String)> {
     let root = StdPath::new(&query.path);
 
+    // Validate path is absolute (security requirement)
+    if !root.is_absolute() {
+        return Err((StatusCode::BAD_REQUEST, "Path must be absolute".to_string()));
+    }
+
+    // Validate path against security restrictions
+    let restrictions = super::config::PathRestrictions::from_env();
+    if let Err(e) = restrictions.validate(root) {
+        return Err((StatusCode::FORBIDDEN, format!("Access denied: {}", e)));
+    }
+
     // Validate directory exists
     if !root.exists() {
         return Err((

@@ -1,16 +1,70 @@
+pub mod auth;
+pub mod authz;
+pub mod config;
 mod handlers;
 mod middleware;
+pub mod validation;
 
 use axum::{
+    http::{header::HeaderName, HeaderValue},
     routing::{delete, get, post, put},
     Router,
 };
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower::ServiceBuilder;
+use tower_http::{cors::CorsLayer, set_header::SetResponseHeaderLayer, trace::TraceLayer};
 
 use crate::db::Database;
 use crate::mcp;
 
+pub use auth::{AuthContext, AuthError, AuthMethod, JwtService, TokenPair};
+pub use authz::{AuthzError, AuthzService, Permission, Role};
+pub use config::{ConfigError, DeploymentMode, JwtConfig, OAuthConfig, SessionConfig};
 pub use middleware::SecurityConfig;
+
+/// Security headers for all responses.
+fn security_headers_layer() -> ServiceBuilder<
+    tower::layer::util::Stack<
+        SetResponseHeaderLayer<HeaderValue>,
+        tower::layer::util::Stack<
+            SetResponseHeaderLayer<HeaderValue>,
+            tower::layer::util::Stack<
+                SetResponseHeaderLayer<HeaderValue>,
+                tower::layer::util::Stack<
+                    SetResponseHeaderLayer<HeaderValue>,
+                    tower::layer::util::Identity,
+                >,
+            >,
+        >,
+    >,
+> {
+    // Security headers per OWASP recommendations
+    let x_frame_options = HeaderName::from_static("x-frame-options");
+    let x_content_type_options = HeaderName::from_static("x-content-type-options");
+    let referrer_policy = HeaderName::from_static("referrer-policy");
+    let x_xss_protection = HeaderName::from_static("x-xss-protection");
+
+    ServiceBuilder::new()
+        // Prevent clickjacking
+        .layer(SetResponseHeaderLayer::overriding(
+            x_frame_options,
+            HeaderValue::from_static("DENY"),
+        ))
+        // Prevent MIME type sniffing
+        .layer(SetResponseHeaderLayer::overriding(
+            x_content_type_options,
+            HeaderValue::from_static("nosniff"),
+        ))
+        // Control referrer information
+        .layer(SetResponseHeaderLayer::overriding(
+            referrer_policy,
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ))
+        // Legacy XSS protection (for older browsers)
+        .layer(SetResponseHeaderLayer::overriding(
+            x_xss_protection,
+            HeaderValue::from_static("1; mode=block"),
+        ))
+}
 
 /// Build CORS layer based on configuration
 fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
@@ -156,4 +210,5 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         .nest("/mcp", mcp_router)
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
+        .layer(security_headers_layer())
 }

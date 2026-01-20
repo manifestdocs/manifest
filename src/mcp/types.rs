@@ -592,6 +592,31 @@ pub struct ReleaseVersionRequest {
     pub version_id: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListProjectsRequest {}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ProjectListResponse {
+    pub projects: Vec<ProjectInfo>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct InitProjectRequest {
+    #[schemars(
+        description = "Absolute path to the directory to initialize as a project. This will be analyzed and associated with the project."
+    )]
+    pub directory_path: String,
+    #[schemars(
+        description = "Optional: existing project name or UUID to link this directory to. If not provided, a new project is created with a name derived from the directory analysis."
+    )]
+    pub project: Option<String>,
+    #[schemars(
+        description = "Include documentation content (README, CLAUDE.md). Defaults to true."
+    )]
+    #[serde(default = "default_true")]
+    pub include_docs: bool,
+}
+
 // ============================================================
 // Project Analysis (for AI feature planning)
 // ============================================================

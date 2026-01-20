@@ -232,6 +232,7 @@ mod protocol {
             .collect();
 
         // Discovery tools
+        assert!(tool_names.contains(&"list_projects"));
         assert!(tool_names.contains(&"get_project_context"));
         assert!(tool_names.contains(&"list_features"));
         assert!(tool_names.contains(&"search_features"));
@@ -240,8 +241,7 @@ mod protocol {
         assert!(tool_names.contains(&"render_feature_tree"));
         assert!(tool_names.contains(&"get_next_feature"));
         // Setup tools
-        assert!(tool_names.contains(&"analyze_project"));
-        assert!(tool_names.contains(&"create_project"));
+        assert!(tool_names.contains(&"init_project"));
         assert!(tool_names.contains(&"add_project_directory"));
         assert!(tool_names.contains(&"create_feature"));
         assert!(tool_names.contains(&"plan_features"));
@@ -267,11 +267,11 @@ mod protocol {
         let tools = result.get("tools").expect("Expected tools array");
         let tools_array = tools.as_array().expect("Tools should be array");
 
-        // IDE mode has 12 tools (simplified from original 21)
+        // IDE mode has 13 tools
         assert_eq!(
             tools_array.len(),
-            12,
-            "Expected 12 IDE tools, got {}",
+            13,
+            "Expected 13 IDE tools, got {}",
             tools_array.len()
         );
 
@@ -282,6 +282,7 @@ mod protocol {
             .collect();
 
         // Discovery tools
+        assert!(tool_names.contains(&"list_projects"));
         assert!(tool_names.contains(&"list_features"));
         assert!(tool_names.contains(&"search_features"));
         assert!(tool_names.contains(&"get_feature"));
@@ -291,7 +292,7 @@ mod protocol {
         assert!(tool_names.contains(&"get_active_feature"));
         assert!(tool_names.contains(&"update_feature_state"));
         // Setup tools
-        assert!(tool_names.contains(&"create_project"));
+        assert!(tool_names.contains(&"init_project"));
         assert!(tool_names.contains(&"add_project_directory"));
         assert!(tool_names.contains(&"create_feature"));
         assert!(tool_names.contains(&"plan_features"));
@@ -339,16 +340,18 @@ mod tool_calls {
 
     #[test]
     #[ignore = "Requires HTTP server at localhost:17010"]
-    fn create_project_succeeds() {
+    fn init_project_succeeds() {
         let mut client = McpTestClient::spawn();
         client.initialize();
 
+        // Use a temp directory for init_project
+        let temp_dir = std::env::temp_dir().join("manifest-test-project");
+        std::fs::create_dir_all(&temp_dir).ok();
+
         let response = client.call_tool(
-            "create_project",
+            "init_project",
             json!({
-                "name": "Test Project",
-                "description": "A test project",
-                "instructions": "Follow TDD"
+                "directory_path": temp_dir.to_string_lossy()
             }),
         );
 
@@ -364,12 +367,10 @@ mod tool_calls {
             .and_then(|t| t.as_str())
             .expect("Expected text content");
 
-        let project: Value = serde_json::from_str(text).expect("Expected JSON in text");
-        assert_eq!(
-            project.get("name").and_then(|n| n.as_str()),
-            Some("Test Project")
-        );
+        let response: Value = serde_json::from_str(text).expect("Expected JSON in text");
+        let project = response.get("project").expect("Expected project");
         assert!(project.get("id").is_some());
+        assert!(project.get("name").is_some());
     }
 
     #[test]
@@ -378,12 +379,16 @@ mod tool_calls {
         let mut client = McpTestClient::spawn();
         client.initialize();
 
-        // Create project first
-        let project_response =
-            client.call_tool("create_project", json!({ "name": "Feature Test Project" }));
+        // Create project first via init_project
+        let temp_dir = std::env::temp_dir().join("manifest-feature-test");
+        std::fs::create_dir_all(&temp_dir).ok();
+        let project_response = client.call_tool(
+            "init_project",
+            json!({ "directory_path": temp_dir.to_string_lossy() }),
+        );
         let project_text = extract_text_content(&project_response);
-        let project: Value = serde_json::from_str(&project_text).unwrap();
-        let project_id = project.get("id").and_then(|id| id.as_str()).unwrap();
+        let response: Value = serde_json::from_str(&project_text).unwrap();
+        let project_id = response["project"]["id"].as_str().unwrap();
 
         // Create feature
         let feature_response = client.call_tool(
@@ -420,12 +425,15 @@ mod tool_calls {
         let mut client = McpTestClient::spawn_ide_mode(); // Session tools require IDE mode
         client.initialize();
 
-        // Setup: create project and feature
-        let project_text = extract_text_content(
-            &client.call_tool("create_project", json!({ "name": "Workflow Test" })),
-        );
-        let project: Value = serde_json::from_str(&project_text).unwrap();
-        let project_id = project["id"].as_str().unwrap();
+        // Setup: create project and feature via init_project
+        let temp_dir = std::env::temp_dir().join("manifest-workflow-test");
+        std::fs::create_dir_all(&temp_dir).ok();
+        let project_text = extract_text_content(&client.call_tool(
+            "init_project",
+            json!({ "directory_path": temp_dir.to_string_lossy() }),
+        ));
+        let response: Value = serde_json::from_str(&project_text).unwrap();
+        let project_id = response["project"]["id"].as_str().unwrap();
 
         let feature_text = extract_text_content(&client.call_tool(
             "create_feature",
@@ -510,40 +518,41 @@ mod tool_calls {
         let mut client = McpTestClient::spawn();
         client.initialize();
 
-        // Create project
-        let project_text = extract_text_content(&client.call_tool(
-            "create_project",
-            json!({
-                "name": "Directory Test",
-                "instructions": "Use TDD"
-            }),
-        ));
-        let project: Value = serde_json::from_str(&project_text).unwrap();
-        let project_id = project["id"].as_str().unwrap();
+        // Create project via init_project with first directory
+        let temp_dir1 = std::env::temp_dir().join("manifest-dir-test-1");
+        let temp_dir2 = std::env::temp_dir().join("manifest-dir-test-2");
+        std::fs::create_dir_all(&temp_dir1).ok();
+        std::fs::create_dir_all(&temp_dir2).ok();
 
-        // Add directory
+        let project_text = extract_text_content(&client.call_tool(
+            "init_project",
+            json!({ "directory_path": temp_dir1.to_string_lossy() }),
+        ));
+        let response: Value = serde_json::from_str(&project_text).unwrap();
+        let project_id = response["project"]["id"].as_str().unwrap();
+
+        // Add second directory
         let dir_response = client.call_tool(
             "add_project_directory",
             json!({
                 "project_id": project_id,
-                "path": "/Users/test/my-project",
-                "is_primary": true,
+                "path": temp_dir2.to_string_lossy(),
+                "is_primary": false,
                 "instructions": "cargo test"
             }),
         );
         assert!(dir_response.error.is_none());
 
-        // Get project context
+        // Get project context for second directory
         let context_text = extract_text_content(&client.call_tool(
             "get_project_context",
-            json!({ "directory_path": "/Users/test/my-project/src" }),
+            json!({ "directory_path": temp_dir2.to_string_lossy() }),
         ));
         let context: Value = serde_json::from_str(&context_text).unwrap();
-        assert_eq!(context["project"]["name"].as_str(), Some("Directory Test"));
-        assert_eq!(context["project"]["instructions"].as_str(), Some("Use TDD"));
+        assert!(context["project"]["id"].as_str().is_some());
         assert_eq!(
             context["directory"]["path"].as_str(),
-            Some("/Users/test/my-project")
+            Some(temp_dir2.to_string_lossy().as_ref())
         );
     }
 
@@ -733,8 +742,8 @@ mod errors {
         let mut client = McpTestClient::spawn();
         client.initialize();
 
-        // create_project requires 'name'
-        let response = client.call_tool("create_project", json!({}));
+        // init_project requires 'directory_path'
+        let response = client.call_tool("init_project", json!({}));
 
         assert!(
             response.error.is_some() || {

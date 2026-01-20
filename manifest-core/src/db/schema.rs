@@ -68,6 +68,21 @@ const MIGRATIONS: &[Migration] = &[
         name: "root_feature",
         sql: include_str!("migrations/012_root_feature.sql"),
     },
+    Migration {
+        version: "013",
+        name: "auth",
+        sql: include_str!("migrations/013_auth.sql"),
+    },
+    Migration {
+        version: "014",
+        name: "project_memberships",
+        sql: include_str!("migrations/014_project_memberships.sql"),
+    },
+    Migration {
+        version: "015",
+        name: "audit_log",
+        sql: include_str!("migrations/015_audit_log.sql"),
+    },
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
@@ -185,7 +200,8 @@ mod tests {
         assert_eq!(
             versions,
             vec![
-                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"
+                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012",
+                "013", "014", "015"
             ]
         );
     }
@@ -200,7 +216,8 @@ mod tests {
         assert_eq!(
             versions,
             vec![
-                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"
+                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012",
+                "013", "014", "015"
             ]
         );
     }
@@ -238,7 +255,8 @@ mod tests {
         assert_eq!(
             versions,
             vec![
-                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"
+                "001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012",
+                "013", "014", "015"
             ]
         );
     }

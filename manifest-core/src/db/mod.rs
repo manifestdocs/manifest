@@ -14,6 +14,21 @@ use uuid::Uuid;
 use crate::models::*;
 
 // ============================================================
+// Security Utilities
+// ============================================================
+
+/// Escape special characters in LIKE patterns to prevent SQL injection.
+///
+/// SQLite LIKE uses % and _ as wildcards. This function escapes them
+/// using \ as the escape character.
+fn escape_like_pattern(query: &str) -> String {
+    query
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+// ============================================================
 // Feature Events (for SSE)
 // ============================================================
 
@@ -1116,16 +1131,18 @@ impl Database {
 
         // Use LIKE for case-insensitive search
         // Ranking: title matches get higher priority than details matches
-        let search_pattern = format!("%{}%", query);
+        // Escape special LIKE characters to prevent injection
+        let escaped_query = escape_like_pattern(query);
+        let search_pattern = format!("%{}%", escaped_query);
         let limit_val = limit.unwrap_or(10) as i64;
 
         let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = match project_id {
             Some(pid) => (
                 "SELECT id, project_id, parent_id, title, state, priority, target_version_id
                  FROM features
-                 WHERE project_id = ?1 AND (title LIKE ?2 OR details LIKE ?2)
+                 WHERE project_id = ?1 AND (title LIKE ?2 ESCAPE '\\' OR details LIKE ?2 ESCAPE '\\')
                  ORDER BY
-                     CASE WHEN title LIKE ?2 THEN 0 ELSE 1 END,
+                     CASE WHEN title LIKE ?2 ESCAPE '\\' THEN 0 ELSE 1 END,
                      priority,
                      title
                  LIMIT ?3"
@@ -1139,9 +1156,9 @@ impl Database {
             None => (
                 "SELECT id, project_id, parent_id, title, state, priority, target_version_id
                  FROM features
-                 WHERE title LIKE ?1 OR details LIKE ?1
+                 WHERE title LIKE ?1 ESCAPE '\\' OR details LIKE ?1 ESCAPE '\\'
                  ORDER BY
-                     CASE WHEN title LIKE ?1 THEN 0 ELSE 1 END,
+                     CASE WHEN title LIKE ?1 ESCAPE '\\' THEN 0 ELSE 1 END,
                      priority,
                      title
                  LIMIT ?2"

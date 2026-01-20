@@ -13,6 +13,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use subtle::ConstantTimeEq;
 
 /// Security configuration loaded from environment variables.
 #[derive(Clone, Debug)]
@@ -173,7 +174,10 @@ pub async fn auth_middleware(
     match auth_header {
         Some(header) if header.starts_with("Bearer ") => {
             let token = &header[7..];
-            if token == expected_key {
+            // Use constant-time comparison to prevent timing attacks
+            let token_valid = token.len() == expected_key.len()
+                && token.as_bytes().ct_eq(expected_key.as_bytes()).into();
+            if token_valid {
                 Ok(next.run(request).await)
             } else {
                 tracing::warn!("Invalid API key provided");

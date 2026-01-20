@@ -337,6 +337,15 @@ impl ManifestClient {
         self.handle_response(response).await
     }
 
+    /// List all projects.
+    pub async fn list_projects(&self) -> Result<Vec<Project>, ClientError> {
+        let response = self
+            .request(reqwest::Method::GET, "/projects")
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+
     /// Create a project.
     pub async fn create_project(&self, input: &CreateProjectInput) -> Result<Project, ClientError> {
         let response = self
