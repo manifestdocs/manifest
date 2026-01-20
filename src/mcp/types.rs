@@ -364,6 +364,48 @@ pub struct FeatureListSummaryResponse {
     pub features: Vec<FeatureSummaryInfo>,
 }
 
+/// Lightweight feature summary for context (parent, siblings, children).
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct FeatureSummaryContextInfo {
+    pub id: String,
+    pub title: String,
+    pub state: String,
+}
+
+/// Breadcrumb item for navigation path (root → feature).
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct BreadcrumbItemInfo {
+    pub id: String,
+    pub title: String,
+}
+
+/// A feature with its hierarchical context (parent, siblings, children, breadcrumb).
+/// Used by get_feature MCP tool to provide navigation context.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct FeatureInfoWithContext {
+    /// The feature itself with all details.
+    pub id: String,
+    pub title: String,
+    /// Feature details including user stories, implementation notes, and technical context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
+    /// Desired details for pending changes. When non-null, indicates edits awaiting implementation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desired_details: Option<String>,
+    pub state: String,
+    /// Priority for ordering within parent. Lower values appear first.
+    pub priority: i32,
+    /// Parent feature (if not a root).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<FeatureSummaryContextInfo>,
+    /// Sibling features (same parent, excluding self).
+    pub siblings: Vec<FeatureSummaryContextInfo>,
+    /// Direct children of this feature.
+    pub children: Vec<FeatureSummaryContextInfo>,
+    /// Breadcrumb trail from root to this feature.
+    pub breadcrumb: Vec<BreadcrumbItemInfo>,
+}
+
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ProjectContextResponse {
     pub project: ProjectInfo,
@@ -490,10 +532,29 @@ pub struct BreakdownFeatureResponse {
     pub tasks: Vec<TaskInfo>,
 }
 
+fn default_max_depth() -> u32 {
+    3
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RenderFeatureTreeRequest {
     #[schemars(description = "The UUID of the project to render the feature tree for")]
     pub project_id: String,
+    #[schemars(
+        description = "Maximum depth of the tree to render. Default is 3. Use 0 for unlimited depth."
+    )]
+    #[serde(default = "default_max_depth")]
+    pub max_depth: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetNextFeatureRequest {
+    #[schemars(description = "The UUID of the project to get the next feature for")]
+    pub project_id: String,
+    #[schemars(
+        description = "Optional version ID to filter features. If not provided, prioritizes the 'now' version (first unreleased)."
+    )]
+    pub version_id: Option<String>,
 }
 
 // ============================================================

@@ -207,13 +207,13 @@ impl CliMcpServer {
         let req = params.0;
         let feature_id = Self::parse_uuid(&req.feature_id)?;
 
-        let feature = self
+        let feature_with_context = self
             .client
-            .get_feature(feature_id)
+            .get_feature_with_context(feature_id)
             .await
             .map_err(Self::client_err)?;
 
-        let result = ManifestClient::feature_to_info(&feature);
+        let result = ManifestClient::feature_with_context_to_info(&feature_with_context);
 
         let json = serde_json::to_string_pretty(&result)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -283,7 +283,7 @@ impl CliMcpServer {
             .await
             .map_err(Self::client_err)?;
 
-        let rendered = tree_render::render_tree(&tree);
+        let rendered = tree_render::render_tree_with_depth(&tree, req.max_depth);
 
         Ok(CallToolResult::success(vec![Content::text(rendered)]))
     }
@@ -549,6 +549,38 @@ impl CliMcpServer {
 
         let json = serde_json::to_string_pretty(&result)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Get the next workable feature for a project. Returns the single highest-priority feature that is proposed or in_progress. Prioritizes features targeting the 'now' version (first unreleased), then backlog features. Returns null if no workable features exist."
+    )]
+    async fn get_next_feature(
+        &self,
+        params: Parameters<GetNextFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = params.0;
+        let project_id = Self::parse_uuid(&req.project_id)?;
+        let version_id = match req.version_id {
+            Some(ref vid) => Some(Self::parse_uuid(vid)?),
+            None => None,
+        };
+
+        let result = self
+            .client
+            .get_next_feature(project_id, version_id)
+            .await
+            .map_err(Self::client_err)?;
+
+        let json = match result {
+            Some(feature_ctx) => {
+                let info = ManifestClient::feature_with_context_to_info(&feature_ctx);
+                serde_json::to_string_pretty(&info)
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            }
+            None => "null".to_string(),
+        };
 
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }

@@ -323,6 +323,41 @@ pub async fn get_feature_tree(
         .map_err(internal_error)
 }
 
+/// Query parameters for getting next workable feature.
+#[derive(Debug, Deserialize)]
+pub struct GetNextFeatureQuery {
+    /// Optional version ID to filter features.
+    pub version_id: Option<Uuid>,
+}
+
+/// Get the next workable feature for a project.
+///
+/// Returns the single highest-priority feature that is workable (proposed or in_progress).
+/// Sort order: version > priority > created_at
+/// - Features targeting "now" version (first unreleased) come first
+/// - Then features with no version (backlog)
+/// - Within each group: lower priority number wins
+/// - Same priority: oldest created wins
+pub async fn get_next_feature(
+    State(db): State<Database>,
+    Path(project_id): Path<Uuid>,
+    Query(query): Query<GetNextFeatureQuery>,
+) -> Result<Json<Option<crate::models::FeatureWithContext>>, (StatusCode, String)> {
+    // Get the next workable feature
+    let feature = db
+        .get_next_workable_feature(project_id, query.version_id)
+        .map_err(internal_error)?;
+
+    // If we found a feature, enrich it with context
+    match feature {
+        Some(f) => {
+            let feature_with_context = db.get_feature_with_context(f.id).map_err(internal_error)?;
+            Ok(Json(feature_with_context))
+        }
+        None => Ok(Json(None)),
+    }
+}
+
 pub async fn list_children(
     State(db): State<Database>,
     Path(parent_id): Path<Uuid>,
@@ -414,6 +449,20 @@ pub async fn get_feature(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Feature>, (StatusCode, String)> {
     db.get_feature(id)
+        .map_err(internal_error)?
+        .map(Json)
+        .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
+}
+
+/// Get a feature with hierarchical context (parent, siblings, children, breadcrumb).
+///
+/// This endpoint provides AI agents with navigation context to understand where
+/// a feature sits in the feature tree.
+pub async fn get_feature_with_context(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<crate::models::FeatureWithContext>, (StatusCode, String)> {
+    db.get_feature_with_context(id)
         .map_err(internal_error)?
         .map(Json)
         .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))

@@ -113,6 +113,32 @@ impl ManifestClient {
         self.handle_response(response).await
     }
 
+    /// Get a feature with hierarchical context (parent, siblings, children, breadcrumb).
+    pub async fn get_feature_with_context(
+        &self,
+        id: Uuid,
+    ) -> Result<FeatureWithContext, ClientError> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/features/{}/context", id))
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+
+    /// Get the next workable feature for a project.
+    pub async fn get_next_feature(
+        &self,
+        project_id: Uuid,
+        version_id: Option<Uuid>,
+    ) -> Result<Option<FeatureWithContext>, ClientError> {
+        let mut url = format!("/projects/{}/features/next", project_id);
+        if let Some(vid) = version_id {
+            url.push_str(&format!("?version_id={}", vid));
+        }
+        let response = self.request(reqwest::Method::GET, &url).send().await?;
+        self.handle_response(response).await
+    }
+
     /// Get history for a feature.
     pub async fn get_feature_history(&self, id: Uuid) -> Result<Vec<FeatureHistory>, ClientError> {
         let response = self
@@ -457,6 +483,54 @@ impl ManifestClient {
             desired_details: feature.desired_details.clone(),
             state: feature.state.as_str().to_string(),
             priority: feature.priority,
+        }
+    }
+
+    /// Convert FeatureWithContext to FeatureInfoWithContext for MCP response.
+    pub fn feature_with_context_to_info(
+        feature_ctx: &FeatureWithContext,
+    ) -> crate::mcp::FeatureInfoWithContext {
+        crate::mcp::FeatureInfoWithContext {
+            id: feature_ctx.feature.id.to_string(),
+            title: feature_ctx.feature.title.clone(),
+            details: feature_ctx.feature.details.clone(),
+            desired_details: feature_ctx.feature.desired_details.clone(),
+            state: feature_ctx.feature.state.as_str().to_string(),
+            priority: feature_ctx.feature.priority,
+            parent: feature_ctx
+                .parent
+                .as_ref()
+                .map(|p| crate::mcp::FeatureSummaryContextInfo {
+                    id: p.id.to_string(),
+                    title: p.title.clone(),
+                    state: p.state.as_str().to_string(),
+                }),
+            siblings: feature_ctx
+                .siblings
+                .iter()
+                .map(|s| crate::mcp::FeatureSummaryContextInfo {
+                    id: s.id.to_string(),
+                    title: s.title.clone(),
+                    state: s.state.as_str().to_string(),
+                })
+                .collect(),
+            children: feature_ctx
+                .children
+                .iter()
+                .map(|c| crate::mcp::FeatureSummaryContextInfo {
+                    id: c.id.to_string(),
+                    title: c.title.clone(),
+                    state: c.state.as_str().to_string(),
+                })
+                .collect(),
+            breadcrumb: feature_ctx
+                .breadcrumb
+                .iter()
+                .map(|b| crate::mcp::BreadcrumbItemInfo {
+                    id: b.id.to_string(),
+                    title: b.title.clone(),
+                })
+                .collect(),
         }
     }
 }

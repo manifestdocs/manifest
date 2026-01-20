@@ -100,6 +100,11 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
             "/directories/{id}",
             delete(handlers::remove_project_directory),
         )
+        // Next workable feature
+        .route(
+            "/projects/{id}/features/next",
+            get(handlers::get_next_feature),
+        )
         // Features (by feature id)
         .route("/features", get(handlers::list_features))
         .route("/features/search", get(handlers::search_features))
@@ -107,6 +112,10 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         .route("/features/{id}", put(handlers::update_feature))
         .route("/features/{id}", delete(handlers::delete_feature))
         .route("/features/{id}/children", get(handlers::list_children))
+        .route(
+            "/features/{id}/context",
+            get(handlers::get_feature_with_context),
+        )
         .route("/features/{id}/diff", get(handlers::get_feature_diff))
         .route(
             "/features/{id}/history",

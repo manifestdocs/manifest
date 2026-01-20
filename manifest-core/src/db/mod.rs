@@ -1391,6 +1391,213 @@ impl Database {
     // Data Migration
     // ============================================================
 
+    // ============================================================
+    // Feature Context (for enhanced MCP get_feature)
+    // ============================================================
+
+    /// Get a feature with its hierarchical context (parent, siblings, children, breadcrumb).
+    ///
+    /// This provides AI agents with navigation context to understand where a feature
+    /// sits in the feature tree.
+    pub fn get_feature_with_context(&self, id: Uuid) -> Result<Option<FeatureWithContext>> {
+        // Get the feature itself
+        let feature = match self.get_feature(id)? {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+
+        let conn = self.conn.lock().expect("database lock poisoned");
+
+        // Get parent (if exists)
+        let parent = if let Some(parent_id) = feature.parent_id {
+            let mut stmt = conn.prepare("SELECT id, title, state FROM features WHERE id = ?")?;
+            stmt.query_row([parent_id.to_string()], |row| {
+                Ok(FeatureSummaryContext {
+                    id: parse_uuid(row.get::<_, String>(0)?),
+                    title: row.get(1)?,
+                    state: FeatureState::from_str(&row.get::<_, String>(2)?)
+                        .unwrap_or(FeatureState::Proposed),
+                })
+            })
+            .ok()
+        } else {
+            None
+        };
+
+        // Get siblings (same parent, excluding self)
+        let siblings = if let Some(parent_id) = feature.parent_id {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, state FROM features
+                 WHERE parent_id = ? AND id != ?
+                 ORDER BY priority, title",
+            )?;
+            let result: Vec<FeatureSummaryContext> = stmt
+                .query_map([parent_id.to_string(), id.to_string()], |row| {
+                    Ok(FeatureSummaryContext {
+                        id: parse_uuid(row.get::<_, String>(0)?),
+                        title: row.get(1)?,
+                        state: FeatureState::from_str(&row.get::<_, String>(2)?)
+                            .unwrap_or(FeatureState::Proposed),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            result
+        } else {
+            // Root feature - siblings are other features with no parent in same project
+            let mut stmt = conn.prepare(
+                "SELECT id, title, state FROM features
+                 WHERE project_id = ? AND parent_id IS NULL AND id != ?
+                 ORDER BY priority, title",
+            )?;
+            let result: Vec<FeatureSummaryContext> = stmt
+                .query_map([feature.project_id.to_string(), id.to_string()], |row| {
+                    Ok(FeatureSummaryContext {
+                        id: parse_uuid(row.get::<_, String>(0)?),
+                        title: row.get(1)?,
+                        state: FeatureState::from_str(&row.get::<_, String>(2)?)
+                            .unwrap_or(FeatureState::Proposed),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            result
+        };
+
+        // Get children
+        let mut children_stmt = conn.prepare(
+            "SELECT id, title, state FROM features
+             WHERE parent_id = ?
+             ORDER BY priority, title",
+        )?;
+        let children = children_stmt
+            .query_map([id.to_string()], |row| {
+                Ok(FeatureSummaryContext {
+                    id: parse_uuid(row.get::<_, String>(0)?),
+                    title: row.get(1)?,
+                    state: FeatureState::from_str(&row.get::<_, String>(2)?)
+                        .unwrap_or(FeatureState::Proposed),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Get breadcrumb using recursive CTE
+        let mut breadcrumb_stmt = conn.prepare(
+            "WITH RECURSIVE ancestors AS (
+                SELECT id, parent_id, title, 0 as depth FROM features WHERE id = ?1
+                UNION ALL
+                SELECT f.id, f.parent_id, f.title, a.depth + 1
+                FROM features f
+                INNER JOIN ancestors a ON f.id = a.parent_id
+            )
+            SELECT id, title FROM ancestors ORDER BY depth DESC",
+        )?;
+        let breadcrumb = breadcrumb_stmt
+            .query_map([id.to_string()], |row| {
+                Ok(BreadcrumbItem {
+                    id: parse_uuid(row.get::<_, String>(0)?),
+                    title: row.get(1)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Some(FeatureWithContext {
+            feature,
+            parent,
+            siblings,
+            children,
+            breadcrumb,
+        }))
+    }
+
+    /// Get the next workable feature for a project.
+    ///
+    /// Returns the single highest-priority feature that is workable (proposed or in_progress).
+    /// Sort order: version > priority > created_at
+    /// - Features targeting "now" version (first unreleased) come first
+    /// - Then features with no version (backlog)
+    /// - Within each group: lower priority number wins
+    /// - Same priority: oldest created wins
+    pub fn get_next_workable_feature(
+        &self,
+        project_id: Uuid,
+        version_id: Option<Uuid>,
+    ) -> Result<Option<Feature>> {
+        let conn = self.conn.lock().expect("database lock poisoned");
+
+        // If version_id provided, filter to that version; otherwise use "now" version logic
+        let feature = if let Some(vid) = version_id {
+            let mut stmt = conn.prepare(
+                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                 FROM features
+                 WHERE project_id = ?1
+                   AND target_version_id = ?2
+                   AND state IN ('proposed', 'in_progress')
+                 ORDER BY priority ASC, created_at ASC
+                 LIMIT 1",
+            )?;
+            stmt.query_row([project_id.to_string(), vid.to_string()], |row| {
+                Ok(Feature {
+                    id: parse_uuid(row.get::<_, String>(0)?),
+                    project_id: parse_uuid(row.get::<_, String>(1)?),
+                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
+                    title: row.get(3)?,
+                    details: row.get(4)?,
+                    desired_details: row.get(5)?,
+                    state: FeatureState::from_str(&row.get::<_, String>(6)?)
+                        .unwrap_or(FeatureState::Proposed),
+                    priority: row.get(7)?,
+                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
+                    created_at: parse_datetime(row.get::<_, String>(9)?),
+                    updated_at: parse_datetime(row.get::<_, String>(10)?),
+                })
+            })
+            .ok()
+        } else {
+            // Find "now" version (first unreleased) and prioritize accordingly
+            let mut stmt = conn.prepare(
+                "WITH now_version AS (
+                    SELECT id FROM versions
+                    WHERE project_id = ?1 AND released_at IS NULL
+                    ORDER BY created_at ASC LIMIT 1
+                )
+                SELECT f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.state, f.priority, f.target_version_id, f.created_at, f.updated_at
+                FROM features f
+                LEFT JOIN now_version nv ON f.target_version_id = nv.id
+                WHERE f.project_id = ?1
+                  AND f.state IN ('proposed', 'in_progress')
+                ORDER BY
+                    CASE WHEN f.target_version_id IS NOT NULL AND f.target_version_id = (SELECT id FROM now_version) THEN 0
+                         WHEN f.target_version_id IS NULL THEN 1
+                         ELSE 2 END,
+                    f.priority ASC,
+                    f.created_at ASC
+                LIMIT 1",
+            )?;
+            stmt.query_row([project_id.to_string()], |row| {
+                Ok(Feature {
+                    id: parse_uuid(row.get::<_, String>(0)?),
+                    project_id: parse_uuid(row.get::<_, String>(1)?),
+                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
+                    title: row.get(3)?,
+                    details: row.get(4)?,
+                    desired_details: row.get(5)?,
+                    state: FeatureState::from_str(&row.get::<_, String>(6)?)
+                        .unwrap_or(FeatureState::Proposed),
+                    priority: row.get(7)?,
+                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
+                    created_at: parse_datetime(row.get::<_, String>(9)?),
+                    updated_at: parse_datetime(row.get::<_, String>(10)?),
+                })
+            })
+            .ok()
+        };
+
+        Ok(feature)
+    }
+
+    // ============================================================
+    // Data Migration
+    // ============================================================
+
     /// Migrate existing projects to use root features.
     ///
     /// For each project without a root_feature_id:

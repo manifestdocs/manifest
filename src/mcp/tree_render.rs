@@ -29,21 +29,34 @@ fn state_symbol(state: FeatureState) -> char {
 /// └── ✗ Legacy Basic Auth
 /// ```
 pub fn render_tree(nodes: &[FeatureTreeNode]) -> String {
+    render_tree_with_depth(nodes, 0)
+}
+
+/// Render a feature tree as ASCII art with status symbols, limited to a maximum depth.
+///
+/// # Arguments
+/// * `nodes` - The feature tree nodes to render
+/// * `max_depth` - Maximum depth to render. 0 means unlimited.
+///
+/// When children are truncated due to depth limit, shows `(...)` indicator.
+pub fn render_tree_with_depth(nodes: &[FeatureTreeNode], max_depth: u32) -> String {
     let mut output = String::new();
     for (i, node) in nodes.iter().enumerate() {
         let is_last = i == nodes.len() - 1;
-        render_node(&mut output, node, "", is_last, true);
+        render_node_with_depth(&mut output, node, "", is_last, true, 0, max_depth);
     }
     output
 }
 
-/// Recursively render a node and its children.
-fn render_node(
+/// Recursively render a node and its children with depth limiting.
+fn render_node_with_depth(
     output: &mut String,
     node: &FeatureTreeNode,
     prefix: &str,
     is_last: bool,
     is_root: bool,
+    current_depth: u32,
+    max_depth: u32,
 ) {
     let symbol = state_symbol(node.feature.state);
 
@@ -70,10 +83,27 @@ fn render_node(
         format!("{}{}", prefix, continuation)
     };
 
-    // Render children
-    for (i, child) in node.children.iter().enumerate() {
-        let child_is_last = i == node.children.len() - 1;
-        render_node(output, child, &child_prefix, child_is_last, false);
+    // Check if we've reached the depth limit
+    let at_depth_limit = max_depth > 0 && current_depth >= max_depth;
+
+    if at_depth_limit && !node.children.is_empty() {
+        // Show truncation indicator
+        output.push_str(&child_prefix);
+        output.push_str("└── (...)\n");
+    } else {
+        // Render children
+        for (i, child) in node.children.iter().enumerate() {
+            let child_is_last = i == node.children.len() - 1;
+            render_node_with_depth(
+                output,
+                child,
+                &child_prefix,
+                child_is_last,
+                false,
+                current_depth + 1,
+                max_depth,
+            );
+        }
     }
 }
 
@@ -151,6 +181,47 @@ mod tests {
         )];
         let output = render_tree(&tree);
         let expected = "Authentication\n├── ● Password Login\n├── ○ OAuth Integration\n│   ├── ◇ Google Provider\n│   └── ◇ GitHub Provider\n└── ✗ Legacy Basic Auth\n";
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_depth_limit_truncates_children() {
+        let tree = vec![make_node(
+            "Authentication",
+            FeatureState::Proposed,
+            vec![
+                make_node("Password Login", FeatureState::Implemented, vec![]),
+                make_node(
+                    "OAuth Integration",
+                    FeatureState::InProgress,
+                    vec![
+                        make_node("Google Provider", FeatureState::Proposed, vec![]),
+                        make_node("GitHub Provider", FeatureState::Proposed, vec![]),
+                    ],
+                ),
+            ],
+        )];
+        // max_depth=1 should show root + first level, but truncate second level
+        let output = render_tree_with_depth(&tree, 1);
+        let expected =
+            "Authentication\n├── ● Password Login\n└── ○ OAuth Integration\n    └── (...)\n";
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_depth_zero_means_unlimited() {
+        let tree = vec![make_node(
+            "Root",
+            FeatureState::Proposed,
+            vec![make_node(
+                "Child",
+                FeatureState::Implemented,
+                vec![make_node("Grandchild", FeatureState::Proposed, vec![])],
+            )],
+        )];
+        // max_depth=0 should show all levels
+        let output = render_tree_with_depth(&tree, 0);
+        let expected = "Root\n└── ● Child\n    └── ◇ Grandchild\n";
         assert_eq!(output, expected);
     }
 }

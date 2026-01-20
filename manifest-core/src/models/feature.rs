@@ -221,3 +221,37 @@ pub struct ListFeaturesQuery {
     /// Number of features to skip for pagination.
     pub offset: Option<u32>,
 }
+
+/// Lightweight feature summary for context (parent, siblings, children).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureSummaryContext {
+    pub id: Uuid,
+    pub title: String,
+    pub state: FeatureState,
+}
+
+/// Breadcrumb item for navigation path (root → feature).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BreadcrumbItem {
+    pub id: Uuid,
+    pub title: String,
+}
+
+/// A feature with its hierarchical context (parent, siblings, children, breadcrumb).
+///
+/// Used by `get_feature` MCP tool to provide navigation context for AI agents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureWithContext {
+    /// The feature itself with all details.
+    #[serde(flatten)]
+    pub feature: Feature,
+    /// Parent feature (if not a root).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<FeatureSummaryContext>,
+    /// Sibling features (same parent, excluding self).
+    pub siblings: Vec<FeatureSummaryContext>,
+    /// Direct children of this feature.
+    pub children: Vec<FeatureSummaryContext>,
+    /// Breadcrumb trail from root to this feature.
+    pub breadcrumb: Vec<BreadcrumbItem>,
+}

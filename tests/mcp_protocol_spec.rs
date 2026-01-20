@@ -217,11 +217,11 @@ mod protocol {
         let tools = result.get("tools").expect("Expected tools array");
         let tools_array = tools.as_array().expect("Tools should be array");
 
-        // CLI mode has 17 tools
+        // CLI mode has 18 tools
         assert_eq!(
             tools_array.len(),
-            17,
-            "Expected 17 CLI tools, got {}",
+            18,
+            "Expected 18 CLI tools, got {}",
             tools_array.len()
         );
 
@@ -238,6 +238,7 @@ mod protocol {
         assert!(tool_names.contains(&"get_feature"));
         assert!(tool_names.contains(&"get_feature_history"));
         assert!(tool_names.contains(&"render_feature_tree"));
+        assert!(tool_names.contains(&"get_next_feature"));
         // Setup tools
         assert!(tool_names.contains(&"analyze_project"));
         assert!(tool_names.contains(&"create_project"));
