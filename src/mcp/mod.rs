@@ -10,6 +10,7 @@ pub use client::ManifestClient;
 pub use server::McpServer;
 pub use types::*;
 
+/// Run the MCP server using stdio transport.
 pub async fn run_stdio_server() -> anyhow::Result<()> {
     use rmcp::ServiceExt;
     use tokio::io::{stdin, stdout};

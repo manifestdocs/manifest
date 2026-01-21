@@ -108,6 +108,7 @@ pub struct AuthzService<'a> {
 }
 
 impl<'a> AuthzService<'a> {
+    /// Create a new authorization service with a database connection.
     pub fn new(conn: &'a rusqlite::Connection) -> Self {
         Self { conn }
     }
@@ -186,17 +187,17 @@ impl<'a> AuthzService<'a> {
         Ok(visibility.as_deref() == Some("public"))
     }
 
-    /// Get the role of a user in a project.
+    /// Get a user's role in a project, if they have membership.
     pub fn get_role(&self, user_id: Uuid, project_id: Uuid) -> Result<Option<Role>, AuthzError> {
         Ok(self.get_membership(project_id, user_id)?.map(|m| m.role))
     }
 
-    /// Check if a user is the owner of a project.
+    /// Check if a user has owner role on a project.
     pub fn is_owner(&self, user_id: Uuid, project_id: Uuid) -> Result<bool, AuthzError> {
         Ok(self.get_role(user_id, project_id)? == Some(Role::Owner))
     }
 
-    /// List all projects a user has access to.
+    /// List all project IDs a user can access (via membership or public visibility).
     pub fn list_user_projects(&self, user_id: Uuid) -> Result<Vec<Uuid>, AuthzError> {
         let mut stmt = self
             .conn

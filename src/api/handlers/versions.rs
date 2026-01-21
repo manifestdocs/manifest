@@ -16,6 +16,7 @@ use super::internal_error;
 // Versions
 // ============================================================
 
+/// List all versions for a project.
 pub async fn list_project_versions(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
@@ -25,6 +26,7 @@ pub async fn list_project_versions(
         .map_err(internal_error)
 }
 
+/// Create a new version for a project.
 pub async fn create_version(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
@@ -35,6 +37,7 @@ pub async fn create_version(
         .map_err(internal_error)
 }
 
+/// Get a version by ID.
 pub async fn get_version(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
@@ -45,6 +48,7 @@ pub async fn get_version(
         .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))
 }
 
+/// Update a version. Creates a release history entry when marking as released.
 pub async fn update_version(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
@@ -83,6 +87,7 @@ pub async fn update_version(
     Ok(Json(updated))
 }
 
+/// Delete a version.
 pub async fn delete_version(
     State(db): State<Database>,
     Path(id): Path<Uuid>,

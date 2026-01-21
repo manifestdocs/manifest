@@ -18,12 +18,14 @@ use super::internal_error;
 // Projects
 // ============================================================
 
+/// List all projects.
 pub async fn list_projects(
     State(db): State<Database>,
 ) -> Result<Json<Vec<Project>>, (StatusCode, String)> {
     db.get_all_projects().map(Json).map_err(internal_error)
 }
 
+/// Get a project by ID with its associated directories.
 pub async fn get_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
@@ -34,6 +36,7 @@ pub async fn get_project(
         .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))
 }
 
+/// Create a new project.
 pub async fn create_project(
     State(db): State<Database>,
     Json(input): Json<CreateProjectInput>,
@@ -43,6 +46,7 @@ pub async fn create_project(
         .map_err(internal_error)
 }
 
+/// Update an existing project.
 pub async fn update_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
@@ -54,6 +58,7 @@ pub async fn update_project(
         .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))
 }
 
+/// Delete a project and all associated data.
 pub async fn delete_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
@@ -113,6 +118,7 @@ pub async fn get_project_history(
 // Project Directories
 // ============================================================
 
+/// List all directories associated with a project.
 pub async fn list_project_directories(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
@@ -122,6 +128,7 @@ pub async fn list_project_directories(
         .map_err(internal_error)
 }
 
+/// Associate a directory with a project.
 pub async fn add_project_directory(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
@@ -132,6 +139,7 @@ pub async fn add_project_directory(
         .map_err(internal_error)
 }
 
+/// Remove a directory association from a project.
 pub async fn remove_project_directory(
     State(db): State<Database>,
     Path(id): Path<Uuid>,

@@ -49,14 +49,17 @@ pub struct ManifestClient {
 }
 
 impl ManifestClient {
-    /// Create client from environment variables.
+    /// Create a client configured from environment variables.
+    ///
+    /// Uses `MANIFEST_URL` (default: `http://localhost:17010/api/v1`) and
+    /// optional `MANIFEST_API_KEY` for authentication.
     pub fn from_env() -> Self {
         let base_url = std::env::var("MANIFEST_URL").unwrap_or_else(|_| DEFAULT_URL.to_string());
         let api_key = std::env::var("MANIFEST_API_KEY").ok();
         Self::new(base_url, api_key)
     }
 
-    /// Create with explicit configuration.
+    /// Create a client with explicit base URL and optional API key.
     pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(10))

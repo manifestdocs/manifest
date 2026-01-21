@@ -25,6 +25,7 @@ use crate::serde_helpers::default_true;
 // Features
 // ============================================================
 
+/// List all features with optional pagination.
 pub async fn list_features(
     State(db): State<Database>,
     Query(query): Query<ListFeaturesQuery>,
@@ -39,6 +40,7 @@ pub async fn list_features(
     Ok(Json(summaries))
 }
 
+/// List all features for a specific project with optional pagination.
 pub async fn list_project_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
@@ -53,6 +55,7 @@ pub async fn list_project_features(
     Ok(Json(summaries))
 }
 
+/// List top-level (root) features for a project.
 pub async fn list_root_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
@@ -62,6 +65,7 @@ pub async fn list_root_features(
         .map_err(internal_error)
 }
 
+/// Get the complete hierarchical feature tree for a project.
 pub async fn get_feature_tree(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
@@ -106,6 +110,7 @@ pub async fn get_next_feature(
     }
 }
 
+/// List direct child features of a parent feature.
 pub async fn list_children(
     State(db): State<Database>,
     Path(parent_id): Path<Uuid>,
@@ -113,6 +118,7 @@ pub async fn list_children(
     db.get_children(parent_id).map(Json).map_err(internal_error)
 }
 
+/// Get implementation history entries for a feature.
 pub async fn get_feature_history(
     State(db): State<Database>,
     Path(feature_id): Path<Uuid>,
@@ -136,6 +142,9 @@ pub struct CreateFeatureHistoryInput {
     pub mark_implemented: bool,
 }
 
+/// Create a history entry directly on a feature.
+///
+/// Optionally marks the feature as implemented. Only allowed on leaf features.
 pub async fn create_feature_history(
     State(db): State<Database>,
     Path(feature_id): Path<Uuid>,
@@ -188,6 +197,7 @@ pub async fn create_feature_history(
     Ok((StatusCode::CREATED, Json(history)))
 }
 
+/// Get a feature by ID.
 pub async fn get_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
@@ -212,6 +222,7 @@ pub async fn get_feature_with_context(
         .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
 }
 
+/// Get the diff between current and desired details for a feature.
 pub async fn get_feature_diff(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
@@ -222,6 +233,7 @@ pub async fn get_feature_diff(
         .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
 }
 
+/// Create a new feature in a project.
 pub async fn create_feature(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
@@ -232,6 +244,7 @@ pub async fn create_feature(
         .map_err(internal_error)
 }
 
+/// Update an existing feature.
 pub async fn update_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
@@ -243,6 +256,7 @@ pub async fn update_feature(
         .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
 }
 
+/// Delete a feature and its descendants.
 pub async fn delete_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
@@ -355,6 +369,7 @@ fn flatten_feature_tree(
     id
 }
 
+/// Subscribe to real-time feature change notifications via SSE.
 pub async fn subscribe_project_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
