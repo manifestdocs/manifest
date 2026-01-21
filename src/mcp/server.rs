@@ -132,7 +132,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement."
+        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement. IMPORTANT: Do not change the feature's target version during implementation."
     )]
     async fn start_feature(
         &self,
@@ -263,6 +263,7 @@ WORKFLOW:
 
 2. CLAIM — signal you're starting:
    - start_feature — transitions proposed → in_progress, returns full spec
+   - IMPORTANT: The feature's target version is locked during implementation. Do not call set_feature_version while working on a feature.
 
 3. BUILD — implement against the spec:
    - The feature details ARE your specification
