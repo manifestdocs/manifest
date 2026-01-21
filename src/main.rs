@@ -7,17 +7,15 @@ use manifest::{api, db, mcp};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Print startup banner to the specified writer
-fn print_banner<W: Write>(mut w: W, mode: &str) {
+fn print_banner<W: Write>(mut w: W, url: &str) {
     let banner = format!(
         r#"
-  █▀▄▀█ ▄▀█ █▄ █ █ █▀▀ █▀▀ █▀ ▀█▀
-  █ ▀ █ █▀█ █ ▀█ █ █▀  ██▄ ▄█  █
+  ◇ ○ ●  M A N I F E S T
 
   Living Feature Documentation
-  Version: {}
-  Mode:    {}
+  v{} · {}
 "#,
-        VERSION, mode
+        VERSION, url
     );
     let _ = writeln!(w, "{}", banner);
 }
@@ -94,10 +92,7 @@ async fn main() -> anyhow::Result<()> {
             // Allow env var override for container deployment
             let bind_addr = std::env::var("MANIFEST_BIND_ADDR").unwrap_or(bind);
 
-            print_banner(
-                std::io::stdout(),
-                &format!("HTTP Server ({}:{})", bind_addr, port),
-            );
+            print_banner(std::io::stdout(), &format!("http://{}:{}", bind_addr, port));
             tracing::info!("Starting Manifest server on {}:{}", bind_addr, port);
 
             let db = db::Database::open_default()?;
@@ -147,10 +142,7 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(17010);
 
-            print_banner(
-                std::io::stdout(),
-                &format!("HTTP Server ({}:{})", bind_addr, port),
-            );
+            print_banner(std::io::stdout(), &format!("http://{}:{}", bind_addr, port));
             tracing::info!("Starting Manifest server on {}:{}", bind_addr, port);
 
             let db = db::Database::open_default()?;
