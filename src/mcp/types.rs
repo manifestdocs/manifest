@@ -46,7 +46,7 @@ pub struct CommitRefInput {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct ListFeaturesRequest {
+pub struct FindFeaturesRequest {
     #[schemars(description = "Optional project UUID to filter features by project")]
     pub project_id: Option<Uuid>,
     #[schemars(
@@ -232,7 +232,7 @@ pub struct FeatureSummaryInfo {
     pub parent_id: Option<Uuid>,
 }
 
-/// Response for list_features in summary mode (default).
+/// Response for find_features in summary mode (default).
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FeatureListSummaryResponse {
     pub features: Vec<FeatureSummaryInfo>,

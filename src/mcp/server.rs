@@ -1,7 +1,7 @@
 //! MCP server for AI-assisted feature development.
 //!
 //! Exposes tools optimized for CLI agents like Claude Code:
-//! - Discovery: list_projects, list_features, get_feature, render_feature_tree
+//! - Discovery: list_projects, find_features, get_feature, render_feature_tree
 //! - Setup: init_project, add_project_directory, plan, create_feature
 //! - Work: start_feature, complete_feature, get_next_feature
 //! - Versions: list_versions, create_version, set_feature_version, release_version
@@ -54,13 +54,13 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: List features, optionally filtered by project, state, or search query. Returns summaries only. Use get_feature for full details."
+        description = "ORIENT: Find features by project, state, or search query. Returns summaries only. Use get_feature for full details."
     )]
-    async fn list_features(
+    async fn find_features(
         &self,
-        params: Parameters<ListFeaturesRequest>,
+        params: Parameters<FindFeaturesRequest>,
     ) -> Result<CallToolResult, McpError> {
-        tools::features::list_features(&self.client, params.0).await
+        tools::features::find_features(&self.client, params.0).await
     }
 
     #[tool(
@@ -240,7 +240,7 @@ Every project has a feature tree—a hierarchy of capabilities the system provid
 ✗ deprecated — no longer active
 
 DISCOVERING FEATURES:
-- list_features — query features by project, state, or search term
+- find_features — find features by project, state, or search term
 - get_feature — get full details and history for a specific feature
 - get_next_feature — get the highest priority proposed or in_progress feature
 - render_feature_tree — display the full tree as ASCII art for the user

@@ -106,8 +106,7 @@ Add Manifest as an MCP server in your Claude Code configuration:
 | Tool | Description |
 |------|-------------|
 | `get_project_context` | Get project info from a directory path. |
-| `list_features` | Browse features with filters. Returns summaries only. |
-| `search_features` | Find features by keyword. Returns ranked summaries. |
+| `find_features` | Find features by project, state, or search query. Returns summaries only. |
 | `get_feature` | Get full details of a specific feature. |
 | `get_feature_history` | View past implementation sessions. |
 | `update_feature_state` | Transition feature through lifecycle. |
@@ -146,8 +145,8 @@ Add Manifest as an MCP server in your Claude Code configuration:
 │                    DISCOVERY (orchestrator)                     │
 ├─────────────────────────────────────────────────────────────────┤
 │  4. get_project_context("/path/to/myapp") → instructions        │
-│  5. list_features(state="specified") → find ready work          │
-│     - OR search_features(query) → find specific feature         │
+│  5. find_features(state="proposed") → find ready work           │
+│     - OR find_features(query="auth") → search by keyword        │
 │  6. get_feature(feature_id) → read full specification           │
 │  7. get_feature_history(feature_id) → review past work          │
 └─────────────────────────────────────────────────────────────────┘

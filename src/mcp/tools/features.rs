@@ -9,9 +9,9 @@ use crate::mcp::{
     tree_render,
     types::{
         CommitInfo, CompleteFeatureRequest, CreateFeatureRequest, FeatureInfo,
-        FeatureInfoWithContext, FeatureListSummaryResponse, FeatureSummaryInfo, GetFeatureRequest,
-        GetNextFeatureRequest, HistoryEntryInfo, ListFeaturesRequest, PlanFeaturesRequest,
-        RenderFeatureTreeRequest, StartFeatureRequest,
+        FeatureInfoWithContext, FeatureListSummaryResponse, FeatureSummaryInfo,
+        FindFeaturesRequest, GetFeatureRequest, GetNextFeatureRequest, HistoryEntryInfo,
+        PlanFeaturesRequest, RenderFeatureTreeRequest, StartFeatureRequest,
     },
     ManifestClient,
 };
@@ -19,10 +19,10 @@ use crate::models::{CommitRef, CreateFeatureInput, FeatureState, UpdateFeatureIn
 
 use super::client_err;
 
-/// List features, optionally filtered by project, state, or search query.
-pub async fn list_features(
+/// Find features by project, state, or search query.
+pub async fn find_features(
     client: &ManifestClient,
-    req: ListFeaturesRequest,
+    req: FindFeaturesRequest,
 ) -> Result<CallToolResult, McpError> {
     // If query is provided, use search; otherwise use list
     let features = if let Some(ref query) = req.query {

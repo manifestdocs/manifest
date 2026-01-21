@@ -219,7 +219,7 @@ mod protocol {
 
         // Discovery tools
         assert!(tool_names.contains(&"list_projects"));
-        assert!(tool_names.contains(&"list_features"));
+        assert!(tool_names.contains(&"find_features"));
         assert!(tool_names.contains(&"get_feature"));
         assert!(tool_names.contains(&"render_feature_tree"));
         // Setup tools
@@ -315,7 +315,7 @@ mod tool_calls {
 
     #[test]
     #[ignore = "Requires HTTP server at localhost:17010"]
-    fn create_feature_and_list_features() {
+    fn create_feature_and_find_features() {
         let mut client = McpTestClient::spawn();
         client.initialize();
 
@@ -349,8 +349,8 @@ mod tool_calls {
             Some("User Authentication")
         );
 
-        // List features
-        let list_response = client.call_tool("list_features", json!({ "project_id": project_id }));
+        // Find features
+        let list_response = client.call_tool("find_features", json!({ "project_id": project_id }));
         assert!(list_response.error.is_none());
 
         let list_text = extract_text_content(&list_response);
