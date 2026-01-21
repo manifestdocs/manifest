@@ -17,22 +17,17 @@ fn state_symbol(state: FeatureState) -> char {
     }
 }
 
-/// Render a feature tree as ASCII art with status symbols (unlimited depth).
+/// Render a feature tree as ASCII art with status symbols, limited to a maximum depth.
 ///
 /// Example output:
 /// ```text
 /// Authentication
 /// ├── ● Password Login
 /// ├── ○ OAuth Integration
-/// │   ├── • Google Provider
-/// │   └── • GitHub Provider
+/// │   ├── ◇ Google Provider
+/// │   └── ◇ GitHub Provider
 /// └── ✗ Legacy Basic Auth
 /// ```
-pub fn render_tree(nodes: &[FeatureTreeNode]) -> String {
-    render_tree_with_depth(nodes, 0)
-}
-
-/// Render a feature tree as ASCII art with status symbols, limited to a maximum depth.
 ///
 /// # Arguments
 /// * `nodes` - The feature tree nodes to render
@@ -140,7 +135,7 @@ mod tests {
     #[test]
     fn test_single_root() {
         let tree = vec![make_node("Authentication", FeatureState::Proposed, vec![])];
-        let output = render_tree(&tree);
+        let output = render_tree_with_depth(&tree, 0);
         assert_eq!(output, "Authentication\n");
     }
 
@@ -154,7 +149,7 @@ mod tests {
                 make_node("OAuth", FeatureState::InProgress, vec![]),
             ],
         )];
-        let output = render_tree(&tree);
+        let output = render_tree_with_depth(&tree, 0);
         assert_eq!(
             output,
             "Authentication\n├── ● Password Login\n└── ○ OAuth\n"
@@ -179,7 +174,7 @@ mod tests {
                 make_node("Legacy Basic Auth", FeatureState::Deprecated, vec![]),
             ],
         )];
-        let output = render_tree(&tree);
+        let output = render_tree_with_depth(&tree, 0);
         let expected = "Authentication\n├── ● Password Login\n├── ○ OAuth Integration\n│   ├── ◇ Google Provider\n│   └── ◇ GitHub Provider\n└── ✗ Legacy Basic Auth\n";
         assert_eq!(output, expected);
     }
