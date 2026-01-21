@@ -158,7 +158,11 @@ pub struct UpdateFeatureInput {
     pub priority: Option<i32>,
     /// Target version for release planning.
     /// Uses double Option to distinguish "field absent" (None) from "set to null" (Some(None)).
-    #[serde(default, deserialize_with = "double_option::deserialize")]
+    #[serde(
+        default,
+        deserialize_with = "double_option::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub target_version_id: Option<Option<Uuid>>,
 }
 

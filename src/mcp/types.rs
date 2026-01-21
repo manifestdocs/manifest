@@ -188,6 +188,9 @@ pub struct FeatureInfo {
     pub state: String,
     /// Priority for ordering within parent. Lower values appear first.
     pub priority: i32,
+    /// Target version for release planning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_version_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -269,6 +272,9 @@ pub struct FeatureInfoWithContext {
     pub state: String,
     /// Priority for ordering within parent. Lower values appear first.
     pub priority: i32,
+    /// Target version for release planning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_version_id: Option<Uuid>,
     /// Parent feature (if not a root).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<FeatureSummaryContextInfo>,
@@ -539,6 +545,7 @@ impl From<&Feature> for FeatureInfo {
             desired_details: f.desired_details.clone(),
             state: f.state.as_str().to_string(),
             priority: f.priority,
+            target_version_id: f.target_version_id,
         }
     }
 }
@@ -571,6 +578,7 @@ impl From<&FeatureWithContext> for FeatureInfoWithContext {
             desired_details: ctx.feature.desired_details.clone(),
             state: ctx.feature.state.as_str().to_string(),
             priority: ctx.feature.priority,
+            target_version_id: ctx.feature.target_version_id,
             parent: ctx.parent.as_ref().map(Into::into),
             siblings: ctx.siblings.iter().map(Into::into).collect(),
             children: ctx.children.iter().map(Into::into).collect(),
