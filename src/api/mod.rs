@@ -13,6 +13,7 @@ use axum::{
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, set_header::SetResponseHeaderLayer, trace::TraceLayer};
 
+use crate::assets::static_handler;
 use crate::db::Database;
 use crate::mcp;
 
@@ -88,10 +89,12 @@ fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
     }
 }
 
+/// Create the API router with default security configuration.
 pub fn create_router(db: Database) -> Router {
     create_router_with_config(db, SecurityConfig::from_env())
 }
 
+/// Create the API router with custom security configuration.
 pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router {
     // Health endpoint (unauthenticated)
     let health_router = Router::new().route("/health", get(handlers::health));
@@ -208,6 +211,7 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         .nest("/api/v1", api)
         .with_state(db)
         .nest("/mcp", mcp_router)
+        .fallback(static_handler)
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
         .layer(security_headers_layer())
