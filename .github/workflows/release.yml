@@ -29,6 +29,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: rocket-tycoon/manifest-web
+          ref: above-fold-optimization
           path: manifest-web-repo
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
