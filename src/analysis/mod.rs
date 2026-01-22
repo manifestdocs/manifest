@@ -3,6 +3,9 @@
 //! Analyzes project directories to detect language, frameworks, modules,
 //! and generate feature hints for AI agents.
 
+pub mod feature_extractor;
+pub mod git_history;
+pub mod markdown_gen;
 mod parsers;
 mod scanner;
 
@@ -177,4 +180,43 @@ fn generate_feature_hints(
     }
 
     hints
+}
+
+/// Generate a feature tree markdown document from a codebase.
+///
+/// Combines:
+/// - Static code analysis (modules, directories, frameworks)
+/// - Git history analysis (feat: commits, deletions)
+/// - Optional RocketIndex symbols
+///
+/// Returns the markdown document and statistics.
+pub fn generate_feature_tree(
+    root: &Path,
+    project_name: &str,
+    since: Option<&str>,
+    symbols: Option<&[feature_extractor::SymbolData]>,
+) -> (String, feature_extractor::TreeStats) {
+    // 1. Run existing analysis
+    let analysis = analyze(root, false, 3);
+
+    // 2. Analyze git history
+    let git = git_history::analyze_git_history(root, since, 500);
+
+    // 3. Extract features
+    let tree = feature_extractor::extract_features(&analysis, &git, symbols);
+
+    // 4. Generate markdown
+    let options = markdown_gen::MarkdownOptions {
+        project_name: project_name.to_string(),
+        branch: git.branch,
+        commit_sha: git.head_sha,
+        include_files: true,
+        include_evidence: true,
+        max_files: 5,
+    };
+
+    let stats = tree.stats.clone();
+    let markdown = markdown_gen::generate_markdown(&tree, &options);
+
+    (markdown, stats)
 }
