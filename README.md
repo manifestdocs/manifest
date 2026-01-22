@@ -4,31 +4,42 @@ Living feature documentation for AI-assisted development.
 
 Manifest is an MCP server and HTTP API that tracks **features** (system capabilities) rather than work items. Unlike traditional issue trackers where items are closed and forgotten, features are living descriptions that evolve with your codebase.
 
-## Quick Start
-
-```bash
-# Start the server
-manifest serve
-
-# Or run as MCP server for Claude Code
-manifest mcp
-```
-
 ## Installation
 
-### Homebrew (recommended)
+### 1. Install via Homebrew
 
 ```bash
-brew tap rocket-tycoon/tap
-brew install manifest
+brew install rocket-tycoon/tap/manifest
 ```
 
-### From Source
+### 2. Configure your AI agent
+
+Add Manifest as an MCP server:
 
 ```bash
-git clone https://github.com/rocket-tycoon/manifest
-cd manifest/manifest-server
-cargo install --path .
+# Claude Code
+claude mcp add manifest -- manifest mcp
+
+# Goose
+goose mcp add manifest -- manifest mcp
+
+# OpenAI Operator
+operator mcp add manifest -- manifest mcp
+```
+
+### 3. Verify installation
+
+```bash
+manifest --version
+manifest serve        # Opens web UI at http://localhost:17010
+```
+
+### 4. Claude Code plugin (optional)
+
+Run this inside Claude Code for slash commands:
+
+```
+/plugin install rocket-tycoon/claude-plugins/manifest
 ```
 
 ## Core Concepts

@@ -22,7 +22,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: rocket-tycoon/manifest-web
-          ref: above-fold-optimization
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - uses: pnpm/action-setup@v4
