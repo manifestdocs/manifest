@@ -29,7 +29,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: rocket-tycoon/manifest-web
-          ref: above-fold-optimization
           path: manifest-web-repo
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
@@ -189,4 +188,83 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/manifest.rb
           git commit -m "Update manifest to ${{ github.ref_name }}"
+          git push
+
+  deploy-pages:
+    name: Deploy GitHub Pages
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout manifest-web
+        uses: actions/checkout@v4
+        with:
+          repository: rocket-tycoon/manifest-web
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install
+      - run: pnpm build:pages
+        env:
+          PUBLIC_CLERK_PUBLISHABLE_KEY: pk_placeholder
+          PUBLIC_MANIFEST_MODE: cloud
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  update-plugin:
+    name: Update Claude Plugin
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout manifest (for plugin source)
+        uses: actions/checkout@v4
+        with:
+          path: manifest
+
+      - name: Checkout claude-plugins
+        uses: actions/checkout@v4
+        with:
+          repository: rocket-tycoon/claude-plugins
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: claude-plugins
+
+      - name: Update plugin version and copy
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION_NUM="${VERSION#v}"
+
+          # Update plugin.json version
+          cd manifest/manifest-plugin
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION_NUM}\"/" plugin.json
+
+          # Copy plugin to claude-plugins repo
+          cd ../../claude-plugins
+          rm -rf manifest
+          cp -r ../manifest/manifest-plugin manifest
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add manifest
+          git commit -m "Update manifest plugin to ${VERSION}" || echo "No changes to commit"
           git push
