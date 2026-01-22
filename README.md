@@ -16,18 +16,19 @@ manifest mcp
 
 ## Installation
 
+### Homebrew (recommended)
+
+```bash
+brew tap rocket-tycoon/tap
+brew install manifest
+```
+
 ### From Source
 
 ```bash
 git clone https://github.com/rocket-tycoon/manifest
-cd manifest
+cd manifest/manifest-server
 cargo install --path .
-```
-
-### Homebrew (coming soon)
-
-```bash
-brew install rocket-tycoon/tap/manifest
 ```
 
 ## Core Concepts
@@ -259,69 +260,6 @@ The database auto-migrates on startup.
 ---
 
 # For Contributors
-
-## Development
-
-Use the Makefile for common tasks:
-
-```bash
-make run          # Run in local mode (default)
-make run-local    # Same as above
-make run-cloud    # Run in cloud mode (requires env vars)
-make run-cloud-env # Run cloud mode, loading .env file
-make build        # Release build
-make test         # Run all tests
-make check        # Type check without building
-make clean        # Remove build artifacts
-```
-
-### Local vs Cloud Mode
-
-| Mode | When to Use | Authentication |
-|------|-------------|----------------|
-| **Local** | Development, personal use, CLI tools | None required |
-| **Cloud** | Production, multi-tenant deployment | Clerk JWT required |
-
-**Local mode** (`make run` or `make run-local`):
-- No authentication required
-- All endpoints accessible
-- Rate limiting disabled (unless `MANIFEST_API_KEY` set)
-- Use for local development and single-user scenarios
-
-**Cloud mode** (`make run-cloud`):
-- Requires Clerk authentication configuration
-- All API endpoints require valid JWT
-- SSE requires `?token=` query parameter
-- MCP endpoint requires Bearer token
-- Rate limiting enabled by default
-- Use for production multi-tenant deployments
-
-### Cloud Mode Setup
-
-1. Create a `.env` file (copy from `.env.example`):
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Configure Clerk credentials:
-   ```bash
-   # .env
-   MANIFEST_MODE=cloud
-   CLERK_DOMAIN=your-app.clerk.accounts.dev
-   CLERK_AUTHORIZED_PARTIES=http://localhost:5173,https://your-domain.com
-   ```
-
-3. Run with environment:
-   ```bash
-   make run-cloud-env
-   ```
-
-Or export variables directly:
-```bash
-export CLERK_DOMAIN=your-app.clerk.accounts.dev
-export CLERK_AUTHORIZED_PARTIES=http://localhost:5173
-make run-cloud
-```
 
 ## Building
 
