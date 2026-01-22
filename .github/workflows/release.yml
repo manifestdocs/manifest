@@ -25,6 +25,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout manifest-web
+        uses: actions/checkout@v4
+        with:
+          repository: rocket-tycoon/manifest-web
+          path: ../manifest-web
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Build manifest-web
+        run: |
+          cd ../manifest-web
+          pnpm install
+          pnpm build
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
