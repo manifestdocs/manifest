@@ -36,6 +36,9 @@ jobs:
 
       - run: pnpm install
       - run: pnpm build:pages
+        env:
+          PUBLIC_CLERK_PUBLISHABLE_KEY: pk_live_placeholder
+          PUBLIC_MANIFEST_MODE: cloud
 
       - uses: actions/upload-pages-artifact@v3
         with:
