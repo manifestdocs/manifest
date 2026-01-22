@@ -76,19 +76,26 @@ manifest status
 manifest stop
 ```
 
-## Claude Code Integration
+## Agent Configuration
 
-Add Manifest as an MCP server in your Claude Code configuration:
+Add Manifest as an MCP server to your CLI agent:
 
-```json
-{
-  "mcpServers": {
-    "manifest": {
-      "command": "manifest",
-      "args": ["mcp"]
-    }
-  }
-}
+### Claude Code
+
+```bash
+claude mcp add manifest -- manifest mcp
+```
+
+### Goose
+
+```bash
+goose mcp add manifest -- manifest mcp
+```
+
+### OpenAI Operator
+
+```bash
+operator mcp add manifest -- manifest mcp
 ```
 
 ### MCP Tools (18 total)
@@ -352,7 +359,7 @@ The OpenAPI spec is the source of truth for the HTTP API.
 ### Why MCP + HTTP?
 
 - **MCP**: Direct integration with Claude Code and other AI tools
-- **HTTP**: For VSCode extension, web UI, CLI tools, and any HTTP client
+- **HTTP**: For web UI, CLI tools, and any HTTP client
 
 ### Why Features Instead of Issues?
 
@@ -360,7 +367,6 @@ Features are living documentation. Unlike issues that are "closed and forgotten,
 
 ## Related Projects
 
-- **RocketCrew** - VSCode extension that consumes this API
 - **RocketIndex** - Code indexer for semantic navigation
 
 ## License
