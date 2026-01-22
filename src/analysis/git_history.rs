@@ -99,11 +99,11 @@ pub struct Deletion {
 /// * `since` - Optional git ref (tag, commit, or date) to start from
 /// * `max_commits` - Maximum number of commits to analyze
 pub fn analyze_git_history(root: &Path, since: Option<&str>, max_commits: u32) -> GitAnalysis {
-    let mut analysis = GitAnalysis::default();
-
-    // Get current branch and HEAD
-    analysis.branch = get_current_branch(root);
-    analysis.head_sha = get_head_sha(root);
+    let mut analysis = GitAnalysis {
+        branch: get_current_branch(root),
+        head_sha: get_head_sha(root),
+        ..Default::default()
+    };
 
     // Get commit log
     let commits = get_commit_log(root, since, max_commits);
@@ -408,7 +408,7 @@ fn is_source_file(path: &str) -> bool {
     ];
 
     path.split('.')
-        .last()
+        .next_back()
         .map(|ext| source_extensions.contains(&ext))
         .unwrap_or(false)
 }

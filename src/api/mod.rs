@@ -29,6 +29,7 @@ pub use config::{ConfigError, DeploymentMode, JwtConfig, OAuthConfig, SessionCon
 pub use middleware::SecurityConfig;
 
 /// Security headers for all responses.
+#[allow(clippy::type_complexity)] // Tower's nested layer types are inherently complex
 fn security_headers_layer() -> ServiceBuilder<
     tower::layer::util::Stack<
         SetResponseHeaderLayer<HeaderValue>,

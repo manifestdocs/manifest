@@ -201,17 +201,19 @@ pub fn extract_features(
     // 2. Create chapters from framework detection
     for framework in &analysis.project_type.frameworks {
         if let Some(chapter_title) = framework_to_chapter(framework) {
-            if !used_features.contains_key(&chapter_title) {
-                let chapter_idx = chapters.len();
-                chapters.push(Chapter {
-                    title: chapter_title.clone(),
-                    source: ChapterSource::Framework,
-                    module_path: None,
-                    file_count: 0,
-                    features: Vec::new(),
+            used_features
+                .entry(chapter_title.clone())
+                .or_insert_with(|| {
+                    let chapter_idx = chapters.len();
+                    chapters.push(Chapter {
+                        title: chapter_title,
+                        source: ChapterSource::Framework,
+                        module_path: None,
+                        file_count: 0,
+                        features: Vec::new(),
+                    });
+                    chapter_idx
                 });
-                used_features.insert(chapter_title, chapter_idx);
-            }
         }
     }
 
@@ -408,10 +410,8 @@ fn find_best_chapter(feature: &ExtractedFeature, chapters: &[Chapter]) -> Option
                 .iter()
                 .filter(|f| f.contains(module_path))
                 .count() as u32;
-            if matches > 0 {
-                if best_match.map(|(_, c)| matches > c).unwrap_or(true) {
-                    best_match = Some((idx, matches));
-                }
+            if matches > 0 && best_match.map(|(_, c)| matches > c).unwrap_or(true) {
+                best_match = Some((idx, matches));
             }
         }
 
@@ -419,7 +419,7 @@ fn find_best_chapter(feature: &ExtractedFeature, chapters: &[Chapter]) -> Option
         let title_lower = chapter.title.to_lowercase();
         for file in &feature.files {
             let file_lower = file.to_lowercase();
-            if file_lower.contains(&title_lower)
+            if (file_lower.contains(&title_lower)
                 || title_lower.contains(
                     &file_lower
                         .split('/')
@@ -427,11 +427,10 @@ fn find_best_chapter(feature: &ExtractedFeature, chapters: &[Chapter]) -> Option
                         .unwrap_or("")
                         .replace(".rs", "")
                         .replace(".ts", ""),
-                )
+                ))
+                && best_match.is_none()
             {
-                if best_match.is_none() {
-                    best_match = Some((idx, 1));
-                }
+                best_match = Some((idx, 1));
             }
         }
     }

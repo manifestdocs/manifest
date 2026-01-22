@@ -5,8 +5,7 @@
 use chrono::Utc;
 
 use super::feature_extractor::{
-    Chapter, ChapterSource, Evidence, EvidenceKind, ExtractedFeature, ExtractedFeatureTree,
-    FeatureState, TreeStats,
+    Chapter, ExtractedFeature, ExtractedFeatureTree, FeatureState, TreeStats,
 };
 
 /// Options for markdown generation.
@@ -235,6 +234,7 @@ fn count_states(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::feature_extractor::{ChapterSource, Evidence, EvidenceKind};
 
     fn sample_tree() -> ExtractedFeatureTree {
         ExtractedFeatureTree {

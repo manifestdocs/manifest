@@ -44,6 +44,7 @@ struct JwksResponse {
 
 /// A single JSON Web Key.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Fields used by serde for JWKS deserialization
 struct Jwk {
     #[serde(rename = "kid")]
     key_id: String,
