@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::mcp::{DirectorySignal, FeatureHint, ModuleSignal, ProjectAnalysis, ProjectType};
+use crate::mcp::{ModuleSignal, ProjectAnalysis};
 
 use super::git_history::{CommitType, FeatureCommit, GitAnalysis};
 

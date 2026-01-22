@@ -108,6 +108,16 @@ impl McpServer {
     }
 
     #[tool(
+        description = "DISCOVER: Generate a feature tree from an existing codebase by analyzing code structure and git history. Returns a markdown document describing system capabilities. Use this to understand what features exist in an undocumented codebase."
+    )]
+    async fn generate_feature_tree(
+        &self,
+        params: Parameters<GenerateFeatureTreeRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::generate::generate_feature_tree(params.0).await
+    }
+
+    #[tool(
         description = "SETUP: Decompose a PRD or vision into a feature tree. With confirm=false, returns a proposal. With confirm=true, creates the features."
     )]
     async fn plan(

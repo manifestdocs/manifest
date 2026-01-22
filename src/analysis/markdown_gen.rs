@@ -299,9 +299,9 @@ mod tests {
         let md = generate_markdown(&tree, &options);
 
         assert!(md.contains("## Legend"));
-        assert!(md.contains("● Implemented"));
-        assert!(md.contains("◇ Proposed"));
-        assert!(md.contains("✗ Deprecated"));
+        assert!(md.contains("**●** Implemented"));
+        assert!(md.contains("**◇** Proposed"));
+        assert!(md.contains("**✗** Deprecated"));
     }
 
     #[test]

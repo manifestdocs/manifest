@@ -460,6 +460,45 @@ pub struct InitProjectRequest {
     pub include_docs: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GenerateFeatureTreeRequest {
+    #[schemars(
+        description = "Absolute path to the directory to analyze (must be a git repository)"
+    )]
+    pub directory_path: String,
+    #[schemars(
+        description = "Only analyze commits since this tag or commit SHA (optional). Example: 'v1.0.0' or 'abc1234'"
+    )]
+    #[serde(default)]
+    pub since: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GenerateFeatureTreeResponse {
+    /// The generated markdown document describing the feature tree.
+    pub document: String,
+    /// Summary statistics about the extraction.
+    pub stats: GenerateFeatureTreeStats,
+    /// Warnings encountered during analysis.
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GenerateFeatureTreeStats {
+    /// Total number of top-level chapters.
+    pub total_chapters: u32,
+    /// Total number of features extracted.
+    pub total_features: u32,
+    /// Features marked as implemented.
+    pub implemented_count: u32,
+    /// Features marked as proposed.
+    pub proposed_count: u32,
+    /// Features marked as deprecated (removed).
+    pub deprecated_count: u32,
+    /// Number of git commits analyzed.
+    pub commits_analyzed: u32,
+}
+
 // ============================================================
 // Project Analysis (for AI feature planning)
 // ============================================================
