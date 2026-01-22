@@ -16,6 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Create web assets placeholder
+        run: |
+          mkdir -p ../manifest-web/build
+          echo "<html><body>Placeholder</body></html>" > ../manifest-web/build/index.html
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -38,6 +43,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Create web assets placeholder
+        run: |
+          mkdir -p ../manifest-web/build
+          echo "<html><body>Placeholder</body></html>" > ../manifest-web/build/index.html
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
