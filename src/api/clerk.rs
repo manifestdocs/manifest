@@ -165,14 +165,28 @@ impl ClerkVerifier {
     ///
     /// Required env vars:
     /// - `CLERK_DOMAIN`: Your Clerk domain
-    /// - `CLERK_AUTHORIZED_PARTIES`: Comma-separated list of authorized origins
+    /// - `CLERK_AUTHORIZED_PARTIES`: Comma-separated list of authorized origins (required, non-empty)
+    ///
+    /// # Errors
+    /// Returns an error if CLERK_DOMAIN is not set or CLERK_AUTHORIZED_PARTIES is empty.
     pub fn from_env() -> Result<Self, ClerkError> {
         let domain = std::env::var("CLERK_DOMAIN")
             .map_err(|_| ClerkError::MissingClaim("CLERK_DOMAIN env var".to_string()))?;
 
-        let parties = std::env::var("CLERK_AUTHORIZED_PARTIES")
-            .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
+        let parties: Vec<String> = std::env::var("CLERK_AUTHORIZED_PARTIES")
+            .map(|s| {
+                s.split(',')
+                    .map(|p| p.trim().to_string())
+                    .filter(|p| !p.is_empty())
+                    .collect()
+            })
             .unwrap_or_default();
+
+        if parties.is_empty() {
+            return Err(ClerkError::MissingClaim(
+                "CLERK_AUTHORIZED_PARTIES env var must be set with at least one origin".to_string(),
+            ));
+        }
 
         Ok(Self::new(&domain, parties))
     }

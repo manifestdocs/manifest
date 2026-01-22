@@ -2,7 +2,8 @@ use clap::{Parser, Subcommand};
 use std::io::Write;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use manifest::{api, db, mcp};
+use manifest::api::{self, DeploymentMode};
+use manifest::{db, mcp};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -94,25 +95,31 @@ async fn main() -> anyhow::Result<()> {
         }) => {
             // Allow env var override for container deployment
             let bind_addr = std::env::var("MANIFEST_BIND_ADDR").unwrap_or(bind);
-            let is_cloud_mode = std::env::var("MANIFEST_MODE")
-                .map(|m| m.to_lowercase() == "cloud")
-                .unwrap_or(false);
+
+            // Validate deployment mode BEFORE starting server (fail-secure)
+            let mode = DeploymentMode::from_env().expect("Configuration validation failed");
+
+            // Production safety: crash if local mode in production
+            if mode == DeploymentMode::Local {
+                let is_prod = std::env::var("FLY_APP_NAME").is_ok()
+                    || std::env::var("RAILWAY_ENVIRONMENT").is_ok()
+                    || std::env::var("RENDER").is_ok();
+                if is_prod {
+                    panic!("FATAL: MANIFEST_MODE=local is forbidden in production. Set MANIFEST_MODE=cloud.");
+                }
+            }
 
             print_banner(std::io::stdout(), &format!("http://{}:{}", bind_addr, port));
             tracing::info!("Starting Manifest server on {}:{}", bind_addr, port);
-            if is_cloud_mode {
-                tracing::info!("Running in CLOUD mode with Clerk authentication");
-            } else {
-                tracing::info!("Running in LOCAL mode (no authentication)");
-            }
+            tracing::info!("Running in {} mode", mode.as_str().to_uppercase());
 
             let db = db::Database::open_default().await?;
             db.migrate().await?;
 
-            let app = if is_cloud_mode {
+            let app = if mode == DeploymentMode::Cloud {
                 // Cloud mode: use Clerk authentication
                 let verifier = api::ClerkVerifier::from_env()
-                    .expect("CLERK_DOMAIN environment variable required for cloud mode");
+                    .expect("Clerk configuration should be validated by DeploymentMode::from_env");
                 api::create_router_with_clerk(db, verifier)
             } else {
                 // Local mode: no authentication
@@ -160,25 +167,31 @@ async fn main() -> anyhow::Result<()> {
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(17010);
-            let is_cloud_mode = std::env::var("MANIFEST_MODE")
-                .map(|m| m.to_lowercase() == "cloud")
-                .unwrap_or(false);
+
+            // Validate deployment mode BEFORE starting server (fail-secure)
+            let mode = DeploymentMode::from_env().expect("Configuration validation failed");
+
+            // Production safety: crash if local mode in production
+            if mode == DeploymentMode::Local {
+                let is_prod = std::env::var("FLY_APP_NAME").is_ok()
+                    || std::env::var("RAILWAY_ENVIRONMENT").is_ok()
+                    || std::env::var("RENDER").is_ok();
+                if is_prod {
+                    panic!("FATAL: MANIFEST_MODE=local is forbidden in production. Set MANIFEST_MODE=cloud.");
+                }
+            }
 
             print_banner(std::io::stdout(), &format!("http://{}:{}", bind_addr, port));
             tracing::info!("Starting Manifest server on {}:{}", bind_addr, port);
-            if is_cloud_mode {
-                tracing::info!("Running in CLOUD mode with Clerk authentication");
-            } else {
-                tracing::info!("Running in LOCAL mode (no authentication)");
-            }
+            tracing::info!("Running in {} mode", mode.as_str().to_uppercase());
 
             let db = db::Database::open_default().await?;
             db.migrate().await?;
 
-            let app = if is_cloud_mode {
+            let app = if mode == DeploymentMode::Cloud {
                 // Cloud mode: use Clerk authentication
                 let verifier = api::ClerkVerifier::from_env()
-                    .expect("CLERK_DOMAIN environment variable required for cloud mode");
+                    .expect("Clerk configuration should be validated by DeploymentMode::from_env");
                 api::create_router_with_clerk(db, verifier)
             } else {
                 // Local mode: no authentication

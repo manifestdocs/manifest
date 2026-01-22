@@ -52,12 +52,8 @@ impl DeploymentMode {
 
     /// Validate that all required cloud configuration is present.
     fn validate_cloud_config() -> Result<(), ConfigError> {
-        let required = [
-            "GOOGLE_CLIENT_ID",
-            "GOOGLE_CLIENT_SECRET",
-            "JWT_SECRET",
-            "SESSION_SECRET",
-        ];
+        // Clerk authentication is required in cloud mode
+        let required = ["CLERK_DOMAIN", "CLERK_AUTHORIZED_PARTIES"];
         let missing: Vec<_> = required
             .iter()
             .copied()
@@ -67,6 +63,15 @@ impl DeploymentMode {
         if !missing.is_empty() {
             return Err(ConfigError::MissingCloudConfig(missing));
         }
+
+        // Validate CLERK_AUTHORIZED_PARTIES is not empty
+        let parties = std::env::var("CLERK_AUTHORIZED_PARTIES").unwrap();
+        if parties.trim().is_empty() {
+            return Err(ConfigError::Invalid(
+                "CLERK_AUTHORIZED_PARTIES cannot be empty".to_string(),
+            ));
+        }
+
         Ok(())
     }
 
