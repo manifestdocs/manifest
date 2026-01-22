@@ -40,8 +40,12 @@ impl SecurityConfig {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(100); // Default: 100 requests per minute
 
-        // Only create rate limiter if API key is set (remote deployment mode)
-        let rate_limiter = if api_key.is_some() {
+        // Enable rate limiting in cloud mode OR if API key is set
+        let is_cloud_mode = std::env::var("MANIFEST_MODE")
+            .map(|m| m.to_lowercase() == "cloud")
+            .unwrap_or(false);
+
+        let rate_limiter = if api_key.is_some() || is_cloud_mode {
             Some(RateLimiter::new(rate_limit, Duration::from_secs(60)))
         } else {
             None
@@ -51,6 +55,24 @@ impl SecurityConfig {
             api_key,
             cors_origins,
             rate_limiter,
+        }
+    }
+
+    /// Create security config for cloud mode with rate limiting enabled.
+    pub fn for_cloud_mode() -> Self {
+        let cors_origins = std::env::var("MANIFEST_CORS_ORIGINS")
+            .ok()
+            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect());
+
+        let rate_limit = std::env::var("MANIFEST_RATE_LIMIT")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(100);
+
+        Self {
+            api_key: None,
+            cors_origins,
+            rate_limiter: Some(RateLimiter::new(rate_limit, Duration::from_secs(60))),
         }
     }
 
