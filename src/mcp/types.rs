@@ -74,23 +74,58 @@ pub struct GetFeatureRequest {
     pub include_history: bool,
 }
 
+/// General-purpose tool for updating any feature field.
+/// Replaces narrow tools (archive, restore, specify, reopen, deprecate) with one flexible tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct UpdateFeatureStateRequest {
+pub struct UpdateFeatureRequest {
     #[schemars(description = "The UUID of the feature to update")]
     pub feature_id: Uuid,
-    #[schemars(
-        description = "The new state: 'proposed', 'in_progress', 'implemented', or 'archived'"
-    )]
-    #[serde(default)]
-    pub state: Option<String>,
+
     #[schemars(description = "New title for the feature")]
     #[serde(default)]
     pub title: Option<String>,
+
     #[schemars(
-        description = "New details for the feature. Use this to update the living documentation when implementation reveals new information."
+        description = "New details/specification for the feature. Use this to update living documentation as you learn more during implementation."
     )]
     #[serde(default)]
     pub details: Option<String>,
+
+    #[schemars(
+        description = "Proposed changes for human review. Set this when you want to suggest spec changes without immediately applying them. Humans see a diff in the web UI and can accept/reject."
+    )]
+    #[serde(default)]
+    pub desired_details: Option<String>,
+
+    #[schemars(
+        description = "New state. Valid values: 'proposed', 'in_progress', 'implemented', 'archived'. Use your judgment: working on it? 'in_progress'. Done? 'implemented'. Found a bug in 'implemented'? Set back to 'in_progress'. Want to hide but preserve history? 'archived'."
+    )]
+    #[serde(default)]
+    pub state: Option<String>,
+
+    #[schemars(
+        description = "New priority for ordering within parent. Lower values appear first."
+    )]
+    #[serde(default)]
+    pub priority: Option<i32>,
+
+    #[schemars(
+        description = "Move feature to a different parent (reparenting). Pass the parent feature UUID, or null to make it a root feature."
+    )]
+    #[serde(default)]
+    pub parent_id: Option<Uuid>,
+
+    #[schemars(
+        description = "Assign to a version for release planning. Pass version UUID to assign, or use set_version_null=true to unassign."
+    )]
+    #[serde(default)]
+    pub target_version_id: Option<Uuid>,
+
+    #[schemars(
+        description = "Set to true to explicitly unassign the feature from any version. Use this instead of passing null for target_version_id."
+    )]
+    #[serde(default)]
+    pub clear_version: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

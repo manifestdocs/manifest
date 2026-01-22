@@ -11,7 +11,7 @@ use crate::mcp::{
         CommitInfo, CompleteFeatureRequest, CreateFeatureRequest, FeatureInfo,
         FeatureInfoWithContext, FeatureListSummaryResponse, FeatureSummaryInfo,
         FindFeaturesRequest, GetFeatureRequest, GetNextFeatureRequest, HistoryEntryInfo,
-        PlanFeaturesRequest, RenderFeatureTreeRequest, StartFeatureRequest,
+        PlanFeaturesRequest, RenderFeatureTreeRequest, StartFeatureRequest, UpdateFeatureRequest,
     },
     ManifestClient,
 };
@@ -169,6 +169,59 @@ pub async fn create_feature(
                 target_version_id: None,
             },
         )
+        .await
+        .map_err(client_err)?;
+
+    let result: FeatureInfo = (&feature).into();
+
+    let json = serde_json::to_string_pretty(&result)
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(json)]))
+}
+
+/// Update any field on a feature.
+/// This is a general-purpose tool that replaces narrow state-transition tools.
+pub async fn update_feature(
+    client: &ManifestClient,
+    req: UpdateFeatureRequest,
+) -> Result<CallToolResult, McpError> {
+    // Parse state if provided
+    let state = if let Some(ref state_str) = req.state {
+        Some(FeatureState::from_str(state_str).map_err(|_| {
+            McpError::invalid_params(
+                format!(
+                    "Invalid state '{}'. Must be: proposed, in_progress, implemented, or archived",
+                    state_str
+                ),
+                None,
+            )
+        })?)
+    } else {
+        None
+    };
+
+    // Build the update input
+    // Handle target_version_id: if clear_version is true, set to Some(None) to clear it
+    // Otherwise, if target_version_id is provided, set to Some(Some(id))
+    let target_version_id = if req.clear_version {
+        Some(None) // Explicitly clear the version
+    } else {
+        req.target_version_id.map(Some) // Set to provided value, or None if not provided
+    };
+
+    let input = UpdateFeatureInput {
+        parent_id: req.parent_id,
+        title: req.title,
+        details: req.details,
+        desired_details: req.desired_details,
+        state,
+        priority: req.priority,
+        target_version_id,
+    };
+
+    let feature = client
+        .update_feature(req.feature_id, &input)
         .await
         .map_err(client_err)?;
 

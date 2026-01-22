@@ -7,7 +7,13 @@
 //! - Versions: list_versions, create_version, set_feature_version, release_version
 
 use super::tools;
-use super::types::*;
+use super::types::{
+    AddProjectDirectoryRequest, CompleteFeatureRequest, CreateFeatureRequest, CreateVersionRequest,
+    FindFeaturesRequest, GenerateFeatureTreeRequest, GetFeatureRequest, GetNextFeatureRequest,
+    InitProjectRequest, ListProjectsRequest, ListVersionsRequest, PlanFeaturesRequest,
+    ReleaseVersionRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest,
+    UpdateFeatureRequest,
+};
 use super::ManifestClient;
 use rmcp::{
     handler::server::{tool::ToolRouter, wrapper::Parameters},
@@ -162,6 +168,16 @@ impl McpServer {
     }
 
     #[tool(
+        description = "UPDATE: Modify any feature field. This is the Swiss Army knife for feature updates—use it to change title, details, state, priority, parent, version assignment, or propose changes for human review via desired_details. Replaces narrow tools with one flexible tool + guidance."
+    )]
+    async fn update_feature(
+        &self,
+        params: Parameters<UpdateFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::update_feature(&self.client, params.0).await
+    }
+
+    #[tool(
         description = "ORIENT: Get the next workable feature. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'now' version. Use this to find what to work on."
     )]
     async fn get_next_feature(
@@ -278,10 +294,19 @@ WORKFLOW:
 3. BUILD — implement against the spec:
    - The feature details ARE your specification
    - Write tests first, then implement, then verify
+   - Use update_feature to evolve the spec as you learn more
 
 4. DOCUMENT — record what you did:
    - complete_feature — provide summary + commit SHAs
    - This creates a history entry so future agents (or future you) know what happened
+
+UPDATING FEATURES:
+update_feature is the Swiss Army knife for modifying features. Use it to:
+- Change state: Set to 'in_progress', 'implemented', 'archived' as appropriate
+- Update spec: Modify details when implementation reveals new information
+- Propose changes: Set desired_details to suggest changes for human review (they see a diff in web UI)
+- Reorganize: Change parent_id to move features in the tree
+- Reprioritize: Adjust priority to reorder within parent
 
 VERSIONS & PLANNING:
 - list_versions — see Now (current focus), Next (queued), Later (backlog)
