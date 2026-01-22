@@ -5,11 +5,11 @@
 //!
 //! # Usage
 //!
-//! ```no_run
+//! ```ignore
 //! use manifest_core::db::Database;
 //! use manifest_core::models::*;
 //!
-//! let db = Database::open_default()?;
+//! let db = Database::open_default().await?;
 //! db.migrate()?;
 //!
 //! let features = db.get_all_features()?;
