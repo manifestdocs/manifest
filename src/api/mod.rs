@@ -110,11 +110,15 @@ pub fn create_router_with_clerk(db: Database, verifier: ClerkVerifier) -> Router
 
     // Public endpoints (unauthenticated)
     // - Health check for load balancers
-    // - SSE subscriptions (EventSource doesn't support auth headers)
-    let public_router = Router::new().route("/health", get(handlers::health)).route(
-        "/projects/{id}/subscribe",
-        get(handlers::subscribe_project_features),
-    );
+    let public_router = Router::new().route("/health", get(handlers::health));
+
+    // SSE endpoint requires token in query param (EventSource doesn't support auth headers)
+    let sse_router = Router::new()
+        .route(
+            "/projects/{id}/subscribe",
+            get(handlers::subscribe_project_features_auth),
+        )
+        .with_state(clerk_state.clone());
 
     // Protected API routes with Clerk auth
     let protected_api = Router::new()
@@ -164,7 +168,6 @@ pub fn create_router_with_clerk(db: Database, verifier: ClerkVerifier) -> Router
             "/projects/{id}/features/tree",
             get(handlers::get_feature_tree),
         )
-        // Note: SSE subscribe endpoint is public (EventSource doesn't support auth headers)
         // Directories (for delete by directory id)
         .route(
             "/directories/{id}",
@@ -193,7 +196,7 @@ pub fn create_router_with_clerk(db: Database, verifier: ClerkVerifier) -> Router
         )
         // Apply Clerk auth middleware
         .layer(axum::middleware::from_fn_with_state(
-            clerk_state,
+            clerk_state.clone(),
             clerk_middleware::clerk_auth_middleware,
         ));
 
@@ -209,11 +212,11 @@ pub fn create_router_with_clerk(db: Database, verifier: ClerkVerifier) -> Router
 
     let cors_layer = build_cors_layer(&config);
 
-    // Combine public (unauthenticated) with protected API
-    let api = public_router.merge(protected_api);
+    // Combine public (unauthenticated), SSE (token auth), and protected API
+    let api = public_router.merge(sse_router).merge(protected_api);
 
-    // MCP router is stateless (uses its own HTTP client internally)
-    let mcp_router = mcp::streamable_http_router();
+    // MCP router with Clerk authentication for cloud mode
+    let mcp_router = mcp::streamable_http_router_with_auth(clerk_state);
 
     Router::new()
         .nest("/api/v1", api)
@@ -281,7 +284,6 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
             "/projects/{id}/features/tree",
             get(handlers::get_feature_tree),
         )
-        // Note: SSE subscribe endpoint is public (EventSource doesn't support auth headers)
         // Directories (for delete by directory id)
         .route(
             "/directories/{id}",
