@@ -56,3 +56,49 @@ pub struct CreateOAuthIdentityInput {
     pub provider_user_id: String,
     pub provider_email: Option<String>,
 }
+
+/// Project membership roles with hierarchical permissions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MembershipRole {
+    /// Read-only access to project and features.
+    Viewer,
+    /// Can create, update, delete features and versions.
+    Member,
+    /// Member permissions + can manage non-owner members.
+    Admin,
+    /// Full access including project deletion and ownership transfer.
+    Owner,
+}
+
+impl MembershipRole {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "viewer" => Some(Self::Viewer),
+            "member" => Some(Self::Member),
+            "admin" => Some(Self::Admin),
+            "owner" => Some(Self::Owner),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Viewer => "viewer",
+            Self::Member => "member",
+            Self::Admin => "admin",
+            Self::Owner => "owner",
+        }
+    }
+}
+
+/// A user's membership in a project with a specific role.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectMembership {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub user_id: Uuid,
+    pub role: MembershipRole,
+    pub invited_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+}

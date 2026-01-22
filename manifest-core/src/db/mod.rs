@@ -12,6 +12,61 @@ use uuid::Uuid;
 use crate::models::*;
 
 // ============================================================
+// Database Dialect
+// ============================================================
+
+/// Database dialect for SQL syntax differences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DbDialect {
+    Sqlite,
+    Postgres,
+}
+
+impl DbDialect {
+    /// Detect dialect from a database URL.
+    pub fn from_url(url: &str) -> Self {
+        if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+            DbDialect::Postgres
+        } else {
+            DbDialect::Sqlite
+        }
+    }
+
+    /// SQL to check if a table exists.
+    pub fn table_exists_sql(&self, table_name: &str) -> String {
+        match self {
+            DbDialect::Sqlite => format!(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{}'",
+                table_name
+            ),
+            DbDialect::Postgres => format!(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='{}'",
+                table_name
+            ),
+        }
+    }
+
+    /// Returns true if this dialect is SQLite.
+    pub fn is_sqlite(&self) -> bool {
+        matches!(self, DbDialect::Sqlite)
+    }
+
+    /// Returns true if this dialect is PostgreSQL.
+    pub fn is_postgres(&self) -> bool {
+        matches!(self, DbDialect::Postgres)
+    }
+
+    /// SQL fragment for unlimited results with an offset.
+    /// SQLite uses `LIMIT -1 OFFSET n`, PostgreSQL uses `LIMIT ALL OFFSET n`.
+    pub fn unlimited_offset_sql(&self) -> &'static str {
+        match self {
+            DbDialect::Sqlite => "LIMIT -1",
+            DbDialect::Postgres => "LIMIT ALL",
+        }
+    }
+}
+
+// ============================================================
 // Security Utilities
 // ============================================================
 
@@ -95,6 +150,7 @@ pub struct RootFeatureMigrationReport {
 
 pub struct Database {
     pool: AnyPool,
+    dialect: DbDialect,
     events: broadcast::Sender<FeatureEvent>,
 }
 
@@ -105,11 +161,21 @@ impl Database {
         // Install the SQLx any driver for the URL scheme
         sqlx::any::install_default_drivers();
 
+        let dialect = DbDialect::from_url(url);
         let pool = AnyPool::connect(url).await?;
 
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
 
-        Ok(Self { pool, events })
+        Ok(Self {
+            pool,
+            dialect,
+            events,
+        })
+    }
+
+    /// Returns the database dialect (SQLite or PostgreSQL).
+    pub fn dialect(&self) -> DbDialect {
+        self.dialect
     }
 
     /// Open a SQLite database at the specified path.
@@ -122,13 +188,13 @@ impl Database {
         let url = format!("sqlite:{}?mode=rwc", path.display());
         let db = Self::connect(&url).await?;
 
-        // Enable WAL mode for SQLite
+        // Enable WAL mode and foreign keys for SQLite
         if url.starts_with("sqlite:") {
             sqlx::query("PRAGMA journal_mode = WAL")
                 .execute(&db.pool)
                 .await
                 .ok();
-            sqlx::query("PRAGMA foreign_keys = OFF")
+            sqlx::query("PRAGMA foreign_keys = ON")
                 .execute(&db.pool)
                 .await
                 .ok();
@@ -159,7 +225,7 @@ impl Database {
         let unique_id = uuid::Uuid::new_v4();
         let url = format!("sqlite:file:memdb_{}?mode=memory&cache=shared", unique_id);
         let db = Self::connect(&url).await?;
-        sqlx::query("PRAGMA foreign_keys = OFF")
+        sqlx::query("PRAGMA foreign_keys = ON")
             .execute(&db.pool)
             .await
             .ok();
@@ -174,12 +240,11 @@ impl Database {
     /// Run database migrations.
     pub async fn migrate(&self) -> Result<()> {
         // Check if this is an existing database with our custom schema_migrations table
-        let migration_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .unwrap_or(0);
+        let migration_sql = self.dialect.table_exists_sql("schema_migrations");
+        let migration_count: i64 = sqlx::query_scalar(&migration_sql)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
 
         if migration_count > 0 {
             // Existing database with old migration system - don't run SQLx migrations
@@ -189,13 +254,12 @@ impl Database {
             return Ok(());
         }
 
-        // Check if core tables exist (SQLite-specific check)
-        let features_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features'",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .unwrap_or(0);
+        // Check if core tables exist
+        let features_sql = self.dialect.table_exists_sql("features");
+        let features_count: i64 = sqlx::query_scalar(&features_sql)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
 
         if features_count > 0 {
             tracing::info!("Detected existing database schema, skipping migrations");
@@ -641,13 +705,15 @@ impl Database {
                 .await?
             }
             (None, Some(off)) => {
-                sqlx::query(
+                let sql = format!(
                     "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                     FROM features ORDER BY priority, title LIMIT -1 OFFSET $1",
-                )
-                .bind(off as i64)
-                .fetch_all(&self.pool)
-                .await?
+                     FROM features ORDER BY priority, title {} OFFSET $1",
+                    self.dialect.unlimited_offset_sql()
+                );
+                sqlx::query(&sql)
+                    .bind(off as i64)
+                    .fetch_all(&self.pool)
+                    .await?
             }
             (None, None) => {
                 sqlx::query(
@@ -695,14 +761,16 @@ impl Database {
                 .await?
             }
             (None, Some(off)) => {
-                sqlx::query(
+                let sql = format!(
                     "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                     FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT -1 OFFSET $2",
-                )
-                .bind(project_id.to_string())
-                .bind(off as i64)
-                .fetch_all(&self.pool)
-                .await?
+                     FROM features WHERE project_id = $1 ORDER BY priority, title {} OFFSET $2",
+                    self.dialect.unlimited_offset_sql()
+                );
+                sqlx::query(&sql)
+                    .bind(project_id.to_string())
+                    .bind(off as i64)
+                    .fetch_all(&self.pool)
+                    .await?
             }
             (None, None) => {
                 sqlx::query(
@@ -1618,12 +1686,128 @@ impl Database {
 
         Ok(rows.iter().map(row_to_oauth_identity).collect())
     }
+
+    // ============================================================
+    // Project Membership operations
+    // ============================================================
+
+    /// Get a user's membership in a project.
+    pub async fn get_project_membership(
+        &self,
+        project_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<ProjectMembership>> {
+        let row = sqlx::query(
+            "SELECT id, project_id, user_id, role, invited_by, created_at
+             FROM project_memberships WHERE project_id = $1 AND user_id = $2",
+        )
+        .bind(project_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_project_membership))
+    }
+
+    /// Get all project IDs a user can access (via membership).
+    pub async fn get_user_project_ids(&self, user_id: Uuid) -> Result<Vec<Uuid>> {
+        let rows: Vec<String> =
+            sqlx::query_scalar("SELECT project_id FROM project_memberships WHERE user_id = $1")
+                .bind(user_id.to_string())
+                .fetch_all(&self.pool)
+                .await?;
+
+        Ok(rows.into_iter().map(parse_uuid).collect())
+    }
+
+    /// Get all projects a user can access (via membership).
+    pub async fn get_user_projects(&self, user_id: Uuid) -> Result<Vec<Project>> {
+        let rows = sqlx::query(
+            "SELECT p.id, p.name, p.description, p.instructions, p.current_version_id, p.root_feature_id, p.created_at, p.updated_at
+             FROM projects p
+             INNER JOIN project_memberships pm ON p.id = pm.project_id
+             WHERE pm.user_id = $1
+             ORDER BY p.name",
+        )
+        .bind(user_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_project).collect())
+    }
+
+    /// Create a project with an owner membership.
+    /// This ensures the creating user automatically becomes the owner.
+    pub async fn create_project_with_owner(
+        &self,
+        input: CreateProjectInput,
+        owner_id: Uuid,
+    ) -> Result<Project> {
+        let project_id = Uuid::new_v4();
+        let root_feature_id = Uuid::new_v4();
+        let membership_id = Uuid::new_v4();
+        let now = Utc::now();
+
+        // Create project with owner_id
+        sqlx::query(
+            "INSERT INTO projects (id, name, description, instructions, root_feature_id, owner_id, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(project_id.to_string())
+        .bind(&input.name)
+        .bind(&input.description)
+        .bind(&input.instructions)
+        .bind(root_feature_id.to_string())
+        .bind(owner_id.to_string())
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        // Create root feature
+        sqlx::query(
+            "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, created_at, updated_at)
+             VALUES ($1, $2, NULL, $3, $4, 'implemented', 0, $5, $6)",
+        )
+        .bind(root_feature_id.to_string())
+        .bind(project_id.to_string())
+        .bind(&input.name)
+        .bind(&input.instructions)
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        // Create owner membership
+        sqlx::query(
+            "INSERT INTO project_memberships (id, project_id, user_id, role, created_at)
+             VALUES ($1, $2, $3, 'owner', $4)",
+        )
+        .bind(membership_id.to_string())
+        .bind(project_id.to_string())
+        .bind(owner_id.to_string())
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(Project {
+            id: project_id,
+            name: input.name,
+            description: input.description,
+            instructions: input.instructions,
+            current_version_id: None,
+            root_feature_id: Some(root_feature_id),
+            created_at: now,
+            updated_at: now,
+        })
+    }
 }
 
 impl Clone for Database {
     fn clone(&self) -> Self {
         Self {
             pool: self.pool.clone(),
+            dialect: self.dialect,
             events: self.events.clone(),
         }
     }
@@ -1789,6 +1973,18 @@ fn row_to_oauth_identity(row: &AnyRow) -> OAuthIdentity {
         token_expires_at: row
             .get::<Option<String>, _>("token_expires_at")
             .map(parse_datetime),
+        created_at: parse_datetime(row.get("created_at")),
+    }
+}
+
+fn row_to_project_membership(row: &AnyRow) -> ProjectMembership {
+    ProjectMembership {
+        id: parse_uuid(row.get("id")),
+        project_id: parse_uuid(row.get("project_id")),
+        user_id: parse_uuid(row.get("user_id")),
+        role: MembershipRole::from_str(&row.get::<String, _>("role"))
+            .unwrap_or(MembershipRole::Viewer),
+        invited_by: row.get::<Option<String>, _>("invited_by").map(parse_uuid),
         created_at: parse_datetime(row.get("created_at")),
     }
 }
