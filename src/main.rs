@@ -77,6 +77,9 @@ fn init_tracing(use_stderr: bool) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load .env file if present (ignored if missing)
+    dotenvy::dotenv().ok();
+
     let cli = Cli::parse();
 
     // MCP mode needs stderr for logging since stdout is the protocol channel
@@ -91,14 +94,30 @@ async fn main() -> anyhow::Result<()> {
         }) => {
             // Allow env var override for container deployment
             let bind_addr = std::env::var("MANIFEST_BIND_ADDR").unwrap_or(bind);
+            let is_cloud_mode = std::env::var("MANIFEST_MODE")
+                .map(|m| m.to_lowercase() == "cloud")
+                .unwrap_or(false);
 
             print_banner(std::io::stdout(), &format!("http://{}:{}", bind_addr, port));
             tracing::info!("Starting Manifest server on {}:{}", bind_addr, port);
+            if is_cloud_mode {
+                tracing::info!("Running in CLOUD mode with Clerk authentication");
+            } else {
+                tracing::info!("Running in LOCAL mode (no authentication)");
+            }
 
-            let db = db::Database::open_default()?;
-            db.migrate()?;
+            let db = db::Database::open_default().await?;
+            db.migrate().await?;
 
-            let app = api::create_router(db);
+            let app = if is_cloud_mode {
+                // Cloud mode: use Clerk authentication
+                let verifier = api::ClerkVerifier::from_env()
+                    .expect("CLERK_DOMAIN environment variable required for cloud mode");
+                api::create_router_with_clerk(db, verifier)
+            } else {
+                // Local mode: no authentication
+                api::create_router(db)
+            };
 
             let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port)).await?;
             tracing::info!("Manifest server listening on http://{}:{}", bind_addr, port);
@@ -121,10 +140,10 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::MigrateRoots) => {
             println!("Migrating existing projects to use root features...");
-            let db = db::Database::open_default()?;
-            db.migrate()?;
+            let db = db::Database::open_default().await?;
+            db.migrate().await?;
 
-            let report = db.migrate_to_root_features()?;
+            let report = db.migrate_to_root_features().await?;
             println!("Migration complete:");
             println!("  Projects migrated: {}", report.projects_migrated);
             println!("  Features reparented: {}", report.features_reparented);
@@ -141,14 +160,30 @@ async fn main() -> anyhow::Result<()> {
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(17010);
+            let is_cloud_mode = std::env::var("MANIFEST_MODE")
+                .map(|m| m.to_lowercase() == "cloud")
+                .unwrap_or(false);
 
             print_banner(std::io::stdout(), &format!("http://{}:{}", bind_addr, port));
             tracing::info!("Starting Manifest server on {}:{}", bind_addr, port);
+            if is_cloud_mode {
+                tracing::info!("Running in CLOUD mode with Clerk authentication");
+            } else {
+                tracing::info!("Running in LOCAL mode (no authentication)");
+            }
 
-            let db = db::Database::open_default()?;
-            db.migrate()?;
+            let db = db::Database::open_default().await?;
+            db.migrate().await?;
 
-            let app = api::create_router(db);
+            let app = if is_cloud_mode {
+                // Cloud mode: use Clerk authentication
+                let verifier = api::ClerkVerifier::from_env()
+                    .expect("CLERK_DOMAIN environment variable required for cloud mode");
+                api::create_router_with_clerk(db, verifier)
+            } else {
+                // Local mode: no authentication
+                api::create_router(db)
+            };
 
             let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port)).await?;
             tracing::info!("Manifest server listening on http://{}:{}", bind_addr, port);

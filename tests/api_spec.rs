@@ -4,9 +4,11 @@ use manifest::api::create_router;
 use manifest::db::Database;
 use manifest::models::*;
 
-fn setup() -> TestServer {
-    let db = Database::open_memory().expect("Failed to create database");
-    db.migrate().expect("Failed to migrate");
+async fn setup() -> TestServer {
+    let db = Database::open_memory()
+        .await
+        .expect("Failed to create database");
+    db.migrate().await.expect("Failed to migrate");
     let app = create_router(db);
     TestServer::new(app).expect("Failed to create test server")
 }
@@ -28,7 +30,7 @@ mod feature_roots {
 
     #[tokio::test]
     async fn returns_empty_list_when_no_features_exist() {
-        let server = setup();
+        let server = setup().await;
         let project = create_test_project(&server).await;
 
         let response = server
@@ -42,7 +44,7 @@ mod feature_roots {
 
     #[tokio::test]
     async fn returns_only_root_features() {
-        let server = setup();
+        let server = setup().await;
         let project = create_test_project(&server).await;
 
         // Create root feature
@@ -95,7 +97,7 @@ mod feature_children {
 
     #[tokio::test]
     async fn returns_empty_list_when_feature_has_no_children() {
-        let server = setup();
+        let server = setup().await;
         let project = create_test_project(&server).await;
 
         let feature = server
@@ -124,7 +126,7 @@ mod feature_children {
 
     #[tokio::test]
     async fn returns_direct_children_ordered_by_title() {
-        let server = setup();
+        let server = setup().await;
         let project = create_test_project(&server).await;
 
         let parent = server
@@ -183,7 +185,7 @@ mod feature_children {
 
     #[tokio::test]
     async fn does_not_return_grandchildren() {
-        let server = setup();
+        let server = setup().await;
         let project = create_test_project(&server).await;
 
         let root = server
@@ -246,7 +248,7 @@ mod feature_hierarchy_create {
 
     #[tokio::test]
     async fn creates_child_feature_with_parent_id() {
-        let server = setup();
+        let server = setup().await;
         let project = create_test_project(&server).await;
 
         let parent = server
@@ -286,7 +288,7 @@ mod feature_hierarchy_create {
 
     #[tokio::test]
     async fn creates_deeply_nested_features() {
-        let server = setup();
+        let server = setup().await;
         let project = create_test_project(&server).await;
 
         let level0 = server
@@ -348,7 +350,7 @@ mod feature_cascade_delete {
 
     #[tokio::test]
     async fn deletes_children_when_parent_is_deleted() {
-        let server = setup();
+        let server = setup().await;
         let project = create_test_project(&server).await;
 
         let parent = server
@@ -400,7 +402,7 @@ mod feature_history {
 
     #[tokio::test]
     async fn returns_empty_list_when_no_history() {
-        let server = setup();
+        let server = setup().await;
         let project = create_test_project(&server).await;
 
         let feature = server
@@ -436,9 +438,11 @@ mod security_auth {
     use super::*;
     use manifest::api::{create_router_with_config, SecurityConfig};
 
-    fn setup_with_auth(api_key: &str) -> TestServer {
-        let db = Database::open_memory().expect("Failed to create database");
-        db.migrate().expect("Failed to migrate");
+    async fn setup_with_auth(api_key: &str) -> TestServer {
+        let db = Database::open_memory()
+            .await
+            .expect("Failed to create database");
+        db.migrate().await.expect("Failed to migrate");
         let config = SecurityConfig::with_api_key(api_key);
         let app = create_router_with_config(db, config);
         TestServer::new(app).expect("Failed to create test server")
@@ -446,7 +450,7 @@ mod security_auth {
 
     #[tokio::test]
     async fn health_endpoint_is_accessible_without_auth() {
-        let server = setup_with_auth("test-secret-key");
+        let server = setup_with_auth("test-secret-key").await;
 
         let response = server.get("/api/v1/health").await;
 
@@ -455,7 +459,7 @@ mod security_auth {
 
     #[tokio::test]
     async fn protected_endpoint_requires_auth() {
-        let server = setup_with_auth("test-secret-key");
+        let server = setup_with_auth("test-secret-key").await;
 
         let response = server.get("/api/v1/projects").await;
 
@@ -464,7 +468,7 @@ mod security_auth {
 
     #[tokio::test]
     async fn protected_endpoint_accepts_valid_bearer_token() {
-        let server = setup_with_auth("test-secret-key");
+        let server = setup_with_auth("test-secret-key").await;
 
         let response = server
             .get("/api/v1/projects")
@@ -476,7 +480,7 @@ mod security_auth {
 
     #[tokio::test]
     async fn protected_endpoint_rejects_invalid_bearer_token() {
-        let server = setup_with_auth("test-secret-key");
+        let server = setup_with_auth("test-secret-key").await;
 
         let response = server
             .get("/api/v1/projects")
@@ -488,7 +492,7 @@ mod security_auth {
 
     #[tokio::test]
     async fn protected_endpoint_rejects_malformed_auth_header() {
-        let server = setup_with_auth("test-secret-key");
+        let server = setup_with_auth("test-secret-key").await;
 
         let response = server
             .get("/api/v1/projects")
@@ -500,7 +504,7 @@ mod security_auth {
 
     #[tokio::test]
     async fn post_endpoint_requires_auth() {
-        let server = setup_with_auth("test-secret-key");
+        let server = setup_with_auth("test-secret-key").await;
 
         let response = server
             .post("/api/v1/projects")
@@ -516,7 +520,7 @@ mod security_auth {
 
     #[tokio::test]
     async fn post_endpoint_works_with_valid_auth() {
-        let server = setup_with_auth("test-secret-key");
+        let server = setup_with_auth("test-secret-key").await;
 
         let response = server
             .post("/api/v1/projects")

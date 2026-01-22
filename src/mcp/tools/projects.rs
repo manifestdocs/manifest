@@ -58,16 +58,20 @@ pub async fn list_projects(
     // No filter - return all projects
     let projects = client.list_projects().await.map_err(client_err)?;
 
+    // Build project info with instructions from root feature (source of truth)
+    let mut project_infos = Vec::with_capacity(projects.len());
+    for p in projects {
+        let instructions = client.get_project_instructions(&p).await;
+        project_infos.push(ProjectInfo {
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            instructions,
+        });
+    }
+
     let result = ProjectListResponse {
-        projects: projects
-            .into_iter()
-            .map(|p| ProjectInfo {
-                id: p.id,
-                name: p.name,
-                description: p.description,
-                instructions: p.instructions,
-            })
-            .collect(),
+        projects: project_infos,
         hint: None,
     };
 
@@ -152,13 +156,16 @@ pub async fn init_project(
         .await
         .map_err(client_err)?;
 
+    // Get instructions from root feature (source of truth) or fallback
+    let instructions = client.get_project_instructions(&project).await;
+
     // Build response with project info and analysis
     let result = serde_json::json!({
         "project": {
             "id": project.id,
             "name": project.name,
             "description": project.description,
-            "instructions": project.instructions,
+            "instructions": instructions,
         },
         "directory": {
             "id": directory.id,

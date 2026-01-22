@@ -33,6 +33,7 @@ pub async fn list_features(
     // Use SQL-based pagination for efficiency
     let features = db
         .get_all_features_paginated(query.limit, query.offset)
+        .await
         .map_err(internal_error)?;
 
     // Always return summaries only - use get_feature for full details
@@ -49,6 +50,7 @@ pub async fn list_project_features(
     // Use SQL-based pagination for efficiency
     let features = db
         .get_features_by_project_paginated(project_id, query.limit, query.offset)
+        .await
         .map_err(internal_error)?;
     // Always return summaries only - use get_feature for full details
     let summaries: Vec<FeatureSummary> = features.into_iter().map(Into::into).collect();
@@ -61,6 +63,7 @@ pub async fn list_root_features(
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<Feature>>, (StatusCode, String)> {
     db.get_root_features(project_id)
+        .await
         .map(Json)
         .map_err(internal_error)
 }
@@ -71,6 +74,7 @@ pub async fn get_feature_tree(
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<FeatureTreeNode>>, (StatusCode, String)> {
     db.get_feature_tree(project_id)
+        .await
         .map(Json)
         .map_err(internal_error)
 }
@@ -98,12 +102,16 @@ pub async fn get_next_feature(
     // Get the next workable feature
     let feature = db
         .get_next_workable_feature(project_id, query.version_id)
+        .await
         .map_err(internal_error)?;
 
     // If we found a feature, enrich it with context
     match feature {
         Some(f) => {
-            let feature_with_context = db.get_feature_with_context(f.id).map_err(internal_error)?;
+            let feature_with_context = db
+                .get_feature_with_context(f.id)
+                .await
+                .map_err(internal_error)?;
             Ok(Json(feature_with_context))
         }
         None => Ok(Json(None)),
@@ -115,7 +123,10 @@ pub async fn list_children(
     State(db): State<Database>,
     Path(parent_id): Path<Uuid>,
 ) -> Result<Json<Vec<Feature>>, (StatusCode, String)> {
-    db.get_children(parent_id).map(Json).map_err(internal_error)
+    db.get_children(parent_id)
+        .await
+        .map(Json)
+        .map_err(internal_error)
 }
 
 /// Get implementation history entries for a feature.
@@ -124,6 +135,7 @@ pub async fn get_feature_history(
     Path(feature_id): Path<Uuid>,
 ) -> Result<Json<Vec<FeatureHistory>>, (StatusCode, String)> {
     db.get_feature_history(feature_id)
+        .await
         .map(Json)
         .map_err(internal_error)
 }
@@ -153,11 +165,12 @@ pub async fn create_feature_history(
     // Verify feature exists
     let feature = db
         .get_feature(feature_id)
+        .await
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))?;
 
     // Verify it's a leaf feature
-    if !db.is_leaf(feature_id).map_err(internal_error)? {
+    if !db.is_leaf(feature_id).await.map_err(internal_error)? {
         return Err((
             StatusCode::BAD_REQUEST,
             "Cannot create history on a non-leaf feature".to_string(),
@@ -175,6 +188,7 @@ pub async fn create_feature_history(
                 commits: input.commits,
             },
         })
+        .await
         .map_err(internal_error)?;
 
     // Optionally update feature state to implemented
@@ -191,6 +205,7 @@ pub async fn create_feature_history(
                 target_version_id: None,
             },
         )
+        .await
         .map_err(internal_error)?;
     }
 
@@ -203,6 +218,7 @@ pub async fn get_feature(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Feature>, (StatusCode, String)> {
     db.get_feature(id)
+        .await
         .map_err(internal_error)?
         .map(Json)
         .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
@@ -217,6 +233,7 @@ pub async fn get_feature_with_context(
     Path(id): Path<Uuid>,
 ) -> Result<Json<crate::models::FeatureWithContext>, (StatusCode, String)> {
     db.get_feature_with_context(id)
+        .await
         .map_err(internal_error)?
         .map(Json)
         .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
@@ -228,6 +245,7 @@ pub async fn get_feature_diff(
     Path(id): Path<Uuid>,
 ) -> Result<Json<FeatureDiff>, (StatusCode, String)> {
     db.get_feature_diff(id)
+        .await
         .map_err(internal_error)?
         .map(Json)
         .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
@@ -240,6 +258,7 @@ pub async fn create_feature(
     Json(input): Json<CreateFeatureInput>,
 ) -> Result<(StatusCode, Json<Feature>), (StatusCode, String)> {
     db.create_feature(project_id, input)
+        .await
         .map(|f| (StatusCode::CREATED, Json(f)))
         .map_err(internal_error)
 }
@@ -251,6 +270,7 @@ pub async fn update_feature(
     Json(input): Json<UpdateFeatureInput>,
 ) -> Result<Json<Feature>, (StatusCode, String)> {
     db.update_feature(id, input)
+        .await
         .map_err(internal_error)?
         .map(Json)
         .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
@@ -261,7 +281,7 @@ pub async fn delete_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    if db.delete_feature(id).map_err(internal_error)? {
+    if db.delete_feature(id).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err((StatusCode::NOT_FOUND, "Feature not found".to_string()))
@@ -286,6 +306,7 @@ pub async fn search_features(
     Query(query): Query<SearchFeaturesQuery>,
 ) -> Result<Json<Vec<FeatureSummary>>, (StatusCode, String)> {
     db.search_features(&query.q, query.project_id, query.limit)
+        .await
         .map(Json)
         .map_err(internal_error)
 }
@@ -315,6 +336,7 @@ pub async fn bulk_create_features(
 ) -> Result<Json<PlanFeaturesResponse>, (StatusCode, String)> {
     // Verify project exists
     db.get_project(project_id)
+        .await
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
@@ -330,6 +352,7 @@ pub async fn bulk_create_features(
 
         // Create all features in a single transaction
         db.create_features_bulk(project_id, feature_inputs)
+            .await
             .map_err(internal_error)?;
     }
 

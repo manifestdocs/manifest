@@ -50,7 +50,7 @@ pub struct FindFeaturesRequest {
     #[schemars(description = "Optional project UUID to filter features by project")]
     pub project_id: Option<Uuid>,
     #[schemars(
-        description = "Optional state filter: 'proposed', 'in_progress', 'implemented', or 'deprecated'"
+        description = "Optional state filter: 'proposed', 'in_progress', 'implemented', or 'archived'"
     )]
     pub state: Option<String>,
     #[schemars(
@@ -79,7 +79,7 @@ pub struct UpdateFeatureStateRequest {
     #[schemars(description = "The UUID of the feature to update")]
     pub feature_id: Uuid,
     #[schemars(
-        description = "The new state: 'proposed', 'in_progress', 'implemented', or 'deprecated'"
+        description = "The new state: 'proposed', 'in_progress', 'implemented', or 'archived'"
     )]
     #[serde(default)]
     pub state: Option<String>,
@@ -143,7 +143,7 @@ pub struct CreateFeatureRequest {
     #[serde(default)]
     pub details: Option<String>,
     #[schemars(
-        description = "Initial state: 'proposed' (default), 'in_progress', 'implemented', or 'deprecated'"
+        description = "Initial state: 'proposed' (default), 'in_progress', 'implemented', or 'archived'"
     )]
     #[serde(default = "default_proposed")]
     pub state: String,

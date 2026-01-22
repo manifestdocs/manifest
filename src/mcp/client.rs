@@ -438,6 +438,21 @@ impl ManifestClient {
 // ============================================================
 
 impl ManifestClient {
+    /// Get the instructions for a project.
+    ///
+    /// If the project has a root feature, returns its details (the source of truth).
+    /// Otherwise falls back to project.instructions (legacy).
+    pub async fn get_project_instructions(&self, project: &Project) -> Option<String> {
+        if let Some(root_id) = project.root_feature_id {
+            // Fetch root feature and use its details
+            if let Ok(feature) = self.get_feature(root_id).await {
+                return feature.details;
+            }
+        }
+        // Fallback to legacy project.instructions
+        project.instructions.clone()
+    }
+
     /// Get project context for MCP response (project + matching directory info).
     pub async fn get_project_context(
         &self,
@@ -454,12 +469,17 @@ impl ManifestClient {
             })
             .ok_or_else(|| ClientError::Server("Directory match logic error".to_string()))?;
 
+        // Get instructions from root feature (source of truth) or fallback to project.instructions
+        let instructions = self
+            .get_project_instructions(&project_with_dirs.project)
+            .await;
+
         Ok(ProjectContextResponse {
             project: ProjectInfo {
                 id: project_with_dirs.project.id,
                 name: project_with_dirs.project.name,
                 description: project_with_dirs.project.description,
-                instructions: project_with_dirs.project.instructions,
+                instructions,
             },
             directory: DirectoryInfo {
                 id: matching_dir.id,

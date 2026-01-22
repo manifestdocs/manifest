@@ -21,6 +21,7 @@ mod history;
 mod project;
 mod session;
 mod task;
+mod user;
 mod version;
 
 pub use feature::*;
@@ -28,4 +29,5 @@ pub use history::*;
 pub use project::*;
 pub use session::*;
 pub use task::*;
+pub use user::*;
 pub use version::*;

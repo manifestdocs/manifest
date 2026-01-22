@@ -932,12 +932,12 @@ components:
 
     FeatureState:
       type: string
-      enum: [proposed, in_progress, implemented, deprecated]
+      enum: [proposed, in_progress, implemented, archived]
       description: |
         - proposed: Initial state, in backlog
         - in_progress: Actively being worked on
         - implemented: Feature is live in codebase
-        - deprecated: Feature marked for removal
+        - archived: Feature archived (soft-deleted)
 
     FeatureSummary:
       type: object
@@ -1015,6 +1015,11 @@ components:
           format: uuid
           nullable: true
           description: Target version for release planning
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Move feature under a different parent. Set null to make root-level.
 
     BulkCreateFeaturesInput:
       type: object
@@ -1092,6 +1097,10 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/FeatureTreeNode"
+            is_root:
+              type: boolean
+              default: false
+              description: True if this is the project's root feature (contains project instructions)
 
     FeatureHistory:
       type: object

@@ -149,7 +149,7 @@ pub async fn create_feature(
     let state = FeatureState::from_str(&req.state).map_err(|_| {
         McpError::invalid_params(
             format!(
-                "Invalid state '{}'. Must be: proposed, in_progress, implemented, or deprecated",
+                "Invalid state '{}'. Must be: proposed, in_progress, implemented, or archived",
                 req.state
             ),
             None,

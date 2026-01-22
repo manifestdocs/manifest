@@ -117,11 +117,11 @@ pub struct AddDirectoryInput {
 /// Validate feature state is one of the allowed values.
 fn validate_feature_state(state: &str) -> Result<(), validator::ValidationError> {
     match state {
-        "proposed" | "in_progress" | "implemented" | "deprecated" => Ok(()),
+        "proposed" | "in_progress" | "implemented" | "archived" => Ok(()),
         _ => {
             let mut err = validator::ValidationError::new("invalid_state");
             err.message =
-                Some("State must be one of: proposed, in_progress, implemented, deprecated".into());
+                Some("State must be one of: proposed, in_progress, implemented, archived".into());
             Err(err)
         }
     }

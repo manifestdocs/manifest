@@ -22,7 +22,10 @@ use super::internal_error;
 pub async fn list_projects(
     State(db): State<Database>,
 ) -> Result<Json<Vec<Project>>, (StatusCode, String)> {
-    db.get_all_projects().map(Json).map_err(internal_error)
+    db.get_all_projects()
+        .await
+        .map(Json)
+        .map_err(internal_error)
 }
 
 /// Get a project by ID with its associated directories.
@@ -31,6 +34,7 @@ pub async fn get_project(
     Path(id): Path<Uuid>,
 ) -> Result<Json<ProjectWithDirectories>, (StatusCode, String)> {
     db.get_project_with_directories(id)
+        .await
         .map_err(internal_error)?
         .map(Json)
         .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))
@@ -42,6 +46,7 @@ pub async fn create_project(
     Json(input): Json<CreateProjectInput>,
 ) -> Result<(StatusCode, Json<Project>), (StatusCode, String)> {
     db.create_project(input)
+        .await
         .map(|p| (StatusCode::CREATED, Json(p)))
         .map_err(internal_error)
 }
@@ -53,6 +58,7 @@ pub async fn update_project(
     Json(input): Json<UpdateProjectInput>,
 ) -> Result<Json<Project>, (StatusCode, String)> {
     db.update_project(id, input)
+        .await
         .map_err(internal_error)?
         .map(Json)
         .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))
@@ -63,7 +69,7 @@ pub async fn delete_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    if db.delete_project(id).map_err(internal_error)? {
+    if db.delete_project(id).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err((StatusCode::NOT_FOUND, "Project not found".to_string()))
@@ -110,6 +116,7 @@ pub async fn get_project_history(
         query.offset,
         since,
     )
+    .await
     .map(Json)
     .map_err(internal_error)
 }
@@ -124,6 +131,7 @@ pub async fn list_project_directories(
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<ProjectDirectory>>, (StatusCode, String)> {
     db.get_project_directories(project_id)
+        .await
         .map(Json)
         .map_err(internal_error)
 }
@@ -135,6 +143,7 @@ pub async fn add_project_directory(
     Json(input): Json<AddDirectoryInput>,
 ) -> Result<(StatusCode, Json<ProjectDirectory>), (StatusCode, String)> {
     db.add_project_directory(project_id, input)
+        .await
         .map(|d| (StatusCode::CREATED, Json(d)))
         .map_err(internal_error)
 }
@@ -144,7 +153,11 @@ pub async fn remove_project_directory(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    if db.remove_project_directory(id).map_err(internal_error)? {
+    if db
+        .remove_project_directory(id)
+        .await
+        .map_err(internal_error)?
+    {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err((StatusCode::NOT_FOUND, "Directory not found".to_string()))
@@ -165,6 +178,7 @@ pub async fn get_project_by_directory(
     Query(query): Query<GetProjectByDirectoryQuery>,
 ) -> Result<Json<ProjectWithDirectories>, (StatusCode, String)> {
     db.get_project_by_directory(&query.path)
+        .await
         .map_err(internal_error)?
         .map(Json)
         .ok_or((

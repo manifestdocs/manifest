@@ -1,13 +1,11 @@
-mod schema;
-
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use rusqlite::Connection;
+use sqlx::any::AnyRow;
+use sqlx::{AnyPool, Row};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -18,9 +16,6 @@ use crate::models::*;
 // ============================================================
 
 /// Escape special characters in LIKE patterns to prevent SQL injection.
-///
-/// SQLite LIKE uses % and _ as wildcards. This function escapes them
-/// using \ as the escape character.
 fn escape_like_pattern(query: &str) -> String {
     query
         .replace('\\', "\\\\")
@@ -51,15 +46,10 @@ impl FeatureEvent {
 }
 
 /// Domain errors that can be meaningfully handled by callers.
-/// These are distinct from infrastructure errors (SQLite failures, etc.)
-/// which propagate as `anyhow::Error`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManifestError {
-    /// Resource does not exist (project, feature, session, task)
     NotFound(String),
-    /// Input validation failed (e.g., sessions only on leaf features)
     Validation(String),
-    /// Operation not allowed in current state (e.g., session not active)
     InvalidState(String),
 }
 
@@ -76,9 +66,8 @@ impl ManifestError {
         ManifestError::InvalidState(msg.into())
     }
 
-    /// Returns true if this is a client error (4xx), false if server error (5xx)
     pub fn is_client_error(&self) -> bool {
-        true // All ManifestError variants are client errors
+        true
     }
 }
 
@@ -94,7 +83,6 @@ impl fmt::Display for ManifestError {
 
 impl std::error::Error for ManifestError {}
 
-/// Channel capacity for feature events. Small is fine since clients just refetch.
 const EVENT_CHANNEL_CAPACITY: usize = 16;
 
 /// Migration report for root feature migration.
@@ -106,155 +94,215 @@ pub struct RootFeatureMigrationReport {
 }
 
 pub struct Database {
-    conn: Arc<Mutex<Connection>>,
-    /// Broadcast channel for feature change notifications.
-    /// Subscribers use this to know when to refetch data.
+    pool: AnyPool,
     events: broadcast::Sender<FeatureEvent>,
 }
 
 impl Database {
-    pub fn open(path: PathBuf) -> Result<Self> {
+    /// Connect to a database using a URL.
+    /// URL format: `sqlite:path/to/db.db` or `postgres://user:pass@host/db`
+    pub async fn connect(url: &str) -> Result<Self> {
+        // Install the SQLx any driver for the URL scheme
+        sqlx::any::install_default_drivers();
+
+        let pool = AnyPool::connect(url).await?;
+
+        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+
+        Ok(Self { pool, events })
+    }
+
+    /// Open a SQLite database at the specified path.
+    pub async fn open(path: PathBuf) -> Result<Self> {
         let parent = path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Database path has no parent directory"))?;
         std::fs::create_dir_all(parent)?;
-        let conn = Connection::open(&path)?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        // Explicitly disable foreign key enforcement (SQLite default) to avoid
-        // FK constraint errors when updating features with version references.
-        conn.pragma_update(None, "foreign_keys", "OFF")?;
-        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            events,
-        })
+
+        let url = format!("sqlite:{}?mode=rwc", path.display());
+        let db = Self::connect(&url).await?;
+
+        // Enable WAL mode for SQLite
+        if url.starts_with("sqlite:") {
+            sqlx::query("PRAGMA journal_mode = WAL")
+                .execute(&db.pool)
+                .await
+                .ok();
+            sqlx::query("PRAGMA foreign_keys = OFF")
+                .execute(&db.pool)
+                .await
+                .ok();
+        }
+
+        Ok(db)
     }
 
-    pub fn open_default() -> Result<Self> {
-        // Check for custom data directory from environment
+    /// Open the default SQLite database location.
+    pub async fn open_default() -> Result<Self> {
         let db_path = if let Ok(data_dir) = std::env::var("MANIFEST_DATA_DIR") {
             PathBuf::from(data_dir).join("manifest.db")
+        } else if let Ok(url) = std::env::var("DATABASE_URL") {
+            return Self::connect(&url).await;
         } else {
             let dirs = directories::ProjectDirs::from("", "", "manifest")
                 .ok_or_else(|| anyhow::anyhow!("Could not determine data directory"))?;
             dirs.data_dir().join("manifest.db")
         };
-        Self::open(db_path)
+        Self::open(db_path).await
     }
 
-    pub fn open_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
-        // Explicitly disable foreign key enforcement (SQLite default) to avoid
-        // FK constraint errors when creating projects with root features.
-        conn.pragma_update(None, "foreign_keys", "OFF")?;
-        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            events,
-        })
+    /// Open an in-memory SQLite database for testing.
+    /// Uses shared cache mode so all connections in the pool see the same database.
+    pub async fn open_memory() -> Result<Self> {
+        // Use a unique named in-memory database with shared cache
+        // This ensures all connections in the pool share the same database
+        let unique_id = uuid::Uuid::new_v4();
+        let url = format!("sqlite:file:memdb_{}?mode=memory&cache=shared", unique_id);
+        let db = Self::connect(&url).await?;
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&db.pool)
+            .await
+            .ok();
+        Ok(db)
     }
 
     /// Subscribe to feature change events.
-    /// Returns a receiver that will get notified when features are created, updated, or deleted.
     pub fn subscribe(&self) -> broadcast::Receiver<FeatureEvent> {
         self.events.subscribe()
     }
 
-    pub fn migrate(&self) -> Result<()> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        schema::run_migrations(&conn)
+    /// Run database migrations.
+    pub async fn migrate(&self) -> Result<()> {
+        // Check if this is an existing database with our custom schema_migrations table
+        let migration_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+
+        if migration_count > 0 {
+            // Existing database with old migration system - don't run SQLx migrations
+            tracing::info!(
+                "Detected existing database with schema_migrations, skipping SQLx migrations"
+            );
+            return Ok(());
+        }
+
+        // Check if core tables exist (SQLite-specific check)
+        let features_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+
+        if features_count > 0 {
+            tracing::info!("Detected existing database schema, skipping migrations");
+            return Ok(());
+        }
+
+        // Run embedded schema directly (sqlx::migrate! has issues with the any driver)
+        self.run_schema().await?;
+        Ok(())
+    }
+
+    /// Execute the initial schema SQL.
+    async fn run_schema(&self) -> Result<()> {
+        let schema = include_str!("../../migrations/20240101000000_initial.sql");
+
+        // Split on semicolons and execute each statement
+        for statement in schema.split(';') {
+            // Filter out comment lines and empty lines, then rejoin
+            let sql: String = statement
+                .lines()
+                .filter(|line| {
+                    let trimmed = line.trim();
+                    !trimmed.is_empty() && !trimmed.starts_with("--")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let sql = sql.trim();
+            if !sql.is_empty() {
+                sqlx::query(sql).execute(&self.pool).await.map_err(|e| {
+                    anyhow::anyhow!(
+                        "Migration failed: {} - SQL: {}",
+                        e,
+                        &sql[..sql.len().min(100)]
+                    )
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the underlying connection pool.
+    pub fn pool(&self) -> &AnyPool {
+        &self.pool
     }
 
     // ============================================================
     // Project operations
     // ============================================================
 
-    pub fn get_all_projects(&self) -> Result<Vec<Project>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
+    pub async fn get_all_projects(&self) -> Result<Vec<Project>> {
+        let rows = sqlx::query(
             "SELECT id, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
              FROM projects ORDER BY name",
-        )?;
+        )
+        .fetch_all(&self.pool)
+        .await?;
 
-        let projects = stmt
-            .query_map([], |row| {
-                Ok(Project {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    instructions: row.get(3)?,
-                    current_version_id: row.get::<_, Option<String>>(4)?.map(parse_uuid),
-                    root_feature_id: row.get::<_, Option<String>>(5)?.map(parse_uuid),
-                    created_at: parse_datetime(row.get::<_, String>(6)?),
-                    updated_at: parse_datetime(row.get::<_, String>(7)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(projects)
+        Ok(rows.iter().map(row_to_project).collect())
     }
 
-    pub fn get_project(&self, id: Uuid) -> Result<Option<Project>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
+    pub async fn get_project(&self, id: Uuid) -> Result<Option<Project>> {
+        let row = sqlx::query(
             "SELECT id, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
-             FROM projects WHERE id = ?",
-        )?;
+             FROM projects WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
 
-        let mut rows = stmt.query([id.to_string()])?;
-        if let Some(row) = rows.next()? {
-            Ok(Some(Project {
-                id: parse_uuid(row.get::<_, String>(0)?),
-                name: row.get(1)?,
-                description: row.get(2)?,
-                instructions: row.get(3)?,
-                current_version_id: row.get::<_, Option<String>>(4)?.map(parse_uuid),
-                root_feature_id: row.get::<_, Option<String>>(5)?.map(parse_uuid),
-                created_at: parse_datetime(row.get::<_, String>(6)?),
-                updated_at: parse_datetime(row.get::<_, String>(7)?),
-            }))
-        } else {
-            Ok(None)
-        }
+        Ok(row.as_ref().map(row_to_project))
     }
 
-    pub fn create_project(&self, input: CreateProjectInput) -> Result<Project> {
-        let mut conn = self.conn.lock().expect("database lock poisoned");
-        let tx = conn.transaction()?;
+    pub async fn create_project(&self, input: CreateProjectInput) -> Result<Project> {
         let project_id = Uuid::new_v4();
         let root_feature_id = Uuid::new_v4();
         let now = Utc::now();
 
         // Create project with root_feature_id
-        tx.execute(
+        sqlx::query(
             "INSERT INTO projects (id, name, description, instructions, root_feature_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                project_id.to_string(),
-                &input.name,
-                &input.description,
-                &input.instructions,
-                root_feature_id.to_string(),
-                now.to_rfc3339(),
-                now.to_rfc3339(),
-            ),
-        )?;
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(project_id.to_string())
+        .bind(&input.name)
+        .bind(&input.description)
+        .bind(&input.instructions)
+        .bind(root_feature_id.to_string())
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
 
-        // Create root feature (title = project name, details = project description, state = implemented)
-        tx.execute(
+        // Create root feature
+        sqlx::query(
             "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, created_at, updated_at)
-             VALUES (?, ?, NULL, ?, ?, 'implemented', 0, ?, ?)",
-            (
-                root_feature_id.to_string(),
-                project_id.to_string(),
-                &input.name,
-                &input.description,
-                now.to_rfc3339(),
-                now.to_rfc3339(),
-            ),
-        )?;
-
-        tx.commit()?;
+             VALUES ($1, $2, NULL, $3, $4, 'implemented', 0, $5, $6)",
+        )
+        .bind(root_feature_id.to_string())
+        .bind(project_id.to_string())
+        .bind(&input.name)
+        .bind(&input.instructions)
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
 
         Ok(Project {
             id: project_id,
@@ -268,29 +316,45 @@ impl Database {
         })
     }
 
-    pub fn update_project(&self, id: Uuid, input: UpdateProjectInput) -> Result<Option<Project>> {
-        let Some(existing) = self.get_project(id)? else {
+    pub async fn update_project(
+        &self,
+        id: Uuid,
+        input: UpdateProjectInput,
+    ) -> Result<Option<Project>> {
+        let Some(existing) = self.get_project(id).await? else {
             return Ok(None);
         };
 
-        let conn = self.conn.lock().expect("database lock poisoned");
         let now = Utc::now();
+        let name_changed = input.name.is_some() && input.name.as_ref() != Some(&existing.name);
         let name = input.name.unwrap_or(existing.name);
         let description = input.description.or(existing.description);
         let instructions = input.instructions.or(existing.instructions);
         let current_version_id = input.current_version_id.or(existing.current_version_id);
 
-        conn.execute(
-            "UPDATE projects SET name = ?, description = ?, instructions = ?, current_version_id = ?, updated_at = ? WHERE id = ?",
-            (
-                &name,
-                &description,
-                &instructions,
-                current_version_id.map(|u| u.to_string()),
-                now.to_rfc3339(),
-                id.to_string(),
-            ),
-        )?;
+        sqlx::query(
+            "UPDATE projects SET name = $1, description = $2, instructions = $3, current_version_id = $4, updated_at = $5 WHERE id = $6",
+        )
+        .bind(&name)
+        .bind(&description)
+        .bind(&instructions)
+        .bind(current_version_id.map(|u| u.to_string()))
+        .bind(now.to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        // Sync name to root feature title if changed
+        if name_changed {
+            if let Some(root_id) = existing.root_feature_id {
+                sqlx::query("UPDATE features SET title = $1, updated_at = $2 WHERE id = $3")
+                    .bind(&name)
+                    .bind(now.to_rfc3339())
+                    .bind(root_id.to_string())
+                    .execute(&self.pool)
+                    .await?;
+            }
+        }
 
         Ok(Some(Project {
             id,
@@ -304,97 +368,83 @@ impl Database {
         }))
     }
 
-    pub fn delete_project(&self, id: Uuid) -> Result<bool> {
-        let mut conn = self.conn.lock().expect("database lock poisoned");
-        let tx = conn.transaction()?;
-
-        // Since FK enforcement is OFF, we need to manually cascade deletes
-        // Delete in reverse dependency order
-
-        // Delete feature history for features in this project
-        tx.execute(
-            "DELETE FROM feature_history WHERE feature_id IN (SELECT id FROM features WHERE project_id = ?)",
-            [id.to_string()],
-        )?;
+    pub async fn delete_project(&self, id: Uuid) -> Result<bool> {
+        // Delete feature history
+        sqlx::query(
+            "DELETE FROM feature_history WHERE feature_id IN (SELECT id FROM features WHERE project_id = $1)",
+        )
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
 
         // Delete features
-        tx.execute(
-            "DELETE FROM features WHERE project_id = ?",
-            [id.to_string()],
-        )?;
+        sqlx::query("DELETE FROM features WHERE project_id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
 
-        // Delete project directories
-        tx.execute(
-            "DELETE FROM project_directories WHERE project_id = ?",
-            [id.to_string()],
-        )?;
+        // Delete directories
+        sqlx::query("DELETE FROM project_directories WHERE project_id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
 
         // Delete versions
-        tx.execute(
-            "DELETE FROM versions WHERE project_id = ?",
-            [id.to_string()],
-        )?;
+        sqlx::query("DELETE FROM versions WHERE project_id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
 
-        // Delete the project itself
-        let rows = tx.execute("DELETE FROM projects WHERE id = ?", [id.to_string()])?;
+        // Delete project
+        let result = sqlx::query("DELETE FROM projects WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
 
-        tx.commit()?;
-        Ok(rows > 0)
+        Ok(result.rows_affected() > 0)
     }
 
     // ============================================================
     // Project Directory operations
     // ============================================================
 
-    pub fn get_project_directories(&self, project_id: Uuid) -> Result<Vec<ProjectDirectory>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
+    pub async fn get_project_directories(&self, project_id: Uuid) -> Result<Vec<ProjectDirectory>> {
+        let rows = sqlx::query(
             "SELECT id, project_id, path, git_remote, is_primary, instructions, created_at
-             FROM project_directories WHERE project_id = ? ORDER BY is_primary DESC, path",
-        )?;
+             FROM project_directories WHERE project_id = $1 ORDER BY is_primary DESC, path",
+        )
+        .bind(project_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
 
-        let dirs = stmt
-            .query_map([project_id.to_string()], |row| {
-                Ok(ProjectDirectory {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    project_id: parse_uuid(row.get::<_, String>(1)?),
-                    path: row.get(2)?,
-                    git_remote: row.get(3)?,
-                    is_primary: row.get::<_, i32>(4)? != 0,
-                    instructions: row.get(5)?,
-                    created_at: parse_datetime(row.get::<_, String>(6)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(dirs)
+        Ok(rows.iter().map(row_to_project_directory).collect())
     }
 
-    pub fn add_project_directory(
+    pub async fn add_project_directory(
         &self,
         project_id: Uuid,
         input: AddDirectoryInput,
     ) -> Result<ProjectDirectory> {
-        self.get_project(project_id)?
+        self.get_project(project_id)
+            .await?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
 
-        let conn = self.conn.lock().expect("database lock poisoned");
         let id = Uuid::new_v4();
         let now = Utc::now();
 
-        conn.execute(
+        sqlx::query(
             "INSERT INTO project_directories (id, project_id, path, git_remote, is_primary, instructions, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                id.to_string(),
-                project_id.to_string(),
-                &input.path,
-                &input.git_remote,
-                if input.is_primary { 1 } else { 0 },
-                &input.instructions,
-                now.to_rfc3339(),
-            ),
-        )?;
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(id.to_string())
+        .bind(project_id.to_string())
+        .bind(&input.path)
+        .bind(&input.git_remote)
+        .bind(if input.is_primary { 1i32 } else { 0i32 })
+        .bind(&input.instructions)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
 
         Ok(ProjectDirectory {
             id,
@@ -407,138 +457,104 @@ impl Database {
         })
     }
 
-    pub fn remove_project_directory(&self, id: Uuid) -> Result<bool> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let rows = conn.execute(
-            "DELETE FROM project_directories WHERE id = ?",
-            [id.to_string()],
-        )?;
-        Ok(rows > 0)
+    pub async fn remove_project_directory(&self, id: Uuid) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM project_directories WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
     }
 
-    pub fn get_project_with_directories(&self, id: Uuid) -> Result<Option<ProjectWithDirectories>> {
-        let project = match self.get_project(id)? {
+    pub async fn get_project_with_directories(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<ProjectWithDirectories>> {
+        let project = match self.get_project(id).await? {
             Some(p) => p,
             None => return Ok(None),
         };
-
-        let directories = self.get_project_directories(id)?;
-
+        let directories = self.get_project_directories(id).await?;
         Ok(Some(ProjectWithDirectories {
             project,
             directories,
         }))
     }
 
-    /// Find a project by a directory path.
-    ///
-    /// Returns the project and matching directory if the path matches exactly,
-    /// or if the path is a subdirectory of a registered project directory.
-    pub fn get_project_by_directory(&self, path: &str) -> Result<Option<ProjectWithDirectories>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-
-        // Get all directories ordered by path length (longest first for best match)
-        let mut stmt = conn.prepare(
+    pub async fn get_project_by_directory(
+        &self,
+        path: &str,
+    ) -> Result<Option<ProjectWithDirectories>> {
+        let rows = sqlx::query(
             "SELECT project_id, path FROM project_directories ORDER BY length(path) DESC",
-        )?;
+        )
+        .fetch_all(&self.pool)
+        .await?;
 
-        let mut rows = stmt.query([])?;
-        let mut found_project_id = None;
-
-        while let Some(row) = rows.next()? {
-            let dir_path: String = row.get(1)?;
-            // Check exact match or subdirectory match
+        for row in &rows {
+            let dir_path: String = row.get("path");
             if path == dir_path || path.starts_with(&format!("{}/", dir_path)) {
-                found_project_id = Some(row.get::<_, String>(0)?);
-                break;
+                let project_id_str: String = row.get("project_id");
+                return self
+                    .get_project_with_directories(parse_uuid(project_id_str))
+                    .await;
             }
         }
 
-        drop(rows);
-        drop(stmt);
-        drop(conn);
-
-        match found_project_id {
-            Some(id) => self.get_project_with_directories(parse_uuid(id)),
-            None => Ok(None),
-        }
+        Ok(None)
     }
 
     // ============================================================
     // Version operations
     // ============================================================
 
-    /// Get all versions for a project.
-    pub fn get_versions_by_project(&self, project_id: Uuid) -> Result<Vec<Version>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
+    pub async fn get_versions_by_project(&self, project_id: Uuid) -> Result<Vec<Version>> {
+        let rows = sqlx::query(
             "SELECT id, project_id, name, description, released_at, created_at, updated_at
-             FROM versions WHERE project_id = ? ORDER BY created_at",
-        )?;
+             FROM versions WHERE project_id = $1 ORDER BY created_at",
+        )
+        .bind(project_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
 
-        let versions = stmt
-            .query_map([project_id.to_string()], |row| {
-                Ok(Version {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    project_id: parse_uuid(row.get::<_, String>(1)?),
-                    name: row.get(2)?,
-                    description: row.get(3)?,
-                    released_at: row.get::<_, Option<String>>(4)?.map(parse_datetime),
-                    created_at: parse_datetime(row.get::<_, String>(5)?),
-                    updated_at: parse_datetime(row.get::<_, String>(6)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(versions)
+        Ok(rows.iter().map(row_to_version).collect())
     }
 
-    /// Get a version by ID.
-    pub fn get_version(&self, id: Uuid) -> Result<Option<Version>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
+    pub async fn get_version(&self, id: Uuid) -> Result<Option<Version>> {
+        let row = sqlx::query(
             "SELECT id, project_id, name, description, released_at, created_at, updated_at
-             FROM versions WHERE id = ?",
-        )?;
+             FROM versions WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
 
-        let mut rows = stmt.query([id.to_string()])?;
-        if let Some(row) = rows.next()? {
-            Ok(Some(Version {
-                id: parse_uuid(row.get::<_, String>(0)?),
-                project_id: parse_uuid(row.get::<_, String>(1)?),
-                name: row.get(2)?,
-                description: row.get(3)?,
-                released_at: row.get::<_, Option<String>>(4)?.map(parse_datetime),
-                created_at: parse_datetime(row.get::<_, String>(5)?),
-                updated_at: parse_datetime(row.get::<_, String>(6)?),
-            }))
-        } else {
-            Ok(None)
-        }
+        Ok(row.as_ref().map(row_to_version))
     }
 
-    /// Create a new version.
-    pub fn create_version(&self, project_id: Uuid, input: CreateVersionInput) -> Result<Version> {
-        // Verify project exists
-        self.get_project(project_id)?
+    pub async fn create_version(
+        &self,
+        project_id: Uuid,
+        input: CreateVersionInput,
+    ) -> Result<Version> {
+        self.get_project(project_id)
+            .await?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
 
-        let conn = self.conn.lock().expect("database lock poisoned");
         let id = Uuid::new_v4();
         let now = Utc::now();
 
-        conn.execute(
+        sqlx::query(
             "INSERT INTO versions (id, project_id, name, description, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                id.to_string(),
-                project_id.to_string(),
-                &input.name,
-                &input.description,
-                now.to_rfc3339(),
-                now.to_rfc3339(),
-            ),
-        )?;
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(id.to_string())
+        .bind(project_id.to_string())
+        .bind(&input.name)
+        .bind(&input.description)
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
 
         Ok(Version {
             id,
@@ -551,28 +567,30 @@ impl Database {
         })
     }
 
-    /// Update an existing version.
-    pub fn update_version(&self, id: Uuid, input: UpdateVersionInput) -> Result<Option<Version>> {
-        let Some(existing) = self.get_version(id)? else {
+    pub async fn update_version(
+        &self,
+        id: Uuid,
+        input: UpdateVersionInput,
+    ) -> Result<Option<Version>> {
+        let Some(existing) = self.get_version(id).await? else {
             return Ok(None);
         };
 
-        let conn = self.conn.lock().expect("database lock poisoned");
         let now = Utc::now();
         let name = input.name.unwrap_or(existing.name);
         let description = input.description.or(existing.description);
         let released_at = input.released_at.or(existing.released_at);
 
-        conn.execute(
-            "UPDATE versions SET name = ?, description = ?, released_at = ?, updated_at = ? WHERE id = ?",
-            (
-                &name,
-                &description,
-                released_at.map(|d| d.to_rfc3339()),
-                now.to_rfc3339(),
-                id.to_string(),
-            ),
-        )?;
+        sqlx::query(
+            "UPDATE versions SET name = $1, description = $2, released_at = $3, updated_at = $4 WHERE id = $5",
+        )
+        .bind(&name)
+        .bind(&description)
+        .bind(released_at.map(|d| d.to_rfc3339()))
+        .bind(now.to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
 
         Ok(Some(Version {
             id,
@@ -585,180 +603,140 @@ impl Database {
         }))
     }
 
-    /// Delete a version.
-    pub fn delete_version(&self, id: Uuid) -> Result<bool> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let rows = conn.execute("DELETE FROM versions WHERE id = ?", [id.to_string()])?;
-        Ok(rows > 0)
+    pub async fn delete_version(&self, id: Uuid) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM versions WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     // ============================================================
     // Feature operations
     // ============================================================
 
-    /// Get all features with optional SQL-based pagination.
-    pub fn get_all_features_paginated(
+    pub async fn get_all_features_paginated(
         &self,
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Feature>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-
-        let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = match (limit, offset) {
-            (Some(lim), Some(off)) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features ORDER BY priority, title LIMIT ? OFFSET ?".to_string(),
-                vec![Box::new(lim) as Box<dyn rusqlite::ToSql>, Box::new(off)],
-            ),
-            (Some(lim), None) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features ORDER BY priority, title LIMIT ?".to_string(),
-                vec![Box::new(lim) as Box<dyn rusqlite::ToSql>],
-            ),
-            (None, Some(off)) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features ORDER BY priority, title LIMIT -1 OFFSET ?".to_string(),
-                vec![Box::new(off) as Box<dyn rusqlite::ToSql>],
-            ),
-            (None, None) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features ORDER BY priority, title".to_string(),
-                vec![],
-            ),
+        let rows = match (limit, offset) {
+            (Some(lim), Some(off)) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features ORDER BY priority, title LIMIT $1 OFFSET $2",
+                )
+                .bind(lim as i64)
+                .bind(off as i64)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (Some(lim), None) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features ORDER BY priority, title LIMIT $1",
+                )
+                .bind(lim as i64)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, Some(off)) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features ORDER BY priority, title LIMIT -1 OFFSET $1",
+                )
+                .bind(off as i64)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, None) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features ORDER BY priority, title",
+                )
+                .fetch_all(&self.pool)
+                .await?
+            }
         };
 
-        let mut stmt = conn.prepare(&sql)?;
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let features = stmt
-            .query_map(params_refs.as_slice(), |row| {
-                Ok(Feature {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    project_id: parse_uuid(row.get::<_, String>(1)?),
-                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                    title: row.get(3)?,
-                    details: row.get(4)?,
-                    desired_details: row.get(5)?,
-                    state: FeatureState::from_str(&row.get::<_, String>(6)?)
-                        .unwrap_or(FeatureState::Proposed),
-                    priority: row.get(7)?,
-                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
-                    created_at: parse_datetime(row.get::<_, String>(9)?),
-                    updated_at: parse_datetime(row.get::<_, String>(10)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(features)
+        Ok(rows.iter().map(row_to_feature).collect())
     }
 
-    /// Get all features (unpaginated, for backwards compatibility).
-    pub fn get_all_features(&self) -> Result<Vec<Feature>> {
-        self.get_all_features_paginated(None, None)
+    pub async fn get_all_features(&self) -> Result<Vec<Feature>> {
+        self.get_all_features_paginated(None, None).await
     }
 
-    /// Get features by project with optional SQL-based pagination.
-    pub fn get_features_by_project_paginated(
+    pub async fn get_features_by_project_paginated(
         &self,
         project_id: Uuid,
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Feature>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let project_id_str = project_id.to_string();
-
-        let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = match (limit, offset) {
-            (Some(lim), Some(off)) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features WHERE project_id = ? ORDER BY priority, title LIMIT ? OFFSET ?".to_string(),
-                vec![
-                    Box::new(project_id_str.clone()) as Box<dyn rusqlite::ToSql>,
-                    Box::new(lim),
-                    Box::new(off),
-                ],
-            ),
-            (Some(lim), None) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features WHERE project_id = ? ORDER BY priority, title LIMIT ?".to_string(),
-                vec![
-                    Box::new(project_id_str.clone()) as Box<dyn rusqlite::ToSql>,
-                    Box::new(lim),
-                ],
-            ),
-            (None, Some(off)) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features WHERE project_id = ? ORDER BY priority, title LIMIT -1 OFFSET ?".to_string(),
-                vec![
-                    Box::new(project_id_str.clone()) as Box<dyn rusqlite::ToSql>,
-                    Box::new(off),
-                ],
-            ),
-            (None, None) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features WHERE project_id = ? ORDER BY priority, title".to_string(),
-                vec![Box::new(project_id_str.clone()) as Box<dyn rusqlite::ToSql>],
-            ),
+        let rows = match (limit, offset) {
+            (Some(lim), Some(off)) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2 OFFSET $3",
+                )
+                .bind(project_id.to_string())
+                .bind(lim as i64)
+                .bind(off as i64)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (Some(lim), None) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2",
+                )
+                .bind(project_id.to_string())
+                .bind(lim as i64)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, Some(off)) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT -1 OFFSET $2",
+                )
+                .bind(project_id.to_string())
+                .bind(off as i64)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, None) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features WHERE project_id = $1 ORDER BY priority, title",
+                )
+                .bind(project_id.to_string())
+                .fetch_all(&self.pool)
+                .await?
+            }
         };
 
-        let mut stmt = conn.prepare(&sql)?;
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let features = stmt
-            .query_map(params_refs.as_slice(), |row| {
-                Ok(Feature {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    project_id: parse_uuid(row.get::<_, String>(1)?),
-                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                    title: row.get(3)?,
-                    details: row.get(4)?,
-                    desired_details: row.get(5)?,
-                    state: FeatureState::from_str(&row.get::<_, String>(6)?)
-                        .unwrap_or(FeatureState::Proposed),
-                    priority: row.get(7)?,
-                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
-                    created_at: parse_datetime(row.get::<_, String>(9)?),
-                    updated_at: parse_datetime(row.get::<_, String>(10)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(features)
+        Ok(rows.iter().map(row_to_feature).collect())
     }
 
-    /// Get features by project (unpaginated, for backwards compatibility).
-    pub fn get_features_by_project(&self, project_id: Uuid) -> Result<Vec<Feature>> {
+    pub async fn get_features_by_project(&self, project_id: Uuid) -> Result<Vec<Feature>> {
         self.get_features_by_project_paginated(project_id, None, None)
+            .await
     }
 
-    pub fn get_feature(&self, id: Uuid) -> Result<Option<Feature>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
+    pub async fn get_feature(&self, id: Uuid) -> Result<Option<Feature>> {
+        let row = sqlx::query(
             "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-             FROM features WHERE id = ?",
-        )?;
+             FROM features WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
 
-        let mut rows = stmt.query([id.to_string()])?;
-        if let Some(row) = rows.next()? {
-            Ok(Some(Feature {
-                id: parse_uuid(row.get::<_, String>(0)?),
-                project_id: parse_uuid(row.get::<_, String>(1)?),
-                parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                title: row.get(3)?,
-                details: row.get(4)?,
-                desired_details: row.get(5)?,
-                state: FeatureState::from_str(&row.get::<_, String>(6)?)
-                    .unwrap_or(FeatureState::Proposed),
-                priority: row.get(7)?,
-                target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
-                created_at: parse_datetime(row.get::<_, String>(9)?),
-                updated_at: parse_datetime(row.get::<_, String>(10)?),
-            }))
-        } else {
-            Ok(None)
-        }
+        Ok(row.as_ref().map(row_to_feature))
     }
 
-    /// Get the diff between current and desired details for a feature.
-    pub fn get_feature_diff(&self, id: Uuid) -> Result<Option<FeatureDiff>> {
-        let feature = match self.get_feature(id)? {
+    pub async fn get_feature_diff(&self, id: Uuid) -> Result<Option<FeatureDiff>> {
+        let feature = match self.get_feature(id).await? {
             Some(f) => f,
             None => return Ok(None),
         };
@@ -773,44 +751,39 @@ impl Database {
         }))
     }
 
-    /// Create a new feature.
-    ///
-    /// If `parent_id` is None and the project has a root feature, the new feature
-    /// will be parented under the root feature. This makes features appear as
-    /// "top level" in the UI while maintaining the root feature hierarchy.
-    pub fn create_feature(&self, project_id: Uuid, input: CreateFeatureInput) -> Result<Feature> {
-        // Verify project exists and get root_feature_id
+    pub async fn create_feature(
+        &self,
+        project_id: Uuid,
+        input: CreateFeatureInput,
+    ) -> Result<Feature> {
         let project = self
-            .get_project(project_id)?
+            .get_project(project_id)
+            .await?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
 
-        // Default parent_id to root_feature_id if not specified
         let parent_id = input.parent_id.or(project.root_feature_id);
-
-        let conn = self.conn.lock().expect("database lock poisoned");
         let id = input.id.unwrap_or_else(Uuid::new_v4);
         let now = Utc::now();
         let state = input.state.unwrap_or(FeatureState::Proposed);
         let priority = input.priority.unwrap_or(0);
 
-        conn.execute(
+        sqlx::query(
             "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                id.to_string(),
-                project_id.to_string(),
-                parent_id.map(|u| u.to_string()),
-                &input.title,
-                &input.details,
-                state.as_str(),
-                priority,
-                input.target_version_id.map(|u| u.to_string()),
-                now.to_rfc3339(),
-                now.to_rfc3339(),
-            ),
-        )?;
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        )
+        .bind(id.to_string())
+        .bind(project_id.to_string())
+        .bind(parent_id.map(|u| u.to_string()))
+        .bind(&input.title)
+        .bind(&input.details)
+        .bind(state.as_str())
+        .bind(priority)
+        .bind(input.target_version_id.map(|u| u.to_string()))
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
 
-        // Notify subscribers (ignore errors - no subscribers is fine)
         let _ = self.events.send(FeatureEvent::Created { project_id });
 
         Ok(Feature {
@@ -828,50 +801,41 @@ impl Database {
         })
     }
 
-    /// Create multiple features in a single transaction.
-    /// All features are created atomically - if any fails, all are rolled back.
-    ///
-    /// If `parent_id` is None and the project has a root feature, features without
-    /// an explicit parent will be parented under the root feature.
-    pub fn create_features_bulk(
+    pub async fn create_features_bulk(
         &self,
         project_id: Uuid,
         inputs: Vec<CreateFeatureInput>,
     ) -> Result<Vec<Feature>> {
-        // Verify project exists and get root_feature_id
         let project = self
-            .get_project(project_id)?
+            .get_project(project_id)
+            .await?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
 
-        let mut conn = self.conn.lock().expect("database lock poisoned");
-        let tx = conn.transaction()?;
         let now = Utc::now();
-
         let mut features = Vec::with_capacity(inputs.len());
 
         for input in inputs {
             let id = input.id.unwrap_or_else(Uuid::new_v4);
             let state = input.state.unwrap_or(FeatureState::Proposed);
             let priority = input.priority.unwrap_or(0);
-            // Default parent_id to root_feature_id if not specified
             let parent_id = input.parent_id.or(project.root_feature_id);
 
-            tx.execute(
+            sqlx::query(
                 "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    id.to_string(),
-                    project_id.to_string(),
-                    parent_id.map(|u| u.to_string()),
-                    &input.title,
-                    &input.details,
-                    state.as_str(),
-                    priority,
-                    input.target_version_id.map(|u| u.to_string()),
-                    now.to_rfc3339(),
-                    now.to_rfc3339(),
-                ),
-            )?;
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            )
+            .bind(id.to_string())
+            .bind(project_id.to_string())
+            .bind(parent_id.map(|u| u.to_string()))
+            .bind(&input.title)
+            .bind(&input.details)
+            .bind(state.as_str())
+            .bind(priority)
+            .bind(input.target_version_id.map(|u| u.to_string()))
+            .bind(now.to_rfc3339())
+            .bind(now.to_rfc3339())
+            .execute(&self.pool)
+            .await?;
 
             features.push(Feature {
                 id,
@@ -888,20 +852,20 @@ impl Database {
             });
         }
 
-        tx.commit()?;
-
-        // Notify subscribers after successful commit
         let _ = self.events.send(FeatureEvent::Created { project_id });
 
         Ok(features)
     }
 
-    pub fn update_feature(&self, id: Uuid, input: UpdateFeatureInput) -> Result<Option<Feature>> {
-        let Some(existing) = self.get_feature(id)? else {
+    pub async fn update_feature(
+        &self,
+        id: Uuid,
+        input: UpdateFeatureInput,
+    ) -> Result<Option<Feature>> {
+        let Some(existing) = self.get_feature(id).await? else {
             return Ok(None);
         };
 
-        let conn = self.conn.lock().expect("database lock poisoned");
         let now = Utc::now();
         let title = input.title.unwrap_or(existing.title);
         let details = input.details.or(existing.details);
@@ -909,27 +873,25 @@ impl Database {
         let state = input.state.unwrap_or(existing.state);
         let parent_id = input.parent_id.or(existing.parent_id);
         let priority = input.priority.unwrap_or(existing.priority);
-        // Double Option: None = don't update (keep existing), Some(x) = set to x (including Some(None) to clear)
         let target_version_id = input
             .target_version_id
             .unwrap_or(existing.target_version_id);
 
-        conn.execute(
-            "UPDATE features SET parent_id = ?, title = ?, details = ?, desired_details = ?, state = ?, priority = ?, target_version_id = ?, updated_at = ? WHERE id = ?",
-            (
-                parent_id.map(|u| u.to_string()),
-                &title,
-                &details,
-                &desired_details,
-                state.as_str(),
-                priority,
-                target_version_id.map(|u| u.to_string()),
-                now.to_rfc3339(),
-                id.to_string(),
-            ),
-        )?;
+        sqlx::query(
+            "UPDATE features SET parent_id = $1, title = $2, details = $3, desired_details = $4, state = $5, priority = $6, target_version_id = $7, updated_at = $8 WHERE id = $9",
+        )
+        .bind(parent_id.map(|u| u.to_string()))
+        .bind(&title)
+        .bind(&details)
+        .bind(&desired_details)
+        .bind(state.as_str())
+        .bind(priority)
+        .bind(target_version_id.map(|u| u.to_string()))
+        .bind(now.to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
 
-        // Notify subscribers
         let _ = self.events.send(FeatureEvent::Updated {
             project_id: existing.project_id,
         });
@@ -949,263 +911,167 @@ impl Database {
         }))
     }
 
-    pub fn delete_feature(&self, id: Uuid) -> Result<bool> {
-        // Get project_id before deleting (for event notification)
-        let project_id = {
-            let conn = self.conn.lock().expect("database lock poisoned");
-            conn.query_row(
-                "SELECT project_id FROM features WHERE id = ?",
-                [id.to_string()],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-            .map(parse_uuid)
-        };
+    pub async fn delete_feature(&self, id: Uuid) -> Result<bool> {
+        // Get project_id before deleting
+        let project_id: Option<Uuid> =
+            sqlx::query_scalar("SELECT project_id FROM features WHERE id = $1")
+                .bind(id.to_string())
+                .fetch_optional(&self.pool)
+                .await?
+                .map(|s: String| parse_uuid(s));
 
-        let mut conn = self.conn.lock().expect("database lock poisoned");
-        let tx = conn.transaction()?;
-
-        // Since FK enforcement is OFF, we need to manually cascade deletes
-        // Use recursive CTE to find all descendants
         let id_str = id.to_string();
 
-        // Delete feature history for this feature and all descendants
-        tx.execute(
+        // Delete feature history for descendants (recursive CTE)
+        sqlx::query(
             "DELETE FROM feature_history WHERE feature_id IN (
                 WITH RECURSIVE descendants AS (
-                    SELECT id FROM features WHERE id = ?1
+                    SELECT id FROM features WHERE id = $1
                     UNION ALL
                     SELECT f.id FROM features f
                     INNER JOIN descendants d ON f.parent_id = d.id
                 )
                 SELECT id FROM descendants
             )",
-            [&id_str],
-        )?;
+        )
+        .bind(&id_str)
+        .execute(&self.pool)
+        .await?;
 
-        // Delete all descendant features and the feature itself
-        let rows = tx.execute(
+        // Delete descendants and feature
+        let result = sqlx::query(
             "DELETE FROM features WHERE id IN (
                 WITH RECURSIVE descendants AS (
-                    SELECT id FROM features WHERE id = ?1
+                    SELECT id FROM features WHERE id = $1
                     UNION ALL
                     SELECT f.id FROM features f
                     INNER JOIN descendants d ON f.parent_id = d.id
                 )
                 SELECT id FROM descendants
             )",
-            [&id_str],
-        )?;
+        )
+        .bind(&id_str)
+        .execute(&self.pool)
+        .await?;
 
-        tx.commit()?;
-
-        // Notify subscribers if we deleted something
-        if rows > 0 {
+        if result.rows_affected() > 0 {
             if let Some(project_id) = project_id {
                 let _ = self.events.send(FeatureEvent::Deleted { project_id });
             }
         }
 
-        Ok(rows > 0)
+        Ok(result.rows_affected() > 0)
     }
 
-    /// Get "root" features for a project (actually children of the root feature).
-    ///
-    /// With the root feature model, this returns features whose parent_id equals
-    /// the project's root_feature_id. This makes the root feature invisible to
-    /// the UI while its children appear as "top level" features.
-    ///
-    /// Falls back to parent_id IS NULL for projects without root_feature_id (legacy).
-    pub fn get_root_features(&self, project_id: Uuid) -> Result<Vec<Feature>> {
-        // Get project to find root_feature_id
-        let project = self.get_project(project_id)?;
+    pub async fn get_root_features(&self, project_id: Uuid) -> Result<Vec<Feature>> {
+        let project = self.get_project(project_id).await?;
 
-        let conn = self.conn.lock().expect("database lock poisoned");
-
-        // Use root_feature_id if available, otherwise fall back to parent_id IS NULL
-        let (sql, parent_param): (&str, Option<String>) = match project.and_then(|p| p.root_feature_id) {
-            Some(root_id) => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features WHERE project_id = ? AND parent_id = ? ORDER BY priority, title",
-                Some(root_id.to_string()),
-            ),
-            None => (
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-                 FROM features WHERE project_id = ? AND parent_id IS NULL ORDER BY priority, title",
-                None,
-            ),
+        let rows = match project.and_then(|p| p.root_feature_id) {
+            Some(root_id) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features WHERE project_id = $1 AND parent_id = $2 ORDER BY priority, title",
+                )
+                .bind(project_id.to_string())
+                .bind(root_id.to_string())
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                     FROM features WHERE project_id = $1 AND parent_id IS NULL ORDER BY priority, title",
+                )
+                .bind(project_id.to_string())
+                .fetch_all(&self.pool)
+                .await?
+            }
         };
 
-        let mut stmt = conn.prepare(sql)?;
-
-        let features = match parent_param {
-            Some(ref parent_id) => stmt
-                .query_map([project_id.to_string(), parent_id.clone()], |row| {
-                    Ok(Feature {
-                        id: parse_uuid(row.get::<_, String>(0)?),
-                        project_id: parse_uuid(row.get::<_, String>(1)?),
-                        parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                        title: row.get(3)?,
-                        details: row.get(4)?,
-                        desired_details: row.get(5)?,
-                        state: FeatureState::from_str(&row.get::<_, String>(6)?)
-                            .unwrap_or(FeatureState::Proposed),
-                        priority: row.get(7)?,
-                        target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
-                        created_at: parse_datetime(row.get::<_, String>(9)?),
-                        updated_at: parse_datetime(row.get::<_, String>(10)?),
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?,
-            None => stmt
-                .query_map([project_id.to_string()], |row| {
-                    Ok(Feature {
-                        id: parse_uuid(row.get::<_, String>(0)?),
-                        project_id: parse_uuid(row.get::<_, String>(1)?),
-                        parent_id: None,
-                        title: row.get(3)?,
-                        details: row.get(4)?,
-                        desired_details: row.get(5)?,
-                        state: FeatureState::from_str(&row.get::<_, String>(6)?)
-                            .unwrap_or(FeatureState::Proposed),
-                        priority: row.get(7)?,
-                        target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
-                        created_at: parse_datetime(row.get::<_, String>(9)?),
-                        updated_at: parse_datetime(row.get::<_, String>(10)?),
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?,
-        };
-
-        Ok(features)
+        Ok(rows.iter().map(row_to_feature).collect())
     }
 
-    pub fn get_children(&self, parent_id: Uuid) -> Result<Vec<Feature>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
+    pub async fn get_children(&self, parent_id: Uuid) -> Result<Vec<Feature>> {
+        let rows = sqlx::query(
             "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
-             FROM features WHERE parent_id = ? ORDER BY priority, title",
-        )?;
+             FROM features WHERE parent_id = $1 ORDER BY priority, title",
+        )
+        .bind(parent_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
 
-        let features = stmt
-            .query_map([parent_id.to_string()], |row| {
-                Ok(Feature {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    project_id: parse_uuid(row.get::<_, String>(1)?),
-                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                    title: row.get(3)?,
-                    details: row.get(4)?,
-                    desired_details: row.get(5)?,
-                    state: FeatureState::from_str(&row.get::<_, String>(6)?)
-                        .unwrap_or(FeatureState::Proposed),
-                    priority: row.get(7)?,
-                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
-                    created_at: parse_datetime(row.get::<_, String>(9)?),
-                    updated_at: parse_datetime(row.get::<_, String>(10)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(features)
+        Ok(rows.iter().map(row_to_feature).collect())
     }
 
-    pub fn is_leaf(&self, feature_id: Uuid) -> Result<bool> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let count: i32 = conn.query_row(
-            "SELECT COUNT(*) FROM features WHERE parent_id = ?",
-            [feature_id.to_string()],
-            |row| row.get(0),
-        )?;
+    pub async fn is_leaf(&self, feature_id: Uuid) -> Result<bool> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM features WHERE parent_id = $1")
+            .bind(feature_id.to_string())
+            .fetch_one(&self.pool)
+            .await?;
         Ok(count == 0)
     }
 
-    /// Search features by title and details.
-    /// Returns summaries ranked by relevance (title matches first, then details matches).
-    pub fn search_features(
+    pub async fn search_features(
         &self,
         query: &str,
         project_id: Option<Uuid>,
         limit: Option<u32>,
     ) -> Result<Vec<FeatureSummary>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-
-        // Use LIKE for case-insensitive search
-        // Ranking: title matches get higher priority than details matches
-        // Escape special LIKE characters to prevent injection
         let escaped_query = escape_like_pattern(query);
         let search_pattern = format!("%{}%", escaped_query);
         let limit_val = limit.unwrap_or(10) as i64;
 
-        let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = match project_id {
-            Some(pid) => (
-                "SELECT id, project_id, parent_id, title, state, priority, target_version_id
-                 FROM features
-                 WHERE project_id = ?1 AND (title LIKE ?2 ESCAPE '\\' OR details LIKE ?2 ESCAPE '\\')
-                 ORDER BY
-                     CASE WHEN title LIKE ?2 ESCAPE '\\' THEN 0 ELSE 1 END,
-                     priority,
-                     title
-                 LIMIT ?3"
-                    .to_string(),
-                vec![
-                    Box::new(pid.to_string()),
-                    Box::new(search_pattern),
-                    Box::new(limit_val),
-                ],
-            ),
-            None => (
-                "SELECT id, project_id, parent_id, title, state, priority, target_version_id
-                 FROM features
-                 WHERE title LIKE ?1 ESCAPE '\\' OR details LIKE ?1 ESCAPE '\\'
-                 ORDER BY
-                     CASE WHEN title LIKE ?1 ESCAPE '\\' THEN 0 ELSE 1 END,
-                     priority,
-                     title
-                 LIMIT ?2"
-                    .to_string(),
-                vec![Box::new(search_pattern), Box::new(limit_val)],
-            ),
+        let rows = match project_id {
+            Some(pid) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, state, priority, target_version_id
+                     FROM features
+                     WHERE project_id = $1 AND (title LIKE $2 ESCAPE '\\' OR details LIKE $2 ESCAPE '\\')
+                     ORDER BY
+                         CASE WHEN title LIKE $2 ESCAPE '\\' THEN 0 ELSE 1 END,
+                         priority,
+                         title
+                     LIMIT $3",
+                )
+                .bind(pid.to_string())
+                .bind(&search_pattern)
+                .bind(limit_val)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, state, priority, target_version_id
+                     FROM features
+                     WHERE title LIKE $1 ESCAPE '\\' OR details LIKE $1 ESCAPE '\\'
+                     ORDER BY
+                         CASE WHEN title LIKE $1 ESCAPE '\\' THEN 0 ELSE 1 END,
+                         priority,
+                         title
+                     LIMIT $2",
+                )
+                .bind(&search_pattern)
+                .bind(limit_val)
+                .fetch_all(&self.pool)
+                .await?
+            }
         };
 
-        let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn.prepare(&sql)?;
-
-        let features = stmt
-            .query_map(params_ref.as_slice(), |row| {
-                Ok(FeatureSummary {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    project_id: parse_uuid(row.get::<_, String>(1)?),
-                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                    title: row.get(3)?,
-                    state: FeatureState::from_str(&row.get::<_, String>(4)?)
-                        .unwrap_or(FeatureState::Proposed),
-                    priority: row.get(5)?,
-                    target_version_id: row.get::<_, Option<String>>(6)?.map(parse_uuid),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(features)
+        Ok(rows.iter().map(row_to_feature_summary).collect())
     }
 
-    /// Get the feature tree for a project, excluding the root feature.
-    ///
-    /// With the root feature model, the tree starts from the root's children,
-    /// making them appear as "top level" features in the UI.
-    ///
-    /// Falls back to parent_id IS NULL for projects without root_feature_id (legacy).
-    pub fn get_feature_tree(&self, project_id: Uuid) -> Result<Vec<FeatureTreeNode>> {
-        let project = self.get_project(project_id)?;
+    pub async fn get_feature_tree(&self, project_id: Uuid) -> Result<Vec<FeatureTreeNode>> {
+        let project = self.get_project(project_id).await?;
         let root_feature_id = project.and_then(|p| p.root_feature_id);
+        let features = self.get_features_by_project(project_id).await?;
 
-        let features = self.get_features_by_project(project_id)?;
-
-        // Group features by parent_id
         let mut children_map: std::collections::HashMap<Option<Uuid>, Vec<Feature>> =
             std::collections::HashMap::new();
+        let mut root_feature: Option<Feature> = None;
+
         for feature in features {
-            // Skip the root feature itself
             if Some(feature.id) == root_feature_id {
+                root_feature = Some(feature);
                 continue;
             }
             children_map
@@ -1214,7 +1080,6 @@ impl Database {
                 .push(feature);
         }
 
-        // Recursively build tree starting from the appropriate root
         fn build_subtree(
             parent_id: Option<Uuid>,
             children_map: &std::collections::HashMap<Option<Uuid>, Vec<Feature>>,
@@ -1227,56 +1092,60 @@ impl Database {
                         .map(|f| FeatureTreeNode {
                             feature: f.clone(),
                             children: build_subtree(Some(f.id), children_map),
+                            is_root: false,
                         })
                         .collect()
                 })
                 .unwrap_or_default()
         }
 
-        // Start from root_feature_id's children if available, else from NULL parent
-        let tree_root = root_feature_id.map(Some).unwrap_or(None);
-        Ok(build_subtree(tree_root, &children_map))
+        if let Some(root) = root_feature {
+            let children = build_subtree(Some(root.id), &children_map);
+            Ok(vec![FeatureTreeNode {
+                feature: root,
+                children,
+                is_root: true,
+            }])
+        } else {
+            Ok(build_subtree(None, &children_map))
+        }
     }
 
     // ============================================================
     // Feature History operations
     // ============================================================
 
-    pub fn create_history_entry(&self, input: CreateHistoryInput) -> Result<FeatureHistory> {
-        let conn = self.conn.lock().expect("database lock poisoned");
+    pub async fn create_history_entry(&self, input: CreateHistoryInput) -> Result<FeatureHistory> {
         let id = Uuid::new_v4();
         let now = Utc::now();
 
-        // If version_id not provided, use feature's target_version_id
+        // Get version_id from input or feature's target_version_id
         let version_id = match input.version_id {
             Some(vid) => Some(vid),
-            None => {
-                // Look up feature's target_version_id
-                let mut stmt =
-                    conn.prepare("SELECT target_version_id FROM features WHERE id = ?")?;
-                stmt.query_row([input.feature_id.to_string()], |row| {
-                    row.get::<_, Option<String>>(0)
-                })
-                .ok()
-                .flatten()
-                .map(parse_uuid)
-            }
+            None => sqlx::query_scalar::<_, Option<String>>(
+                "SELECT target_version_id FROM features WHERE id = $1",
+            )
+            .bind(input.feature_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten()
+            .map(parse_uuid),
         };
 
         let details_json = serde_json::to_string(&input.details)?;
 
-        conn.execute(
+        sqlx::query(
             "INSERT INTO feature_history (id, feature_id, version_id, summary, details, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                id.to_string(),
-                input.feature_id.to_string(),
-                version_id.map(|u| u.to_string()),
-                &input.details.summary,
-                &details_json,
-                now.to_rfc3339(),
-            ),
-        )?;
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(id.to_string())
+        .bind(input.feature_id.to_string())
+        .bind(version_id.map(|u| u.to_string()))
+        .bind(&input.details.summary)
+        .bind(&details_json)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
 
         Ok(FeatureHistory {
             id,
@@ -1287,41 +1156,19 @@ impl Database {
         })
     }
 
-    pub fn get_feature_history(&self, feature_id: Uuid) -> Result<Vec<FeatureHistory>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
+    pub async fn get_feature_history(&self, feature_id: Uuid) -> Result<Vec<FeatureHistory>> {
+        let rows = sqlx::query(
             "SELECT id, feature_id, version_id, details, created_at
-             FROM feature_history WHERE feature_id = ? ORDER BY created_at DESC",
-        )?;
+             FROM feature_history WHERE feature_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(feature_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
 
-        let entries = stmt
-            .query_map([feature_id.to_string()], |row| {
-                let details_json: String = row.get(3)?;
-                let details: HistoryDetails =
-                    serde_json::from_str(&details_json).unwrap_or_default();
-
-                Ok(FeatureHistory {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    feature_id: parse_uuid(row.get::<_, String>(1)?),
-                    version_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                    details,
-                    created_at: parse_datetime(row.get::<_, String>(4)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(entries)
+        Ok(rows.iter().map(row_to_feature_history).collect())
     }
 
-    /// Get project-wide history with feature context.
-    ///
-    /// Returns history entries across all features in a project, ordered by
-    /// creation date (newest first). Each entry includes the feature title,
-    /// state, and version info for display without additional lookups.
-    ///
-    /// Supports optional filtering by `version_id` (for release notes),
-    /// `since` datetime, and pagination via `limit` and `offset`.
-    pub fn get_project_history(
+    pub async fn get_project_history(
         &self,
         project_id: Uuid,
         version_id: Option<Uuid>,
@@ -1329,192 +1176,162 @@ impl Database {
         offset: Option<u32>,
         since: Option<DateTime<Utc>>,
     ) -> Result<Vec<ProjectHistoryEntry>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-
-        // Build query with optional filters
-        // Join with versions to get version_name
-        let base_query = r#"
-            SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
-            FROM feature_history fh
-            INNER JOIN features f ON f.id = fh.feature_id
-            LEFT JOIN versions v ON v.id = fh.version_id
-            WHERE f.project_id = ?1
-        "#;
-
         let limit_val = limit.unwrap_or(50) as i64;
         let offset_val = offset.unwrap_or(0) as i64;
 
-        // Build dynamic SQL with optional filters
-        let mut conditions = Vec::new();
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(project_id.to_string())];
-        let mut param_idx = 2;
-
-        if let Some(vid) = version_id {
-            conditions.push(format!("fh.version_id = ?{}", param_idx));
-            params.push(Box::new(vid.to_string()));
-            param_idx += 1;
-        }
-
-        if let Some(since_dt) = since {
-            conditions.push(format!("fh.created_at > ?{}", param_idx));
-            params.push(Box::new(since_dt.to_rfc3339()));
-            param_idx += 1;
-        }
-
-        let where_clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!(" AND {}", conditions.join(" AND "))
+        // Build dynamic query based on filters
+        let rows = match (version_id, since) {
+            (Some(vid), Some(since_dt)) => {
+                sqlx::query(
+                    "SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
+                     FROM feature_history fh
+                     INNER JOIN features f ON f.id = fh.feature_id
+                     LEFT JOIN versions v ON v.id = fh.version_id
+                     WHERE f.project_id = $1 AND fh.version_id = $2 AND fh.created_at > $3
+                     ORDER BY fh.created_at DESC LIMIT $4 OFFSET $5",
+                )
+                .bind(project_id.to_string())
+                .bind(vid.to_string())
+                .bind(since_dt.to_rfc3339())
+                .bind(limit_val)
+                .bind(offset_val)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (Some(vid), None) => {
+                sqlx::query(
+                    "SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
+                     FROM feature_history fh
+                     INNER JOIN features f ON f.id = fh.feature_id
+                     LEFT JOIN versions v ON v.id = fh.version_id
+                     WHERE f.project_id = $1 AND fh.version_id = $2
+                     ORDER BY fh.created_at DESC LIMIT $3 OFFSET $4",
+                )
+                .bind(project_id.to_string())
+                .bind(vid.to_string())
+                .bind(limit_val)
+                .bind(offset_val)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, Some(since_dt)) => {
+                sqlx::query(
+                    "SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
+                     FROM feature_history fh
+                     INNER JOIN features f ON f.id = fh.feature_id
+                     LEFT JOIN versions v ON v.id = fh.version_id
+                     WHERE f.project_id = $1 AND fh.created_at > $2
+                     ORDER BY fh.created_at DESC LIMIT $3 OFFSET $4",
+                )
+                .bind(project_id.to_string())
+                .bind(since_dt.to_rfc3339())
+                .bind(limit_val)
+                .bind(offset_val)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, None) => {
+                sqlx::query(
+                    "SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
+                     FROM feature_history fh
+                     INNER JOIN features f ON f.id = fh.feature_id
+                     LEFT JOIN versions v ON v.id = fh.version_id
+                     WHERE f.project_id = $1
+                     ORDER BY fh.created_at DESC LIMIT $2 OFFSET $3",
+                )
+                .bind(project_id.to_string())
+                .bind(limit_val)
+                .bind(offset_val)
+                .fetch_all(&self.pool)
+                .await?
+            }
         };
 
-        let sql = format!(
-            "{}{} ORDER BY fh.created_at DESC LIMIT ?{} OFFSET ?{}",
-            base_query,
-            where_clause,
-            param_idx,
-            param_idx + 1
-        );
-        params.push(Box::new(limit_val));
-        params.push(Box::new(offset_val));
-
-        let mut stmt = conn.prepare(&sql)?;
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-
-        let entries = stmt
-            .query_map(params_refs.as_slice(), |row| {
-                let details_json: String = row.get(6)?;
-                let details: HistoryDetails =
-                    serde_json::from_str(&details_json).unwrap_or_default();
-
-                Ok(ProjectHistoryEntry {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    feature_id: parse_uuid(row.get::<_, String>(1)?),
-                    feature_title: row.get(2)?,
-                    feature_state: FeatureState::from_str(&row.get::<_, String>(3)?)
-                        .unwrap_or(FeatureState::Proposed),
-                    version_id: row.get::<_, Option<String>>(4)?.map(parse_uuid),
-                    version_name: row.get(5)?,
-                    summary: details.summary,
-                    commits: details.commits,
-                    created_at: parse_datetime(row.get::<_, String>(7)?),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(entries)
+        Ok(rows.iter().map(row_to_project_history_entry).collect())
     }
 
     // ============================================================
-    // Data Migration
+    // Feature Context
     // ============================================================
 
-    // ============================================================
-    // Feature Context (for enhanced MCP get_feature)
-    // ============================================================
-
-    /// Get a feature with its hierarchical context (parent, siblings, children, breadcrumb).
-    ///
-    /// This provides AI agents with navigation context to understand where a feature
-    /// sits in the feature tree.
-    pub fn get_feature_with_context(&self, id: Uuid) -> Result<Option<FeatureWithContext>> {
-        // Get the feature itself
-        let feature = match self.get_feature(id)? {
+    pub async fn get_feature_with_context(&self, id: Uuid) -> Result<Option<FeatureWithContext>> {
+        let feature = match self.get_feature(id).await? {
             Some(f) => f,
             None => return Ok(None),
         };
 
-        let conn = self.conn.lock().expect("database lock poisoned");
-
-        // Get parent (if exists)
+        // Get parent
         let parent = if let Some(parent_id) = feature.parent_id {
-            let mut stmt = conn.prepare("SELECT id, title, state FROM features WHERE id = ?")?;
-            stmt.query_row([parent_id.to_string()], |row| {
-                Ok(FeatureSummaryContext {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    title: row.get(1)?,
-                    state: FeatureState::from_str(&row.get::<_, String>(2)?)
-                        .unwrap_or(FeatureState::Proposed),
-                })
-            })
-            .ok()
+            sqlx::query("SELECT id, title, state FROM features WHERE id = $1")
+                .bind(parent_id.to_string())
+                .fetch_optional(&self.pool)
+                .await?
+                .map(|row| row_to_feature_summary_context(&row))
         } else {
             None
         };
 
-        // Get siblings (same parent, excluding self)
+        // Get siblings
         let siblings = if let Some(parent_id) = feature.parent_id {
-            let mut stmt = conn.prepare(
+            let rows = sqlx::query(
                 "SELECT id, title, state FROM features
-                 WHERE parent_id = ? AND id != ?
+                 WHERE parent_id = $1 AND id != $2
                  ORDER BY priority, title",
-            )?;
-            let result: Vec<FeatureSummaryContext> = stmt
-                .query_map([parent_id.to_string(), id.to_string()], |row| {
-                    Ok(FeatureSummaryContext {
-                        id: parse_uuid(row.get::<_, String>(0)?),
-                        title: row.get(1)?,
-                        state: FeatureState::from_str(&row.get::<_, String>(2)?)
-                            .unwrap_or(FeatureState::Proposed),
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            result
+            )
+            .bind(parent_id.to_string())
+            .bind(id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
+            rows.iter().map(row_to_feature_summary_context).collect()
         } else {
-            // Root feature - siblings are other features with no parent in same project
-            let mut stmt = conn.prepare(
+            let rows = sqlx::query(
                 "SELECT id, title, state FROM features
-                 WHERE project_id = ? AND parent_id IS NULL AND id != ?
+                 WHERE project_id = $1 AND parent_id IS NULL AND id != $2
                  ORDER BY priority, title",
-            )?;
-            let result: Vec<FeatureSummaryContext> = stmt
-                .query_map([feature.project_id.to_string(), id.to_string()], |row| {
-                    Ok(FeatureSummaryContext {
-                        id: parse_uuid(row.get::<_, String>(0)?),
-                        title: row.get(1)?,
-                        state: FeatureState::from_str(&row.get::<_, String>(2)?)
-                            .unwrap_or(FeatureState::Proposed),
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            result
+            )
+            .bind(feature.project_id.to_string())
+            .bind(id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
+            rows.iter().map(row_to_feature_summary_context).collect()
         };
 
         // Get children
-        let mut children_stmt = conn.prepare(
+        let children_rows = sqlx::query(
             "SELECT id, title, state FROM features
-             WHERE parent_id = ?
+             WHERE parent_id = $1
              ORDER BY priority, title",
-        )?;
-        let children = children_stmt
-            .query_map([id.to_string()], |row| {
-                Ok(FeatureSummaryContext {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    title: row.get(1)?,
-                    state: FeatureState::from_str(&row.get::<_, String>(2)?)
-                        .unwrap_or(FeatureState::Proposed),
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+        )
+        .bind(id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+        let children: Vec<FeatureSummaryContext> = children_rows
+            .iter()
+            .map(row_to_feature_summary_context)
+            .collect();
 
         // Get breadcrumb using recursive CTE
-        let mut breadcrumb_stmt = conn.prepare(
+        let breadcrumb_rows = sqlx::query(
             "WITH RECURSIVE ancestors AS (
-                SELECT id, parent_id, title, 0 as depth FROM features WHERE id = ?1
+                SELECT id, parent_id, title, 0 as depth FROM features WHERE id = $1
                 UNION ALL
                 SELECT f.id, f.parent_id, f.title, a.depth + 1
                 FROM features f
                 INNER JOIN ancestors a ON f.id = a.parent_id
             )
             SELECT id, title FROM ancestors ORDER BY depth DESC",
-        )?;
-        let breadcrumb = breadcrumb_stmt
-            .query_map([id.to_string()], |row| {
-                Ok(BreadcrumbItem {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    title: row.get(1)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+        )
+        .bind(id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        let breadcrumb: Vec<BreadcrumbItem> = breadcrumb_rows
+            .iter()
+            .map(|row| BreadcrumbItem {
+                id: parse_uuid(row.get::<String, _>("id")),
+                title: row.get("title"),
+            })
+            .collect();
 
         Ok(Some(FeatureWithContext {
             feature,
@@ -1525,61 +1342,36 @@ impl Database {
         }))
     }
 
-    /// Get the next workable feature for a project.
-    ///
-    /// Returns the single highest-priority feature that is workable (proposed or in_progress).
-    /// Sort order: version > priority > created_at
-    /// - Features targeting "now" version (first unreleased) come first
-    /// - Then features with no version (backlog)
-    /// - Within each group: lower priority number wins
-    /// - Same priority: oldest created wins
-    pub fn get_next_workable_feature(
+    pub async fn get_next_workable_feature(
         &self,
         project_id: Uuid,
         version_id: Option<Uuid>,
     ) -> Result<Option<Feature>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-
-        // If version_id provided, filter to that version; otherwise use "now" version logic
-        let feature = if let Some(vid) = version_id {
-            let mut stmt = conn.prepare(
+        let row = if let Some(vid) = version_id {
+            sqlx::query(
                 "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
                  FROM features
-                 WHERE project_id = ?1
-                   AND target_version_id = ?2
+                 WHERE project_id = $1
+                   AND target_version_id = $2
                    AND state IN ('proposed', 'in_progress')
                  ORDER BY priority ASC, created_at ASC
                  LIMIT 1",
-            )?;
-            stmt.query_row([project_id.to_string(), vid.to_string()], |row| {
-                Ok(Feature {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    project_id: parse_uuid(row.get::<_, String>(1)?),
-                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                    title: row.get(3)?,
-                    details: row.get(4)?,
-                    desired_details: row.get(5)?,
-                    state: FeatureState::from_str(&row.get::<_, String>(6)?)
-                        .unwrap_or(FeatureState::Proposed),
-                    priority: row.get(7)?,
-                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
-                    created_at: parse_datetime(row.get::<_, String>(9)?),
-                    updated_at: parse_datetime(row.get::<_, String>(10)?),
-                })
-            })
-            .ok()
+            )
+            .bind(project_id.to_string())
+            .bind(vid.to_string())
+            .fetch_optional(&self.pool)
+            .await?
         } else {
-            // Find "now" version (first unreleased) and prioritize accordingly
-            let mut stmt = conn.prepare(
+            sqlx::query(
                 "WITH now_version AS (
                     SELECT id FROM versions
-                    WHERE project_id = ?1 AND released_at IS NULL
+                    WHERE project_id = $1 AND released_at IS NULL
                     ORDER BY created_at ASC LIMIT 1
                 )
                 SELECT f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.state, f.priority, f.target_version_id, f.created_at, f.updated_at
                 FROM features f
                 LEFT JOIN now_version nv ON f.target_version_id = nv.id
-                WHERE f.project_id = ?1
+                WHERE f.project_id = $1
                   AND f.state IN ('proposed', 'in_progress')
                 ORDER BY
                     CASE WHEN f.target_version_id IS NOT NULL AND f.target_version_id = (SELECT id FROM now_version) THEN 0
@@ -1588,120 +1380,415 @@ impl Database {
                     f.priority ASC,
                     f.created_at ASC
                 LIMIT 1",
-            )?;
-            stmt.query_row([project_id.to_string()], |row| {
-                Ok(Feature {
-                    id: parse_uuid(row.get::<_, String>(0)?),
-                    project_id: parse_uuid(row.get::<_, String>(1)?),
-                    parent_id: row.get::<_, Option<String>>(2)?.map(parse_uuid),
-                    title: row.get(3)?,
-                    details: row.get(4)?,
-                    desired_details: row.get(5)?,
-                    state: FeatureState::from_str(&row.get::<_, String>(6)?)
-                        .unwrap_or(FeatureState::Proposed),
-                    priority: row.get(7)?,
-                    target_version_id: row.get::<_, Option<String>>(8)?.map(parse_uuid),
-                    created_at: parse_datetime(row.get::<_, String>(9)?),
-                    updated_at: parse_datetime(row.get::<_, String>(10)?),
-                })
-            })
-            .ok()
+            )
+            .bind(project_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?
         };
 
-        Ok(feature)
+        Ok(row.as_ref().map(row_to_feature))
     }
 
     // ============================================================
     // Data Migration
     // ============================================================
 
-    /// Migrate existing projects to use root features.
-    ///
-    /// For each project without a root_feature_id:
-    /// 1. Creates a root feature (title=project.name, details=project.description, state=implemented)
-    /// 2. Re-parents existing root features (parent_id=NULL) to the new root
-    /// 3. Sets project.root_feature_id
-    ///
-    /// This migration is idempotent - running it multiple times is safe.
-    pub fn migrate_to_root_features(&self) -> Result<RootFeatureMigrationReport> {
+    pub async fn migrate_to_root_features(&self) -> Result<RootFeatureMigrationReport> {
         let mut report = RootFeatureMigrationReport::default();
-        let projects = self.get_all_projects()?;
+        let projects = self.get_all_projects().await?;
 
         for project in projects {
-            // Skip if already has root feature
             if project.root_feature_id.is_some() {
                 report.projects_skipped += 1;
                 continue;
             }
 
-            let mut conn = self.conn.lock().expect("database lock poisoned");
-            let tx = conn.transaction()?;
             let now = Utc::now();
+            let root_feature_id = Uuid::new_v4();
 
             // Create root feature
-            let root_feature_id = Uuid::new_v4();
-            tx.execute(
+            sqlx::query(
                 "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, created_at, updated_at)
-                 VALUES (?, ?, NULL, ?, ?, 'implemented', 0, ?, ?)",
-                (
-                    root_feature_id.to_string(),
-                    project.id.to_string(),
-                    &project.name,
-                    &project.description,
-                    now.to_rfc3339(),
-                    now.to_rfc3339(),
-                ),
-            )?;
+                 VALUES ($1, $2, NULL, $3, $4, 'implemented', 0, $5, $6)",
+            )
+            .bind(root_feature_id.to_string())
+            .bind(project.id.to_string())
+            .bind(&project.name)
+            .bind(&project.instructions)
+            .bind(now.to_rfc3339())
+            .bind(now.to_rfc3339())
+            .execute(&self.pool)
+            .await?;
 
-            // Re-parent existing root features to the new root
-            let reparented = tx.execute(
-                "UPDATE features SET parent_id = ? WHERE project_id = ? AND parent_id IS NULL AND id != ?",
-                (
-                    root_feature_id.to_string(),
-                    project.id.to_string(),
-                    root_feature_id.to_string(),
-                ),
-            )?;
-            report.features_reparented += reparented;
+            // Re-parent existing root features
+            let result = sqlx::query(
+                "UPDATE features SET parent_id = $1 WHERE project_id = $2 AND parent_id IS NULL AND id != $1",
+            )
+            .bind(root_feature_id.to_string())
+            .bind(project.id.to_string())
+            .execute(&self.pool)
+            .await?;
+            report.features_reparented += result.rows_affected() as usize;
 
-            // Update project with root_feature_id
-            tx.execute(
-                "UPDATE projects SET root_feature_id = ?, updated_at = ? WHERE id = ?",
-                (
-                    root_feature_id.to_string(),
-                    now.to_rfc3339(),
-                    project.id.to_string(),
-                ),
-            )?;
+            // Update project
+            sqlx::query("UPDATE projects SET root_feature_id = $1, updated_at = $2 WHERE id = $3")
+                .bind(root_feature_id.to_string())
+                .bind(now.to_rfc3339())
+                .bind(project.id.to_string())
+                .execute(&self.pool)
+                .await?;
 
-            tx.commit()?;
             report.projects_migrated += 1;
         }
 
         Ok(report)
+    }
+
+    // ============================================================
+    // User operations
+    // ============================================================
+
+    /// Get a user by their ID.
+    pub async fn get_user(&self, id: Uuid) -> Result<Option<User>> {
+        let row = sqlx::query(
+            "SELECT id, email, email_verified_at, display_name, avatar_url, created_at, updated_at
+             FROM users WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_user))
+    }
+
+    /// Get a user by their email address.
+    pub async fn get_user_by_email(&self, email: &str) -> Result<Option<User>> {
+        let row = sqlx::query(
+            "SELECT id, email, email_verified_at, display_name, avatar_url, created_at, updated_at
+             FROM users WHERE email = $1",
+        )
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_user))
+    }
+
+    /// Get a user by their Clerk ID (via oauth_identities table).
+    pub async fn get_user_by_clerk_id(&self, clerk_id: &str) -> Result<Option<User>> {
+        let row = sqlx::query(
+            "SELECT u.id, u.email, u.email_verified_at, u.display_name, u.avatar_url, u.created_at, u.updated_at
+             FROM users u
+             INNER JOIN oauth_identities o ON u.id = o.user_id
+             WHERE o.provider = 'clerk' AND o.provider_user_id = $1",
+        )
+        .bind(clerk_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_user))
+    }
+
+    /// Get a user by OAuth provider and provider user ID.
+    pub async fn get_user_by_oauth_provider(
+        &self,
+        provider: &str,
+        provider_user_id: &str,
+    ) -> Result<Option<User>> {
+        let row = sqlx::query(
+            "SELECT u.id, u.email, u.email_verified_at, u.display_name, u.avatar_url, u.created_at, u.updated_at
+             FROM users u
+             INNER JOIN oauth_identities o ON u.id = o.user_id
+             WHERE o.provider = $1 AND o.provider_user_id = $2",
+        )
+        .bind(provider)
+        .bind(provider_user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_user))
+    }
+
+    /// Create a new user.
+    pub async fn create_user(
+        &self,
+        id: Uuid,
+        email: &str,
+        display_name: Option<&str>,
+        avatar_url: Option<&str>,
+    ) -> Result<User> {
+        let now = Utc::now();
+
+        sqlx::query(
+            "INSERT INTO users (id, email, display_name, avatar_url, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(id.to_string())
+        .bind(email)
+        .bind(display_name)
+        .bind(avatar_url)
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(User {
+            id,
+            email: email.to_string(),
+            email_verified_at: None,
+            display_name: display_name.map(String::from),
+            avatar_url: avatar_url.map(String::from),
+            created_at: now,
+            updated_at: now,
+        })
+    }
+
+    /// Update an existing user's profile.
+    pub async fn update_user(
+        &self,
+        id: Uuid,
+        display_name: Option<&str>,
+        avatar_url: Option<&str>,
+    ) -> Result<bool> {
+        let now = Utc::now();
+
+        let result = sqlx::query(
+            "UPDATE users SET display_name = $1, avatar_url = $2, updated_at = $3 WHERE id = $4",
+        )
+        .bind(display_name)
+        .bind(avatar_url)
+        .bind(now.to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    // ============================================================
+    // OAuth Identity operations
+    // ============================================================
+
+    /// Create an OAuth identity linking a provider account to a user.
+    pub async fn create_oauth_identity(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        provider: &str,
+        provider_user_id: &str,
+        provider_email: Option<&str>,
+    ) -> Result<OAuthIdentity> {
+        let now = Utc::now();
+
+        sqlx::query(
+            "INSERT INTO oauth_identities (id, user_id, provider, provider_user_id, provider_email, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(id.to_string())
+        .bind(user_id.to_string())
+        .bind(provider)
+        .bind(provider_user_id)
+        .bind(provider_email)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(OAuthIdentity {
+            id,
+            user_id,
+            provider: provider.to_string(),
+            provider_user_id: provider_user_id.to_string(),
+            provider_email: provider_email.map(String::from),
+            access_token: None,
+            refresh_token: None,
+            token_expires_at: None,
+            created_at: now,
+        })
+    }
+
+    /// Get OAuth identities for a user.
+    pub async fn get_oauth_identities_for_user(&self, user_id: Uuid) -> Result<Vec<OAuthIdentity>> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, provider, provider_user_id, provider_email, access_token, refresh_token, token_expires_at, created_at
+             FROM oauth_identities WHERE user_id = $1",
+        )
+        .bind(user_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_oauth_identity).collect())
     }
 }
 
 impl Clone for Database {
     fn clone(&self) -> Self {
         Self {
-            conn: self.conn.clone(),
+            pool: self.pool.clone(),
             events: self.events.clone(),
         }
     }
 }
+
+// ============================================================
+// Helper functions
+// ============================================================
 
 fn parse_uuid(s: String) -> Uuid {
     Uuid::parse_str(&s).unwrap_or_else(|_| panic!("Invalid UUID stored in database: {}", s))
 }
 
 fn parse_datetime(s: String) -> DateTime<Utc> {
-    // Try RFC3339 first (e.g., 2026-01-11T18:51:25Z)
     chrono::DateTime::parse_from_rfc3339(&s)
         .map(|dt| dt.with_timezone(&Utc))
         .or_else(|_| {
-            // Fall back to SQLite format (e.g., 2026-01-11 18:51:25)
             chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S").map(|dt| dt.and_utc())
         })
         .unwrap_or_else(|_| panic!("Invalid timestamp stored in database: {}", s))
+}
+
+fn row_to_project(row: &AnyRow) -> Project {
+    Project {
+        id: parse_uuid(row.get("id")),
+        name: row.get("name"),
+        description: row.get("description"),
+        instructions: row.get("instructions"),
+        current_version_id: row
+            .get::<Option<String>, _>("current_version_id")
+            .map(parse_uuid),
+        root_feature_id: row
+            .get::<Option<String>, _>("root_feature_id")
+            .map(parse_uuid),
+        created_at: parse_datetime(row.get("created_at")),
+        updated_at: parse_datetime(row.get("updated_at")),
+    }
+}
+
+fn row_to_project_directory(row: &AnyRow) -> ProjectDirectory {
+    ProjectDirectory {
+        id: parse_uuid(row.get("id")),
+        project_id: parse_uuid(row.get("project_id")),
+        path: row.get("path"),
+        git_remote: row.get("git_remote"),
+        is_primary: row.get::<i32, _>("is_primary") != 0,
+        instructions: row.get("instructions"),
+        created_at: parse_datetime(row.get("created_at")),
+    }
+}
+
+fn row_to_version(row: &AnyRow) -> Version {
+    Version {
+        id: parse_uuid(row.get("id")),
+        project_id: parse_uuid(row.get("project_id")),
+        name: row.get("name"),
+        description: row.get("description"),
+        released_at: row
+            .get::<Option<String>, _>("released_at")
+            .map(parse_datetime),
+        created_at: parse_datetime(row.get("created_at")),
+        updated_at: parse_datetime(row.get("updated_at")),
+    }
+}
+
+fn row_to_feature(row: &AnyRow) -> Feature {
+    Feature {
+        id: parse_uuid(row.get("id")),
+        project_id: parse_uuid(row.get("project_id")),
+        parent_id: row.get::<Option<String>, _>("parent_id").map(parse_uuid),
+        title: row.get("title"),
+        details: row.get("details"),
+        desired_details: row.get("desired_details"),
+        state: FeatureState::from_str(&row.get::<String, _>("state"))
+            .unwrap_or(FeatureState::Proposed),
+        priority: row.get("priority"),
+        target_version_id: row
+            .get::<Option<String>, _>("target_version_id")
+            .map(parse_uuid),
+        created_at: parse_datetime(row.get("created_at")),
+        updated_at: parse_datetime(row.get("updated_at")),
+    }
+}
+
+fn row_to_feature_summary(row: &AnyRow) -> FeatureSummary {
+    FeatureSummary {
+        id: parse_uuid(row.get("id")),
+        project_id: parse_uuid(row.get("project_id")),
+        parent_id: row.get::<Option<String>, _>("parent_id").map(parse_uuid),
+        title: row.get("title"),
+        state: FeatureState::from_str(&row.get::<String, _>("state"))
+            .unwrap_or(FeatureState::Proposed),
+        priority: row.get("priority"),
+        target_version_id: row
+            .get::<Option<String>, _>("target_version_id")
+            .map(parse_uuid),
+    }
+}
+
+fn row_to_feature_summary_context(row: &AnyRow) -> FeatureSummaryContext {
+    FeatureSummaryContext {
+        id: parse_uuid(row.get("id")),
+        title: row.get("title"),
+        state: FeatureState::from_str(&row.get::<String, _>("state"))
+            .unwrap_or(FeatureState::Proposed),
+    }
+}
+
+fn row_to_feature_history(row: &AnyRow) -> FeatureHistory {
+    let details_json: String = row.get("details");
+    let details: HistoryDetails = serde_json::from_str(&details_json).unwrap_or_default();
+
+    FeatureHistory {
+        id: parse_uuid(row.get("id")),
+        feature_id: parse_uuid(row.get("feature_id")),
+        version_id: row.get::<Option<String>, _>("version_id").map(parse_uuid),
+        details,
+        created_at: parse_datetime(row.get("created_at")),
+    }
+}
+
+fn row_to_project_history_entry(row: &AnyRow) -> ProjectHistoryEntry {
+    let details_json: String = row.get("details");
+    let details: HistoryDetails = serde_json::from_str(&details_json).unwrap_or_default();
+
+    ProjectHistoryEntry {
+        id: parse_uuid(row.get::<String, _>("id")),
+        feature_id: parse_uuid(row.get::<String, _>("feature_id")),
+        feature_title: row.get("title"),
+        feature_state: FeatureState::from_str(&row.get::<String, _>("state"))
+            .unwrap_or(FeatureState::Proposed),
+        version_id: row.get::<Option<String>, _>("version_id").map(parse_uuid),
+        version_name: row.get("name"),
+        summary: details.summary,
+        commits: details.commits,
+        created_at: parse_datetime(row.get::<String, _>("created_at")),
+    }
+}
+
+fn row_to_user(row: &AnyRow) -> User {
+    User {
+        id: parse_uuid(row.get("id")),
+        email: row.get("email"),
+        email_verified_at: row
+            .get::<Option<String>, _>("email_verified_at")
+            .map(parse_datetime),
+        display_name: row.get("display_name"),
+        avatar_url: row.get("avatar_url"),
+        created_at: parse_datetime(row.get("created_at")),
+        updated_at: parse_datetime(row.get("updated_at")),
+    }
+}
+
+fn row_to_oauth_identity(row: &AnyRow) -> OAuthIdentity {
+    OAuthIdentity {
+        id: parse_uuid(row.get("id")),
+        user_id: parse_uuid(row.get("user_id")),
+        provider: row.get("provider"),
+        provider_user_id: row.get("provider_user_id"),
+        provider_email: row.get("provider_email"),
+        access_token: row.get("access_token"),
+        refresh_token: row.get("refresh_token"),
+        token_expires_at: row
+            .get::<Option<String>, _>("token_expires_at")
+            .map(parse_datetime),
+        created_at: parse_datetime(row.get("created_at")),
+    }
 }

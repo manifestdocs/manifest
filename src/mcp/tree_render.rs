@@ -5,7 +5,8 @@ use crate::models::{FeatureState, FeatureTreeNode};
 const PROPOSED: char = '◇';
 const IN_PROGRESS: char = '○';
 const IMPLEMENTED: char = '●';
-const DEPRECATED: char = '✗';
+const ARCHIVED: char = '✗';
+const PROJECT_ROOT: char = '▣'; // Special symbol for project root feature
 
 /// Get the status symbol for a feature state.
 fn state_symbol(state: FeatureState) -> char {
@@ -13,7 +14,7 @@ fn state_symbol(state: FeatureState) -> char {
         FeatureState::Proposed => PROPOSED,
         FeatureState::InProgress => IN_PROGRESS,
         FeatureState::Implemented => IMPLEMENTED,
-        FeatureState::Deprecated => DEPRECATED,
+        FeatureState::Archived => ARCHIVED,
     }
 }
 
@@ -49,14 +50,20 @@ fn render_node_with_depth(
     node: &FeatureTreeNode,
     prefix: &str,
     is_last: bool,
-    is_root: bool,
+    is_tree_root: bool,
     current_depth: u32,
     max_depth: u32,
 ) {
-    let symbol = state_symbol(node.feature.state);
+    let symbol = if node.is_root {
+        PROJECT_ROOT // Project root feature gets special symbol
+    } else {
+        state_symbol(node.feature.state)
+    };
 
-    if is_root {
-        // Root nodes: just title (no branch characters)
+    if is_tree_root {
+        // Tree root nodes: symbol + title (no branch characters)
+        output.push(symbol);
+        output.push(' ');
         output.push_str(&node.feature.title);
         output.push('\n');
     } else {
@@ -71,7 +78,7 @@ fn render_node_with_depth(
     }
 
     // Calculate prefix for children
-    let child_prefix = if is_root {
+    let child_prefix = if is_tree_root {
         String::new()
     } else {
         let continuation = if is_last { "    " } else { "│   " };
@@ -129,6 +136,7 @@ mod tests {
                 updated_at: Utc::now(),
             },
             children,
+            is_root: false,
         }
     }
 
@@ -136,7 +144,7 @@ mod tests {
     fn test_single_root() {
         let tree = vec![make_node("Authentication", FeatureState::Proposed, vec![])];
         let output = render_tree_with_depth(&tree, 0);
-        assert_eq!(output, "Authentication\n");
+        assert_eq!(output, "◇ Authentication\n");
     }
 
     #[test]
@@ -152,7 +160,7 @@ mod tests {
         let output = render_tree_with_depth(&tree, 0);
         assert_eq!(
             output,
-            "Authentication\n├── ● Password Login\n└── ○ OAuth\n"
+            "◇ Authentication\n├── ● Password Login\n└── ○ OAuth\n"
         );
     }
 
@@ -171,11 +179,11 @@ mod tests {
                         make_node("GitHub Provider", FeatureState::Proposed, vec![]),
                     ],
                 ),
-                make_node("Legacy Basic Auth", FeatureState::Deprecated, vec![]),
+                make_node("Legacy Basic Auth", FeatureState::Archived, vec![]),
             ],
         )];
         let output = render_tree_with_depth(&tree, 0);
-        let expected = "Authentication\n├── ● Password Login\n├── ○ OAuth Integration\n│   ├── ◇ Google Provider\n│   └── ◇ GitHub Provider\n└── ✗ Legacy Basic Auth\n";
+        let expected = "◇ Authentication\n├── ● Password Login\n├── ○ OAuth Integration\n│   ├── ◇ Google Provider\n│   └── ◇ GitHub Provider\n└── ✗ Legacy Basic Auth\n";
         assert_eq!(output, expected);
     }
 
@@ -199,7 +207,7 @@ mod tests {
         // max_depth=1 should show root + first level, but truncate second level
         let output = render_tree_with_depth(&tree, 1);
         let expected =
-            "Authentication\n├── ● Password Login\n└── ○ OAuth Integration\n    └── (...)\n";
+            "◇ Authentication\n├── ● Password Login\n└── ○ OAuth Integration\n    └── (...)\n";
         assert_eq!(output, expected);
     }
 
@@ -216,7 +224,7 @@ mod tests {
         )];
         // max_depth=0 should show all levels
         let output = render_tree_with_depth(&tree, 0);
-        let expected = "Root\n└── ● Child\n    └── ◇ Grandchild\n";
+        let expected = "◇ Root\n└── ● Child\n    └── ◇ Grandchild\n";
         assert_eq!(output, expected);
     }
 }

@@ -237,7 +237,7 @@ Every project has a feature tree—a hierarchy of capabilities the system provid
 ◇ proposed — in the backlog, not yet started
 ○ in_progress — actively being worked on
 ● implemented — complete and documented
-✗ deprecated — no longer active
+✗ archived — soft-deleted, kept for historical reference
 
 DISCOVERING FEATURES:
 - find_features — find features by project, state, or search term

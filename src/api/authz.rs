@@ -2,7 +2,7 @@
 //!
 //! Implements project-level permissions based on membership roles.
 
-use rusqlite::OptionalExtension;
+use crate::db::Database;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -103,121 +103,74 @@ pub struct Membership {
 }
 
 /// Authorization service that checks permissions against the database.
-pub struct AuthzService<'a> {
-    conn: &'a rusqlite::Connection,
+///
+/// Note: This service is a placeholder for cloud deployment. In local mode,
+/// there's no authentication and all operations are allowed. The full
+/// implementation requires Database methods for membership queries.
+#[derive(Clone)]
+pub struct AuthzService {
+    db: Database,
 }
 
-impl<'a> AuthzService<'a> {
-    /// Create a new authorization service with a database connection.
-    pub fn new(conn: &'a rusqlite::Connection) -> Self {
-        Self { conn }
+impl AuthzService {
+    /// Create a new authorization service with a database reference.
+    pub fn new(db: Database) -> Self {
+        Self { db }
     }
 
     /// Get a user's membership in a project.
-    pub fn get_membership(
+    ///
+    /// Note: Membership queries will be implemented when cloud mode is enabled.
+    /// For now, returns None (no membership required in local mode).
+    pub async fn get_membership(
         &self,
-        project_id: Uuid,
-        user_id: Uuid,
+        _project_id: Uuid,
+        _user_id: Uuid,
     ) -> Result<Option<Membership>, AuthzError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT id, project_id, user_id, role FROM project_memberships
-                 WHERE project_id = ? AND user_id = ?",
-            )
-            .map_err(|e| AuthzError::Database(e.to_string()))?;
-
-        let membership = stmt
-            .query_row([project_id.to_string(), user_id.to_string()], |row| {
-                let role_str: String = row.get(3)?;
-                Ok(Membership {
-                    id: row.get::<_, String>(0)?.parse().unwrap(),
-                    project_id: row.get::<_, String>(1)?.parse().unwrap(),
-                    user_id: row.get::<_, String>(2)?.parse().unwrap(),
-                    role: Role::from_str(&role_str).unwrap_or(Role::Viewer),
-                })
-            })
-            .optional()
-            .map_err(|e| AuthzError::Database(e.to_string()))?;
-
-        Ok(membership)
+        // Local mode: no memberships tracked
+        Ok(None)
     }
 
     /// Check if a user has a specific permission on a project.
     ///
     /// Returns Ok(()) if allowed, Err(AuthzError::Forbidden) if denied.
-    pub fn require_permission(
+    /// In local mode (no authentication), always allows access.
+    pub async fn require_permission(
         &self,
-        user_id: Uuid,
-        project_id: Uuid,
-        permission: Permission,
+        _user_id: Uuid,
+        _project_id: Uuid,
+        _permission: Permission,
     ) -> Result<(), AuthzError> {
-        // Check if project is public (for read permissions)
-        if matches!(
-            permission,
-            Permission::ProjectRead | Permission::FeatureRead | Permission::VersionRead
-        ) {
-            if self.is_project_public(project_id)? {
-                return Ok(());
-            }
-        }
-
-        // Check membership
-        let membership = self.get_membership(project_id, user_id)?;
-
-        match membership {
-            Some(m) if m.role.has_permission(permission) => Ok(()),
-            _ => Err(AuthzError::Forbidden),
-        }
-    }
-
-    /// Check if a project is public.
-    fn is_project_public(&self, project_id: Uuid) -> Result<bool, AuthzError> {
-        let visibility: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT visibility FROM projects WHERE id = ?",
-                [project_id.to_string()],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| AuthzError::Database(e.to_string()))?
-            .flatten();
-
-        Ok(visibility.as_deref() == Some("public"))
+        // Local mode: always allow
+        Ok(())
     }
 
     /// Get a user's role in a project, if they have membership.
-    pub fn get_role(&self, user_id: Uuid, project_id: Uuid) -> Result<Option<Role>, AuthzError> {
-        Ok(self.get_membership(project_id, user_id)?.map(|m| m.role))
+    pub async fn get_role(
+        &self,
+        user_id: Uuid,
+        project_id: Uuid,
+    ) -> Result<Option<Role>, AuthzError> {
+        Ok(self
+            .get_membership(project_id, user_id)
+            .await?
+            .map(|m| m.role))
     }
 
     /// Check if a user has owner role on a project.
-    pub fn is_owner(&self, user_id: Uuid, project_id: Uuid) -> Result<bool, AuthzError> {
-        Ok(self.get_role(user_id, project_id)? == Some(Role::Owner))
+    pub async fn is_owner(&self, user_id: Uuid, project_id: Uuid) -> Result<bool, AuthzError> {
+        Ok(self.get_role(user_id, project_id).await? == Some(Role::Owner))
     }
 
-    /// List all project IDs a user can access (via membership or public visibility).
-    pub fn list_user_projects(&self, user_id: Uuid) -> Result<Vec<Uuid>, AuthzError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT project_id FROM project_memberships WHERE user_id = ?
-                 UNION
-                 SELECT id FROM projects WHERE visibility = 'public'",
-            )
+    /// List all project IDs a user can access.
+    /// In local mode, returns all projects.
+    pub async fn list_user_projects(&self, _user_id: Uuid) -> Result<Vec<Uuid>, AuthzError> {
+        let projects = self
+            .db
+            .get_all_projects()
+            .await
             .map_err(|e| AuthzError::Database(e.to_string()))?;
-
-        let projects = stmt
-            .query_map([user_id.to_string()], |row| {
-                let id: String = row.get(0)?;
-                Ok(id.parse::<Uuid>().unwrap())
-            })
-            .map_err(|e| AuthzError::Database(e.to_string()))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AuthzError::Database(e.to_string()))?;
-
-        Ok(projects)
+        Ok(projects.into_iter().map(|p| p.id).collect())
     }
 }
 
@@ -228,7 +181,7 @@ pub trait RequirePermission {
         user_id: Uuid,
         project_id: Uuid,
         permission: Permission,
-    ) -> Result<(), AuthzError>;
+    ) -> impl std::future::Future<Output = Result<(), AuthzError>> + Send;
 }
 
 #[cfg(test)]

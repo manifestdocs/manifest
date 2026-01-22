@@ -48,6 +48,67 @@ mod tests {
         let input: UpdateFeatureInput = serde_json::from_str(json).unwrap();
         assert!(input.target_version_id.is_none());
     }
+
+    #[test]
+    fn test_update_feature_input_serialize_none_omits_field() {
+        // When target_version_id is None (don't update), it should NOT appear in JSON
+        let input = UpdateFeatureInput {
+            parent_id: None,
+            title: Some("Test".to_string()),
+            details: None,
+            desired_details: None,
+            state: Some(FeatureState::InProgress),
+            priority: None,
+            target_version_id: None,
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(
+            !json.contains("target_version_id"),
+            "JSON should NOT contain target_version_id when it's None, got: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn test_update_feature_input_serialize_some_none_produces_null() {
+        // When target_version_id is Some(None) (clear the field), it should be "null"
+        let input = UpdateFeatureInput {
+            parent_id: None,
+            title: None,
+            details: None,
+            desired_details: None,
+            state: None,
+            priority: None,
+            target_version_id: Some(None),
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(
+            json.contains(r#""target_version_id":null"#),
+            "JSON should contain target_version_id: null when it's Some(None), got: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn test_update_feature_input_serialize_some_uuid() {
+        // When target_version_id is Some(Some(uuid)), it should be the UUID string
+        let uuid = Uuid::parse_str("fb5e9bc0-6202-4617-92f0-3eb6d943bc4f").unwrap();
+        let input = UpdateFeatureInput {
+            parent_id: None,
+            title: None,
+            details: None,
+            desired_details: None,
+            state: None,
+            priority: None,
+            target_version_id: Some(Some(uuid)),
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(
+            json.contains(r#""target_version_id":"fb5e9bc0-6202-4617-92f0-3eb6d943bc4f""#),
+            "JSON should contain the UUID, got: {}",
+            json
+        );
+    }
 }
 
 /// A living description of a system capability.
@@ -89,14 +150,14 @@ pub struct Feature {
 /// - `Proposed`: Initial idea, in backlog
 /// - `InProgress`: Actively being worked on
 /// - `Implemented`: Built and deployed (enters "living" phase)
-/// - `Deprecated`: No longer active, kept for historical reference
+/// - `Archived`: Soft-deleted, kept for historical reference
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FeatureState {
     Proposed,
     InProgress,
     Implemented,
-    Deprecated,
+    Archived,
 }
 
 impl FeatureState {
@@ -105,7 +166,7 @@ impl FeatureState {
             Self::Proposed => "proposed",
             Self::InProgress => "in_progress",
             Self::Implemented => "implemented",
-            Self::Deprecated => "deprecated",
+            Self::Archived => "archived",
         }
     }
 }
@@ -118,7 +179,7 @@ impl FromStr for FeatureState {
             "proposed" => Ok(Self::Proposed),
             "in_progress" => Ok(Self::InProgress),
             "implemented" => Ok(Self::Implemented),
-            "deprecated" => Ok(Self::Deprecated),
+            "archived" => Ok(Self::Archived),
             _ => Err(()),
         }
     }
@@ -175,6 +236,9 @@ pub struct FeatureTreeNode {
     #[serde(flatten)]
     pub feature: Feature,
     pub children: Vec<FeatureTreeNode>,
+    /// True if this is the project's root feature (contains project instructions).
+    #[serde(default)]
+    pub is_root: bool,
 }
 
 /// Diff between current and desired feature details.
