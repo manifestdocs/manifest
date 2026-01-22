@@ -48,8 +48,10 @@ jobs:
           pnpm install
           pnpm build
           cd ..
-          # Create symlink where rust-embed expects it
-          ln -s $GITHUB_WORKSPACE/manifest-web-repo $GITHUB_WORKSPACE/../manifest-web
+          # Copy build to where rust-embed expects it
+          mkdir -p ../manifest-web
+          cp -r manifest-web-repo/build ../manifest-web/
+          ls -la ../manifest-web/
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
