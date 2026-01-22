@@ -44,6 +44,9 @@ jobs:
           version: 9
 
       - name: Build manifest-web
+        env:
+          PUBLIC_MANIFEST_MODE: local
+          PUBLIC_MANIFEST_API_URL: http://localhost:17010/api/v1
         run: |
           cd manifest-web-repo
           pnpm install
