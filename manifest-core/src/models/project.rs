@@ -10,6 +10,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub id: Uuid,
+    /// URL-friendly identifier (e.g., "manifest", "rocketship"). Unique across all projects.
+    pub slug: String,
     pub name: String,
     pub description: Option<String>,
     /// Project-wide instructions for AI agents (coding guidelines, conventions, etc.).
@@ -47,6 +49,8 @@ pub struct ProjectDirectory {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateProjectInput {
     pub name: String,
+    /// URL-friendly identifier. If not provided, auto-generated from name.
+    pub slug: Option<String>,
     pub description: Option<String>,
     pub instructions: Option<String>,
 }
@@ -55,6 +59,8 @@ pub struct CreateProjectInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProjectInput {
     pub name: Option<String>,
+    /// URL-friendly identifier. Must be unique.
+    pub slug: Option<String>,
     pub description: Option<String>,
     pub instructions: Option<String>,
     /// Set the current/active version for this project.

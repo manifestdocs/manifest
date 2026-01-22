@@ -131,6 +131,10 @@ pub fn create_router_with_clerk(db: Database, verifier: ClerkVerifier) -> Router
             "/projects/by-directory",
             get(handlers::get_project_by_directory),
         )
+        .route(
+            "/projects/by-slug/{slug}",
+            get(handlers::get_project_by_slug),
+        )
         .route("/projects/{id}", get(handlers::get_project))
         .route("/projects/{id}", put(handlers::update_project))
         .route("/projects/{id}", delete(handlers::delete_project))
@@ -246,6 +250,10 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         .route(
             "/projects/by-directory",
             get(handlers::get_project_by_directory),
+        )
+        .route(
+            "/projects/by-slug/{slug}",
+            get(handlers::get_project_by_slug),
         )
         .route("/projects/{id}", get(handlers::get_project))
         .route("/projects/{id}", put(handlers::update_project))

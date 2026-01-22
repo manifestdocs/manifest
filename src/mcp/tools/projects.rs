@@ -135,6 +135,7 @@ pub async fn init_project(
         client
             .create_project(&CreateProjectInput {
                 name,
+                slug: None,
                 description: analysis.description.clone(),
                 instructions: None,
             })

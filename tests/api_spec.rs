@@ -17,6 +17,7 @@ async fn create_test_project(server: &TestServer) -> Project {
     server
         .post("/api/v1/projects")
         .json(&CreateProjectInput {
+            slug: None,
             name: "Test Project".to_string(),
             description: None,
             instructions: None,
@@ -509,6 +510,7 @@ mod security_auth {
         let response = server
             .post("/api/v1/projects")
             .json(&CreateProjectInput {
+                slug: None,
                 name: "Test".to_string(),
                 description: None,
                 instructions: None,
@@ -526,6 +528,7 @@ mod security_auth {
             .post("/api/v1/projects")
             .add_header("Authorization", "Bearer test-secret-key")
             .json(&CreateProjectInput {
+                slug: None,
                 name: "Test".to_string(),
                 description: None,
                 instructions: None,

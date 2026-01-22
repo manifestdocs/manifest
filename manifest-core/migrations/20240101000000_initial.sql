@@ -20,6 +20,7 @@ CREATE INDEX idx_users_email ON users(email);
 
 CREATE TABLE projects (
     id TEXT PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     description TEXT,
     instructions TEXT,
@@ -33,6 +34,7 @@ CREATE TABLE projects (
 );
 
 CREATE INDEX idx_projects_root_feature ON projects(root_feature_id);
+CREATE INDEX idx_projects_slug ON projects(slug);
 
 CREATE TABLE project_directories (
     id TEXT PRIMARY KEY,

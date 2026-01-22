@@ -40,6 +40,28 @@ pub async fn get_project(
         .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))
 }
 
+/// Get a project by slug with its associated directories.
+pub async fn get_project_by_slug(
+    State(db): State<Database>,
+    Path(slug): Path<String>,
+) -> Result<Json<ProjectWithDirectories>, (StatusCode, String)> {
+    let project = db
+        .get_project_by_slug(&slug)
+        .await
+        .map_err(internal_error)?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    let directories = db
+        .get_project_directories(project.id)
+        .await
+        .map_err(internal_error)?;
+
+    Ok(Json(ProjectWithDirectories {
+        project,
+        directories,
+    }))
+}
+
 /// Create a new project.
 pub async fn create_project(
     State(db): State<Database>,

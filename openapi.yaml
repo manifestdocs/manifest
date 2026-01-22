@@ -124,6 +124,29 @@ paths:
                 type: string
                 example: "No project found for directory: /Users/dev/unknown"
 
+  /projects/by-slug/{slug}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Project slug (URL-friendly identifier)
+        example: "manifest"
+    get:
+      tags: [Projects]
+      summary: Get a project by slug
+      operationId: getProjectBySlug
+      responses:
+        "200":
+          description: Project with directories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectWithDirectories"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /projects/{id}:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -742,11 +765,15 @@ components:
     # ============================================================
     Project:
       type: object
-      required: [id, name, created_at, updated_at]
+      required: [id, slug, name, created_at, updated_at]
       properties:
         id:
           type: string
           format: uuid
+        slug:
+          type: string
+          description: URL-friendly identifier (lowercase, hyphenated). Unique across all projects.
+          example: "manifest"
         name:
           type: string
           example: "Manifest"
@@ -778,6 +805,11 @@ components:
         name:
           type: string
           example: "My Project"
+        slug:
+          type: string
+          nullable: true
+          description: URL-friendly identifier. If not provided, auto-generated from name.
+          example: "my-project"
         description:
           type: string
           nullable: true
@@ -791,6 +823,10 @@ components:
       properties:
         name:
           type: string
+        slug:
+          type: string
+          description: URL-friendly identifier. Must be unique.
+          example: "my-project"
         description:
           type: string
           nullable: true
@@ -853,11 +889,14 @@ components:
 
     ProjectWithDirectories:
       type: object
-      required: [id, name, created_at, updated_at, directories]
+      required: [id, slug, name, created_at, updated_at, directories]
       properties:
         id:
           type: string
           format: uuid
+        slug:
+          type: string
+          description: URL-friendly identifier
         name:
           type: string
         description:

@@ -247,10 +247,11 @@ impl Database {
             .unwrap_or(0);
 
         if migration_count > 0 {
-            // Existing database with old migration system - don't run SQLx migrations
+            // Existing database with old migration system - run incremental migrations
             tracing::info!(
-                "Detected existing database with schema_migrations, skipping SQLx migrations"
+                "Detected existing database with schema_migrations, running incremental migrations"
             );
+            self.run_incremental_migrations().await?;
             return Ok(());
         }
 
@@ -262,12 +263,262 @@ impl Database {
             .unwrap_or(0);
 
         if features_count > 0 {
-            tracing::info!("Detected existing database schema, skipping migrations");
+            tracing::info!("Detected existing database schema, running incremental migrations");
+            self.run_incremental_migrations().await?;
             return Ok(());
         }
 
         // Run embedded schema directly (sqlx::migrate! has issues with the any driver)
         self.run_schema().await?;
+        Ok(())
+    }
+
+    /// Run incremental migrations on existing databases.
+    async fn run_incremental_migrations(&self) -> Result<()> {
+        // Migration: rename 'deprecated' state to 'archived'
+        self.migrate_deprecated_to_archived().await?;
+        // Migration: add slug column to projects
+        self.migrate_add_project_slug().await?;
+        Ok(())
+    }
+
+    /// Add slug column to projects table if it doesn't exist.
+    async fn migrate_add_project_slug(&self) -> Result<()> {
+        // Check if slug column already exists
+        let has_slug = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("slug"))
+                .unwrap_or(false)
+        } else {
+            // PostgreSQL: check information_schema
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'projects' AND column_name = 'slug'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_slug {
+            tracing::debug!("Project slug migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Adding slug column to projects table");
+
+        if self.dialect.is_sqlite() {
+            // SQLite: Add column, populate, then recreate table with constraints
+            let mut conn = self.pool.acquire().await?;
+
+            // Disable foreign keys
+            sqlx::query("PRAGMA foreign_keys = OFF")
+                .execute(&mut *conn)
+                .await?;
+
+            // Add slug column (nullable initially)
+            sqlx::query("ALTER TABLE projects ADD COLUMN slug TEXT")
+                .execute(&mut *conn)
+                .await?;
+
+            // Generate slugs from names
+            sqlx::query(
+                "UPDATE projects SET slug = LOWER(REPLACE(REPLACE(REPLACE(REPLACE(name, ' ', '-'), '_', '-'), '.', '-'), '--', '-'))"
+            )
+            .execute(&mut *conn)
+            .await?;
+
+            // Handle duplicates by appending rowid
+            sqlx::query(
+                "UPDATE projects SET slug = slug || '-' || rowid
+                 WHERE rowid NOT IN (
+                     SELECT MIN(rowid) FROM projects GROUP BY slug
+                 )",
+            )
+            .execute(&mut *conn)
+            .await?;
+
+            // Recreate table with NOT NULL and UNIQUE constraint
+            let statements = [
+                "DROP TABLE IF EXISTS projects_new",
+                "CREATE TABLE projects_new (
+                    id TEXT PRIMARY KEY,
+                    slug TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    instructions TEXT,
+                    current_version_id TEXT,
+                    root_feature_id TEXT,
+                    owner_id TEXT,
+                    visibility TEXT NOT NULL DEFAULT 'private',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CONSTRAINT chk_projects_visibility CHECK (visibility IN ('private', 'public'))
+                )",
+                "INSERT INTO projects_new SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, owner_id, visibility, created_at, updated_at FROM projects",
+                "DROP TABLE projects",
+                "ALTER TABLE projects_new RENAME TO projects",
+                "CREATE INDEX idx_projects_root_feature ON projects(root_feature_id)",
+                "CREATE INDEX idx_projects_slug ON projects(slug)",
+            ];
+
+            for sql in statements {
+                sqlx::query(sql).execute(&mut *conn).await?;
+            }
+
+            // Re-enable foreign keys
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&mut *conn)
+                .await?;
+        } else {
+            // PostgreSQL: simpler migration
+            sqlx::query("ALTER TABLE projects ADD COLUMN slug TEXT")
+                .execute(&self.pool)
+                .await?;
+
+            sqlx::query(
+                "UPDATE projects SET slug = LOWER(REGEXP_REPLACE(REGEXP_REPLACE(name, '[^a-zA-Z0-9]', '-', 'g'), '-+', '-', 'g'))"
+            )
+            .execute(&self.pool)
+            .await?;
+
+            // Handle duplicates
+            sqlx::query(
+                "UPDATE projects p1 SET slug = slug || '-' || (
+                    SELECT COUNT(*) FROM projects p2
+                    WHERE p2.slug = p1.slug AND p2.created_at < p1.created_at
+                ) WHERE slug IN (SELECT slug FROM projects GROUP BY slug HAVING COUNT(*) > 1)",
+            )
+            .execute(&self.pool)
+            .await?;
+
+            sqlx::query("ALTER TABLE projects ALTER COLUMN slug SET NOT NULL")
+                .execute(&self.pool)
+                .await?;
+
+            sqlx::query("ALTER TABLE projects ADD CONSTRAINT projects_slug_unique UNIQUE (slug)")
+                .execute(&self.pool)
+                .await?;
+
+            sqlx::query("CREATE INDEX idx_projects_slug ON projects(slug)")
+                .execute(&self.pool)
+                .await?;
+        }
+
+        tracing::info!("Project slug migration complete");
+        Ok(())
+    }
+
+    /// Migrate 'deprecated' feature state to 'archived'.
+    async fn migrate_deprecated_to_archived(&self) -> Result<()> {
+        // Check if migration is needed by looking for 'deprecated' in the constraint
+        // We do this by checking if we can insert 'archived' - if not, migration needed
+        let test_result = if self.dialect.is_sqlite() {
+            // For SQLite, check the table schema
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.contains("'deprecated'"))
+                .unwrap_or(false)
+        } else {
+            // For PostgreSQL, check constraint definition
+            let constraint_def: Option<String> = sqlx::query_scalar(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint
+                 WHERE conname = 'chk_features_state'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            constraint_def
+                .as_ref()
+                .map(|s| s.contains("deprecated"))
+                .unwrap_or(false)
+        };
+
+        if !test_result {
+            tracing::debug!("Feature state migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Migrating feature state: deprecated -> archived");
+
+        if self.dialect.is_sqlite() {
+            // SQLite: recreate table with new constraint
+            // Must use a single connection for PRAGMA foreign_keys to work
+            let mut conn = self.pool.acquire().await?;
+
+            // Disable foreign keys on this connection
+            sqlx::query("PRAGMA foreign_keys = OFF")
+                .execute(&mut *conn)
+                .await?;
+
+            let statements = [
+                "DROP TABLE IF EXISTS features_new",
+                "CREATE TABLE features_new (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    parent_id TEXT REFERENCES features_new(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    details TEXT,
+                    desired_details TEXT,
+                    state TEXT NOT NULL DEFAULT 'proposed' CHECK (state IN ('proposed', 'in_progress', 'implemented', 'archived')),
+                    priority INTEGER NOT NULL DEFAULT 0,
+                    target_version_id TEXT REFERENCES versions(id) ON DELETE SET NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )",
+                "INSERT INTO features_new (id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at)
+                SELECT id, project_id, parent_id, title, details, desired_details,
+                    CASE WHEN state = 'deprecated' THEN 'archived' ELSE state END,
+                    priority, target_version_id, created_at, updated_at
+                FROM features",
+                "DROP TABLE features",
+                "ALTER TABLE features_new RENAME TO features",
+                "CREATE INDEX idx_features_project ON features(project_id)",
+                "CREATE INDEX idx_features_parent ON features(parent_id)",
+                "CREATE INDEX idx_features_target_version ON features(target_version_id) WHERE target_version_id IS NOT NULL",
+            ];
+
+            for sql in statements {
+                sqlx::query(sql).execute(&mut *conn).await?;
+            }
+
+            // Re-enable foreign keys
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&mut *conn)
+                .await?;
+        } else {
+            // PostgreSQL: update data and alter constraint
+            sqlx::query("UPDATE features SET state = 'archived' WHERE state = 'deprecated'")
+                .execute(&self.pool)
+                .await?;
+
+            sqlx::query("ALTER TABLE features DROP CONSTRAINT IF EXISTS chk_features_state")
+                .execute(&self.pool)
+                .await?;
+
+            sqlx::query(
+                "ALTER TABLE features ADD CONSTRAINT chk_features_state
+                 CHECK (state IN ('proposed', 'in_progress', 'implemented', 'archived'))",
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+
+        tracing::info!("Feature state migration complete");
         Ok(())
     }
 
@@ -313,7 +564,7 @@ impl Database {
 
     pub async fn get_all_projects(&self) -> Result<Vec<Project>> {
         let rows = sqlx::query(
-            "SELECT id, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
+            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
              FROM projects ORDER BY name",
         )
         .fetch_all(&self.pool)
@@ -324,10 +575,22 @@ impl Database {
 
     pub async fn get_project(&self, id: Uuid) -> Result<Option<Project>> {
         let row = sqlx::query(
-            "SELECT id, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
+            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
              FROM projects WHERE id = $1",
         )
         .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_project))
+    }
+
+    pub async fn get_project_by_slug(&self, slug: &str) -> Result<Option<Project>> {
+        let row = sqlx::query(
+            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
+             FROM projects WHERE slug = $1",
+        )
+        .bind(slug)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -339,12 +602,16 @@ impl Database {
         let root_feature_id = Uuid::new_v4();
         let now = Utc::now();
 
+        // Generate slug from name if not provided
+        let slug = input.slug.unwrap_or_else(|| slugify(&input.name));
+
         // Create project with root_feature_id
         sqlx::query(
-            "INSERT INTO projects (id, name, description, instructions, root_feature_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO projects (id, slug, name, description, instructions, root_feature_id, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(project_id.to_string())
+        .bind(&slug)
         .bind(&input.name)
         .bind(&input.description)
         .bind(&input.instructions)
@@ -370,6 +637,7 @@ impl Database {
 
         Ok(Project {
             id: project_id,
+            slug,
             name: input.name,
             description: input.description,
             instructions: input.instructions,
@@ -391,14 +659,16 @@ impl Database {
 
         let now = Utc::now();
         let name_changed = input.name.is_some() && input.name.as_ref() != Some(&existing.name);
+        let slug = input.slug.unwrap_or(existing.slug);
         let name = input.name.unwrap_or(existing.name);
         let description = input.description.or(existing.description);
         let instructions = input.instructions.or(existing.instructions);
         let current_version_id = input.current_version_id.or(existing.current_version_id);
 
         sqlx::query(
-            "UPDATE projects SET name = $1, description = $2, instructions = $3, current_version_id = $4, updated_at = $5 WHERE id = $6",
+            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, updated_at = $6 WHERE id = $7",
         )
+        .bind(&slug)
         .bind(&name)
         .bind(&description)
         .bind(&instructions)
@@ -422,6 +692,7 @@ impl Database {
 
         Ok(Some(Project {
             id,
+            slug,
             name,
             description,
             instructions,
@@ -589,6 +860,34 @@ impl Database {
              FROM versions WHERE id = $1",
         )
         .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_version))
+    }
+
+    /// Get the "Now" version (first unreleased version) for a project.
+    /// Returns None if no unreleased versions exist.
+    pub async fn get_now_version(&self, project_id: Uuid) -> Result<Option<Version>> {
+        let row = sqlx::query(
+            "SELECT id, project_id, name, description, released_at, created_at, updated_at
+             FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at LIMIT 1",
+        )
+        .bind(project_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_version))
+    }
+
+    /// Get the latest unreleased version for a project (for new feature assignment).
+    /// Returns None if no unreleased versions exist.
+    pub async fn get_latest_version(&self, project_id: Uuid) -> Result<Option<Version>> {
+        let row = sqlx::query(
+            "SELECT id, project_id, name, description, released_at, created_at, updated_at
+             FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(project_id.to_string())
         .fetch_optional(&self.pool)
         .await?;
 
@@ -835,6 +1134,12 @@ impl Database {
         let state = input.state.unwrap_or(FeatureState::Proposed);
         let priority = input.priority.unwrap_or(0);
 
+        // Default to "Now" version (first unreleased) if not specified
+        let target_version_id = match input.target_version_id {
+            Some(vid) => Some(vid),
+            None => self.get_latest_version(project_id).await?.map(|v| v.id),
+        };
+
         sqlx::query(
             "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
@@ -846,7 +1151,7 @@ impl Database {
         .bind(&input.details)
         .bind(state.as_str())
         .bind(priority)
-        .bind(input.target_version_id.map(|u| u.to_string()))
+        .bind(target_version_id.map(|u| u.to_string()))
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
         .execute(&self.pool)
@@ -863,7 +1168,7 @@ impl Database {
             desired_details: None,
             state,
             priority,
-            target_version_id: input.target_version_id,
+            target_version_id,
             created_at: now,
             updated_at: now,
         })
@@ -882,11 +1187,15 @@ impl Database {
         let now = Utc::now();
         let mut features = Vec::with_capacity(inputs.len());
 
+        // Get "Now" version once for defaulting
+        let latest_version_id = self.get_latest_version(project_id).await?.map(|v| v.id);
+
         for input in inputs {
             let id = input.id.unwrap_or_else(Uuid::new_v4);
             let state = input.state.unwrap_or(FeatureState::Proposed);
             let priority = input.priority.unwrap_or(0);
             let parent_id = input.parent_id.or(project.root_feature_id);
+            let target_version_id = input.target_version_id.or(latest_version_id);
 
             sqlx::query(
                 "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
@@ -899,7 +1208,7 @@ impl Database {
             .bind(&input.details)
             .bind(state.as_str())
             .bind(priority)
-            .bind(input.target_version_id.map(|u| u.to_string()))
+            .bind(target_version_id.map(|u| u.to_string()))
             .bind(now.to_rfc3339())
             .bind(now.to_rfc3339())
             .execute(&self.pool)
@@ -914,7 +1223,7 @@ impl Database {
                 desired_details: None,
                 state,
                 priority,
-                target_version_id: input.target_version_id,
+                target_version_id,
                 created_at: now,
                 updated_at: now,
             });
@@ -1748,12 +2057,16 @@ impl Database {
         let membership_id = Uuid::new_v4();
         let now = Utc::now();
 
+        // Generate slug from name if not provided
+        let slug = input.slug.unwrap_or_else(|| slugify(&input.name));
+
         // Create project with owner_id
         sqlx::query(
-            "INSERT INTO projects (id, name, description, instructions, root_feature_id, owner_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "INSERT INTO projects (id, slug, name, description, instructions, root_feature_id, owner_id, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(project_id.to_string())
+        .bind(&slug)
         .bind(&input.name)
         .bind(&input.description)
         .bind(&input.instructions)
@@ -1792,6 +2105,7 @@ impl Database {
 
         Ok(Project {
             id: project_id,
+            slug,
             name: input.name,
             description: input.description,
             instructions: input.instructions,
@@ -1830,9 +2144,37 @@ fn parse_datetime(s: String) -> DateTime<Utc> {
         .unwrap_or_else(|_| panic!("Invalid timestamp stored in database: {}", s))
 }
 
+/// Convert a name to a URL-friendly slug.
+/// - Lowercase
+/// - Replace non-alphanumeric with hyphens
+/// - Collapse multiple hyphens
+/// - Trim leading/trailing hyphens
+fn slugify(name: &str) -> String {
+    let mut slug = String::with_capacity(name.len());
+    let mut last_was_hyphen = true; // Start true to skip leading hyphens
+
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+            last_was_hyphen = false;
+        } else if !last_was_hyphen {
+            slug.push('-');
+            last_was_hyphen = true;
+        }
+    }
+
+    // Trim trailing hyphen
+    if slug.ends_with('-') {
+        slug.pop();
+    }
+
+    slug
+}
+
 fn row_to_project(row: &AnyRow) -> Project {
     Project {
         id: parse_uuid(row.get("id")),
+        slug: row.get("slug"),
         name: row.get("name"),
         description: row.get("description"),
         instructions: row.get("instructions"),

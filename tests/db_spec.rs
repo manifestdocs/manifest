@@ -12,6 +12,7 @@ async fn setup() -> Database {
 
 async fn create_test_project(db: &Database) -> Project {
     db.create_project(CreateProjectInput {
+        slug: None,
         name: "Test Project".to_string(),
         description: None,
         instructions: None,
@@ -35,6 +36,7 @@ mod projects {
             let db = setup().await;
             let project = db
                 .create_project(CreateProjectInput {
+                    slug: None,
                     name: "My Project".to_string(),
                     description: None,
                     instructions: None,
@@ -51,6 +53,7 @@ mod projects {
             let db = setup().await;
             let project = db
                 .create_project(CreateProjectInput {
+                    slug: None,
                     name: "Full Project".to_string(),
                     description: Some("A complete project".to_string()),
                     instructions: Some("Use cargo test to run tests".to_string()),
@@ -82,6 +85,7 @@ mod projects {
             let db = setup().await;
             let created = db
                 .create_project(CreateProjectInput {
+                    slug: None,
                     name: "Test".to_string(),
                     description: None,
                     instructions: None,
@@ -109,6 +113,7 @@ mod projects {
         async fn returns_all_projects_ordered_by_name() {
             let db = setup().await;
             db.create_project(CreateProjectInput {
+                slug: None,
                 name: "Zebra".to_string(),
                 description: None,
                 instructions: None,
@@ -117,6 +122,7 @@ mod projects {
             .expect("Failed to create");
 
             db.create_project(CreateProjectInput {
+                slug: None,
                 name: "Alpha".to_string(),
                 description: None,
                 instructions: None,
@@ -815,6 +821,7 @@ mod features {
             let db = setup().await;
             let project1 = db
                 .create_project(CreateProjectInput {
+                    slug: None,
                     name: "Project 1".to_string(),
                     description: None,
                     instructions: None,
@@ -824,6 +831,7 @@ mod features {
 
             let project2 = db
                 .create_project(CreateProjectInput {
+                    slug: None,
                     name: "Project 2".to_string(),
                     description: None,
                     instructions: None,
@@ -1946,6 +1954,7 @@ mod feature_history {
             let db = setup().await;
             let project1 = db
                 .create_project(CreateProjectInput {
+                    slug: None,
                     name: "Project 1".to_string(),
                     description: None,
                     instructions: None,
@@ -1955,6 +1964,7 @@ mod feature_history {
 
             let project2 = db
                 .create_project(CreateProjectInput {
+                    slug: None,
                     name: "Project 2".to_string(),
                     description: None,
                     instructions: None,
