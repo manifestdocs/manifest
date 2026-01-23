@@ -235,18 +235,19 @@ pub async fn update_feature(
 
 /// Signal start of work on a feature.
 /// Returns full context including breadcrumb with ancestor details.
+/// Also transitions all proposed children to in_progress (cascading start).
 pub async fn start_feature(
     client: &ManifestClient,
     req: StartFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
-    // Get current feature to check state
-    let feature = client
-        .get_feature(req.feature_id)
+    // Get current feature with context (includes children)
+    let feature_with_context = client
+        .get_feature_with_context(req.feature_id)
         .await
         .map_err(client_err)?;
 
     // Transition to in_progress if proposed
-    if feature.state == FeatureState::Proposed {
+    if feature_with_context.feature.state == FeatureState::Proposed {
         client
             .update_feature(
                 req.feature_id,
@@ -264,7 +265,10 @@ pub async fn start_feature(
             .map_err(client_err)?;
     }
 
-    // Return full context with breadcrumb (includes ancestor details)
+    // Cascade: also start all proposed children
+    start_children_recursive(client, &feature_with_context.children).await?;
+
+    // Re-fetch context to get updated states
     let feature_with_context = client
         .get_feature_with_context(req.feature_id)
         .await
@@ -276,6 +280,48 @@ pub async fn start_feature(
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     Ok(CallToolResult::success(vec![Content::text(json)]))
+}
+
+/// Recursively transition proposed children to in_progress.
+async fn start_children_recursive(
+    client: &ManifestClient,
+    children: &[crate::models::FeatureSummaryContext],
+) -> Result<(), McpError> {
+    use futures_util::future::try_join_all;
+
+    let update_futures: Vec<_> = children
+        .iter()
+        .filter(|child| child.state == FeatureState::Proposed)
+        .map(|child| async move {
+            // Update this child to in_progress
+            client
+                .update_feature(
+                    child.id,
+                    &UpdateFeatureInput {
+                        parent_id: None,
+                        title: None,
+                        details: None,
+                        desired_details: None,
+                        state: Some(FeatureState::InProgress),
+                        priority: None,
+                        target_version_id: None,
+                    },
+                )
+                .await
+                .map_err(client_err)?;
+
+            // Recursively start this child's children
+            let child_context = client
+                .get_feature_with_context(child.id)
+                .await
+                .map_err(client_err)?;
+
+            Box::pin(start_children_recursive(client, &child_context.children)).await
+        })
+        .collect();
+
+    try_join_all(update_futures).await?;
+    Ok(())
 }
 
 /// Complete work on a feature.
