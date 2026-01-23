@@ -10,8 +10,6 @@ pub use client::ManifestClient;
 pub use server::McpServer;
 pub use types::*;
 
-use crate::api::ClerkAuthState;
-
 /// Run the MCP server using stdio transport.
 pub async fn run_stdio_server() -> anyhow::Result<()> {
     use rmcp::ServiceExt;
@@ -42,27 +40,4 @@ pub fn streamable_http_router() -> axum::Router {
         Default::default(),
     );
     axum::Router::new().fallback_service(service)
-}
-
-/// Create Axum router for Streamable HTTP MCP transport with Clerk authentication.
-///
-/// In cloud mode, MCP requests require a valid Clerk JWT in the Authorization header.
-pub fn streamable_http_router_with_auth(clerk_state: ClerkAuthState) -> axum::Router {
-    use rmcp::transport::streamable_http_server::{
-        session::local::LocalSessionManager, tower::StreamableHttpService,
-    };
-    use std::sync::Arc;
-
-    let service = StreamableHttpService::new(
-        || Ok(McpServer::from_env()),
-        Arc::new(LocalSessionManager::default()),
-        Default::default(),
-    );
-
-    axum::Router::new()
-        .fallback_service(service)
-        .layer(axum::middleware::from_fn_with_state(
-            clerk_state,
-            crate::api::clerk_middleware::clerk_auth_middleware,
-        ))
 }

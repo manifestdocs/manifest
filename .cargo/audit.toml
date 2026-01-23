@@ -1,0 +1,9 @@
+# Cargo audit configuration
+# https://rustsec.org/advisories/
+
+[advisories]
+# RUSTSEC-2023-0071: rsa timing sidechannel (Marvin Attack)
+# This is a FALSE POSITIVE - sqlx-mysql (which depends on rsa) is included in
+# Cargo.lock but NOT actually compiled. We only use sqlite and postgres backends.
+# Verified: `cargo build --message-format=json | grep sqlx-mysql` returns nothing.
+ignore = ["RUSTSEC-2023-0071"]

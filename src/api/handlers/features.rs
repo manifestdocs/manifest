@@ -1,10 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{
-        sse::{Event, KeepAlive, Sse},
-        IntoResponse, Response,
-    },
+    response::sse::{Event, KeepAlive, Sse},
     Json,
 };
 use futures_util::{stream::Stream, StreamExt};
@@ -13,7 +10,6 @@ use std::convert::Infallible;
 use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
 
-use crate::api::clerk_middleware::ClerkAuthState;
 use crate::db::Database;
 use crate::mcp::{PlanFeaturesResponse, ProposedFeature};
 use crate::models::{
@@ -396,24 +392,11 @@ fn flatten_feature_tree(
     id
 }
 
-/// Query parameters for SSE subscription (supports token auth for cloud mode).
-#[derive(Debug, Deserialize)]
-pub struct SseSubscribeQuery {
-    /// JWT token for cloud mode authentication.
-    /// Required in cloud mode since EventSource doesn't support Authorization headers.
-    pub token: Option<String>,
-}
-
 /// Subscribe to real-time feature change notifications via SSE.
-///
-/// In local mode, no authentication required.
-/// In cloud mode, pass `?token=<JWT>` since EventSource doesn't support Authorization headers.
 pub async fn subscribe_project_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
-    Query(_query): Query<SseSubscribeQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    // This handler is used in local mode only where no auth is required.
     let rx = db.subscribe();
 
     let stream = BroadcastStream::new(rx).filter_map(move |result| {
@@ -429,50 +412,4 @@ pub async fn subscribe_project_features(
     });
 
     Sse::new(stream).keep_alive(KeepAlive::default())
-}
-
-/// Subscribe to real-time feature change notifications via SSE (cloud mode).
-///
-/// Requires `?token=<JWT>` since EventSource doesn't support Authorization headers.
-/// The token must be a valid Clerk JWT.
-pub async fn subscribe_project_features_auth(
-    State(clerk_state): State<ClerkAuthState>,
-    Path(project_id): Path<Uuid>,
-    Query(query): Query<SseSubscribeQuery>,
-) -> Response {
-    // Validate token from query parameter
-    let token = match query.token {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                "Missing token query parameter. Use ?token=<JWT>",
-            )
-                .into_response();
-        }
-    };
-
-    // Verify the token
-    if let Err(e) = clerk_state.verifier.verify(&token).await {
-        tracing::warn!("SSE token verification failed: {}", e);
-        return (StatusCode::UNAUTHORIZED, "Invalid or expired token").into_response();
-    }
-
-    // Token is valid, proceed with SSE
-    let rx = clerk_state.db.subscribe();
-
-    let stream = BroadcastStream::new(rx).filter_map(move |result| {
-        let val: Option<Result<Event, Infallible>> = match result {
-            Ok(event) if event.project_id() == project_id => {
-                Some(Ok(Event::default().event("change").data("feature_changed")))
-            }
-            Ok(_) => None,
-            Err(_) => None,
-        };
-        std::future::ready(val)
-    });
-
-    Sse::new(stream)
-        .keep_alive(KeepAlive::default())
-        .into_response()
 }

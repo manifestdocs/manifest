@@ -284,6 +284,8 @@ impl From<Feature> for FeatureSummary {
 /// Query parameters for listing features.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ListFeaturesQuery {
+    /// Project ID to filter features (required in cloud mode).
+    pub project_id: Option<Uuid>,
     /// Maximum number of features to return.
     pub limit: Option<u32>,
     /// Number of features to skip for pagination.

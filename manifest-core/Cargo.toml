@@ -7,12 +7,11 @@ license = "BUSL-1.1"
 
 [dependencies]
 # Database - SQLx with multi-database support
-sqlx = { version = "0.8", features = [
+sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio",
     "sqlite",
     "postgres",
     "any",
-    "migrate",
     "uuid",
     "chrono"
 ]}

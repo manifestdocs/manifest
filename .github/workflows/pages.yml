@@ -16,11 +16,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout manifest-web
-        uses: actions/checkout@v4
-        with:
-          repository: rocket-tycoon/manifest-web
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
@@ -30,16 +26,17 @@ jobs:
         with:
           node-version: '22'
           cache: 'pnpm'
+          cache-dependency-path: manifest-site/pnpm-lock.yaml
 
-      - run: pnpm install
-      - run: pnpm build:pages
-        env:
-          PUBLIC_CLERK_PUBLISHABLE_KEY: pk_live_placeholder
-          PUBLIC_MANIFEST_MODE: cloud
+      - name: Build manifest-site
+        run: |
+          cd manifest-site
+          pnpm install
+          pnpm build
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: build
+          path: manifest-site/build
 
   deploy:
     environment:
