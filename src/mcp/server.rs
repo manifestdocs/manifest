@@ -70,7 +70,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT/BUILD: Get detailed feature spec. Returns title, description, acceptance criteria, and state. Set include_history=true to see implementation history. READ THIS before starting work."
+        description = "ORIENT/BUILD: Get detailed feature spec with hierarchical context. Returns the feature details plus breadcrumb with ancestor context (architectural decisions, conventions). Set include_history=true to see past work. READ THIS before starting work."
     )]
     async fn get_feature(
         &self,
@@ -80,7 +80,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (◇ proposed, ○ in_progress, ● implemented)."
+        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (◇ proposed, ○ in_progress, ● implemented, ✗ archived)."
     )]
     async fn render_feature_tree(
         &self,
@@ -114,7 +114,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DISCOVER: Generate a feature tree from an existing codebase by analyzing code structure and git history. Returns a markdown document describing system capabilities. Use this to understand what features exist in an undocumented codebase."
+        description = "DISCOVER: Generate a feature tree from an existing codebase by analyzing code structure and git history. Use `since` to limit to recent commits (e.g., 'v1.0.0'). Returns a markdown document describing system capabilities."
     )]
     async fn generate_feature_tree(
         &self,
@@ -124,7 +124,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Decompose a PRD or vision into a feature tree. With confirm=false, returns a proposal. With confirm=true, creates the features."
+        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features can have details for shared context (architecture, conventions). With confirm=false, returns a proposal. With confirm=true, creates the features."
     )]
     async fn plan(
         &self,
@@ -148,7 +148,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement. IMPORTANT: Do not change the feature's target version during implementation."
+        description = "CLAIM: Signal you are starting work. Transitions proposed → in_progress (safe to call if already in_progress). Returns full feature details with breadcrumb context—this is your spec. IMPORTANT: Do not change the feature's target version during implementation."
     )]
     async fn start_feature(
         &self,
@@ -158,7 +158,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Call this only after verification."
+        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Set mark_implemented=false to record progress without changing state. Call only after verification."
     )]
     async fn complete_feature(
         &self,
@@ -178,7 +178,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Get the next workable feature. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'now' version. Use this to find what to work on."
+        description = "ORIENT: Get the next workable feature, or null if none. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'now' version (or filter by version_id). Use this to find what to work on."
     )]
     async fn get_next_feature(
         &self,
@@ -258,7 +258,7 @@ HOW TO USE MANIFEST:
 Manifest provides context: what the system does, what has been built, what needs work, and why decisions were made. Read feature specs before implementing. Check history to see prior work. Update features when you complete work.
 
 THE FEATURE TREE:
-Every project has a feature tree—a hierarchy of capabilities the system provides. The tree structure groups related features (e.g., Auth > Login > OAuth). Each feature has a state:
+Every project has a feature tree—a hierarchy of capabilities the system provides. The tree structure groups related features (e.g., Auth > Login > OAuth). Parent features (feature sets) can have details too—use them for shared context like architectural decisions, conventions, or constraints that apply to all children. Each feature has a state:
 
 ◇ proposed — in the backlog, not yet started
 ○ in_progress — actively being worked on
@@ -272,7 +272,7 @@ DISCOVERING FEATURES:
 - render_feature_tree — display the full tree as ASCII art for the user
 
 VERSIONS:
-Versions use semantic versioning e.g., 0.1.0, 0.2.0, 1.0.0), and organize features into releases. The first unreleased version is "now"—the current focus. The second unreleased version is "next". Everything after that is "later". Features in "now" are highest priority.
+Versions use semantic versioning (e.g., 0.1.0, 0.2.0, 1.0.0) and organize features into releases. The first unreleased version is "now"—the current focus. The second unreleased version is "next". Everything after that is "later". Features in "now" are highest priority.
 
 FEATURES AS LIVING DOCUMENTATION:
 Features describe system capabilities, not work items to close. A feature titled "Router" should make sense years from now. Before creating one, apply the user story test: "As a [user], I can [capability] so that [benefit]."
@@ -293,12 +293,14 @@ WORKFLOW:
 
 3. BUILD — implement against the spec:
    - The feature details ARE your specification
+   - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
    - Write tests first, then implement, then verify
    - Use update_feature to evolve the spec as you learn more
 
 4. DOCUMENT — record what you did:
    - complete_feature — provide summary + commit SHAs
    - This creates a history entry so future agents (or future you) know what happened
+   - If you learned something that applies to sibling features, update the parent's details with shared context
 
 UPDATING FEATURES:
 update_feature is the Swiss Army knife for modifying features. Use it to:
@@ -318,15 +320,25 @@ When all features in the "now" version are implemented, ask the user before call
 
 SETUP (when starting fresh):
 1. init_project — analyze codebase, create project, link directory
-2. add_project_directory — for projects that may have directories in different locations
+2. generate_feature_tree — for existing codebases, extract features from code structure and git history
 3. plan — break down a PRD, tech spec, or vision into a feature tree
-4. create_version — define release milestones
+4. add_project_directory — for monorepos with multiple directories
+5. create_version — define release milestones
 
 DISPLAY GUIDELINES:
 Tool results are collapsed JSON. Always summarize for humans:
-- render_feature_tree: Show the ASCII tree directly
-- get_feature: "Feature: Title (state)" + key spec details + relevant history
+- list_projects: "Found project 'Name'" or "No project found for this directory"
+- find_features: "Found N features" + brief list
+- get_feature: "Feature: Title (state)" + key spec details + breadcrumb context if relevant
 - get_next_feature: "Next up: Title" or "No workable features"
-- start_feature: "Started 'Title' — now in_progress"
+- render_feature_tree: Show the ASCII tree directly
+- init_project: "Initialized 'Name' with N detected modules"
+- generate_feature_tree: "Extracted N features from codebase" + summary
+- plan: "Proposed N features" (confirm=false) or "Created N features" (confirm=true)
+- start_feature: "Started 'Title' — now in_progress" + note any breadcrumb context
 - complete_feature: "Completed 'Title' — recorded N commits"
-- list_versions: "0.1.0 (released), 0.2.0 (now, 3 features), 0.3.0 (next)""#;
+- update_feature: "Updated 'Title'" + what changed
+- list_versions: "0.1.0 (released), 0.2.0 (now, 3 features), 0.3.0 (next)"
+- create_version: "Created version 'Name'"
+- set_feature_version: "Assigned 'Feature' to version 'Name'" or "Unassigned from version"
+- release_version: "Released 'Name'""#;

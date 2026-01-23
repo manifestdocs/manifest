@@ -198,7 +198,7 @@ pub struct PlanFeaturesRequest {
     #[schemars(description = "The UUID of the project to plan features for")]
     pub project_id: Uuid,
     #[schemars(
-        description = "The proposed feature tree. Apply the user story test before proposing: 'As a [user], I can [feature]...'"
+        description = "The proposed feature tree. Parent features can include contextual details (architectural decisions, shared conventions). Apply the user story test to leaf features: 'As a [user], I can [feature]...'"
     )]
     pub features: Vec<ProposedFeature>,
     #[schemars(
@@ -285,10 +285,14 @@ pub struct FeatureSummaryContextInfo {
 }
 
 /// Breadcrumb item for navigation path (root → feature).
+/// Includes details for ancestor context that flows down to children.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BreadcrumbItemInfo {
     pub id: Uuid,
     pub title: String,
+    /// Contextual details from this ancestor (architectural decisions, conventions, constraints).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
 }
 
 /// A feature with its hierarchical context (parent, siblings, children, breadcrumb).
@@ -390,6 +394,7 @@ pub struct ProposedFeature {
     /// Short capability name (2-5 words). What users can DO.
     pub title: String,
     /// Feature details: user story, technical notes, constraints, acceptance criteria.
+    /// For parent features, use details to provide shared context that flows to children.
     /// User stories can be in "As a \[user\], I can \[capability\] so that \[benefit\]" format.
     #[serde(default)]
     pub details: Option<String>,
@@ -639,6 +644,7 @@ impl From<&BreadcrumbItem> for BreadcrumbItemInfo {
         Self {
             id: b.id,
             title: b.title.clone(),
+            details: b.details.clone(),
         }
     }
 }

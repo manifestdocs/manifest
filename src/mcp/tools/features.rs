@@ -234,18 +234,19 @@ pub async fn update_feature(
 }
 
 /// Signal start of work on a feature.
+/// Returns full context including breadcrumb with ancestor details.
 pub async fn start_feature(
     client: &ManifestClient,
     req: StartFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
-    // Get current feature
+    // Get current feature to check state
     let feature = client
         .get_feature(req.feature_id)
         .await
         .map_err(client_err)?;
 
     // Transition to in_progress if proposed
-    let feature = if feature.state == FeatureState::Proposed {
+    if feature.state == FeatureState::Proposed {
         client
             .update_feature(
                 req.feature_id,
@@ -260,12 +261,16 @@ pub async fn start_feature(
                 },
             )
             .await
-            .map_err(client_err)?
-    } else {
-        feature
-    };
+            .map_err(client_err)?;
+    }
 
-    let result: FeatureInfo = (&feature).into();
+    // Return full context with breadcrumb (includes ancestor details)
+    let feature_with_context = client
+        .get_feature_with_context(req.feature_id)
+        .await
+        .map_err(client_err)?;
+
+    let result: FeatureInfoWithContext = (&feature_with_context).into();
 
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;

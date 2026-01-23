@@ -1687,16 +1687,16 @@ impl Database {
             .map(row_to_feature_summary_context)
             .collect();
 
-        // Get breadcrumb using recursive CTE
+        // Get breadcrumb using recursive CTE (includes details for ancestor context)
         let breadcrumb_rows = sqlx::query(
             "WITH RECURSIVE ancestors AS (
-                SELECT id, parent_id, title, 0 as depth FROM features WHERE id = $1
+                SELECT id, parent_id, title, details, 0 as depth FROM features WHERE id = $1
                 UNION ALL
-                SELECT f.id, f.parent_id, f.title, a.depth + 1
+                SELECT f.id, f.parent_id, f.title, f.details, a.depth + 1
                 FROM features f
                 INNER JOIN ancestors a ON f.id = a.parent_id
             )
-            SELECT id, title FROM ancestors ORDER BY depth DESC",
+            SELECT id, title, details FROM ancestors ORDER BY depth DESC",
         )
         .bind(id.to_string())
         .fetch_all(&self.pool)
@@ -1707,6 +1707,7 @@ impl Database {
             .map(|row| BreadcrumbItem {
                 id: parse_uuid(row.get::<String, _>("id")),
                 title: row.get("title"),
+                details: row.get("details"),
             })
             .collect();
 
