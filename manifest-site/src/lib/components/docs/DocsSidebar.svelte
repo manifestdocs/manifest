@@ -1,37 +1,38 @@
 <script lang="ts">
     import { page } from '$app/stores';
+    import { base } from '$app/paths';
 
-    const navigation = [
+    const navigation = $derived([
         {
             title: 'Getting Started',
             items: [
-                { title: 'Install', href: '/docs/getting-started' },
-                { title: 'Concepts', href: '/docs/getting-started/concepts' }
+                { title: 'Install', href: `${base}/docs/getting-started` },
+                { title: 'Concepts', href: `${base}/docs/getting-started/concepts` }
             ]
         },
         {
             title: 'CLI Workflow',
             items: [
-                { title: 'Initialize', href: '/docs/cli/initialize' },
-                { title: 'Planning', href: '/docs/cli/planning' },
-                { title: 'Implementing', href: '/docs/cli/implementing' },
-                { title: 'Versions', href: '/docs/cli/versions' }
+                { title: 'Initialize', href: `${base}/docs/cli/initialize` },
+                { title: 'Planning', href: `${base}/docs/cli/planning` },
+                { title: 'Implementing', href: `${base}/docs/cli/implementing` },
+                { title: 'Versions', href: `${base}/docs/cli/versions` }
             ]
         },
         {
             title: 'Web Interface',
             items: [
-                { title: 'Overview', href: '/docs/web' },
-                { title: 'Edit View', href: '/docs/web/edit' },
-                { title: 'Plan View', href: '/docs/web/plan' },
-                { title: 'History View', href: '/docs/web/history' }
+                { title: 'Overview', href: `${base}/docs/web` },
+                { title: 'Edit View', href: `${base}/docs/web/edit` },
+                { title: 'Plan View', href: `${base}/docs/web/plan` },
+                { title: 'History View', href: `${base}/docs/web/history` }
             ]
         }
-    ];
+    ]);
 
     let { onNavigate, cameFromApp = false }: { onNavigate?: () => void; cameFromApp?: boolean } = $props();
 
-    const backLink = $derived(cameFromApp ? { href: '/projects', label: 'Back to App' } : { href: '/', label: 'Back to Home' });
+    const backLink = $derived(cameFromApp ? { href: `${base}/projects`, label: 'Back to App' } : { href: `${base}/`, label: 'Back to Home' });
 
     function isActive(href: string): boolean {
         return $page.url.pathname === href;

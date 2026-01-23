@@ -216,6 +216,8 @@ jobs:
           cache-dependency-path: manifest-site/pnpm-lock.yaml
 
       - name: Build manifest-site
+        env:
+          BASE_PATH: /manifest
         run: |
           cd manifest-site
           pnpm install
