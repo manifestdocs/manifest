@@ -70,7 +70,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT/BUILD: Get detailed feature spec. Returns title, description, acceptance criteria, and state. Set include_history=true to see implementation history. READ THIS before starting work."
+        description = "ORIENT/BUILD: Get detailed feature spec with hierarchical context. Returns the feature details plus breadcrumb with ancestor context (architectural decisions, conventions). Set include_history=true to see past work. READ THIS before starting work."
     )]
     async fn get_feature(
         &self,
@@ -148,7 +148,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement. IMPORTANT: Do not change the feature's target version during implementation."
+        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details with breadcrumb context—this is your spec to implement. IMPORTANT: Do not change the feature's target version during implementation."
     )]
     async fn start_feature(
         &self,
@@ -272,7 +272,7 @@ DISCOVERING FEATURES:
 - render_feature_tree — display the full tree as ASCII art for the user
 
 VERSIONS:
-Versions use semantic versioning e.g., 0.1.0, 0.2.0, 1.0.0), and organize features into releases. The first unreleased version is "now"—the current focus. The second unreleased version is "next". Everything after that is "later". Features in "now" are highest priority.
+Versions use semantic versioning (e.g., 0.1.0, 0.2.0, 1.0.0) and organize features into releases. The first unreleased version is "now"—the current focus. The second unreleased version is "next". Everything after that is "later". Features in "now" are highest priority.
 
 FEATURES AS LIVING DOCUMENTATION:
 Features describe system capabilities, not work items to close. A feature titled "Router" should make sense years from now. Before creating one, apply the user story test: "As a [user], I can [capability] so that [benefit]."
@@ -300,6 +300,7 @@ WORKFLOW:
 4. DOCUMENT — record what you did:
    - complete_feature — provide summary + commit SHAs
    - This creates a history entry so future agents (or future you) know what happened
+   - If you learned something that applies to sibling features, update the parent's details with shared context
 
 UPDATING FEATURES:
 update_feature is the Swiss Army knife for modifying features. Use it to:
@@ -319,15 +320,25 @@ When all features in the "now" version are implemented, ask the user before call
 
 SETUP (when starting fresh):
 1. init_project — analyze codebase, create project, link directory
-2. add_project_directory — for projects that may have directories in different locations
+2. generate_feature_tree — for existing codebases, extract features from code structure and git history
 3. plan — break down a PRD, tech spec, or vision into a feature tree
-4. create_version — define release milestones
+4. add_project_directory — for monorepos with multiple directories
+5. create_version — define release milestones
 
 DISPLAY GUIDELINES:
 Tool results are collapsed JSON. Always summarize for humans:
-- render_feature_tree: Show the ASCII tree directly
-- get_feature: "Feature: Title (state)" + key spec details + relevant history
+- list_projects: "Found project 'Name'" or "No project found for this directory"
+- find_features: "Found N features" + brief list
+- get_feature: "Feature: Title (state)" + key spec details + breadcrumb context if relevant
 - get_next_feature: "Next up: Title" or "No workable features"
-- start_feature: "Started 'Title' — now in_progress"
+- render_feature_tree: Show the ASCII tree directly
+- init_project: "Initialized 'Name' with N detected modules"
+- generate_feature_tree: "Extracted N features from codebase" + summary
+- plan: "Proposed N features" (confirm=false) or "Created N features" (confirm=true)
+- start_feature: "Started 'Title' — now in_progress" + note any breadcrumb context
 - complete_feature: "Completed 'Title' — recorded N commits"
-- list_versions: "0.1.0 (released), 0.2.0 (now, 3 features), 0.3.0 (next)""#;
+- update_feature: "Updated 'Title'" + what changed
+- list_versions: "0.1.0 (released), 0.2.0 (now, 3 features), 0.3.0 (next)"
+- create_version: "Created version 'Name'"
+- set_feature_version: "Assigned 'Feature' to version 'Name'" or "Unassigned from version"
+- release_version: "Released 'Name'""#;
