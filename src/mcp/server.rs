@@ -124,7 +124,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Decompose a PRD or vision into a feature tree. With confirm=false, returns a proposal. With confirm=true, creates the features."
+        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features can have details for shared context (architecture, conventions). With confirm=false, returns a proposal. With confirm=true, creates the features."
     )]
     async fn plan(
         &self,
@@ -258,7 +258,7 @@ HOW TO USE MANIFEST:
 Manifest provides context: what the system does, what has been built, what needs work, and why decisions were made. Read feature specs before implementing. Check history to see prior work. Update features when you complete work.
 
 THE FEATURE TREE:
-Every project has a feature tree—a hierarchy of capabilities the system provides. The tree structure groups related features (e.g., Auth > Login > OAuth). Each feature has a state:
+Every project has a feature tree—a hierarchy of capabilities the system provides. The tree structure groups related features (e.g., Auth > Login > OAuth). Parent features (feature sets) can have details too—use them for shared context like architectural decisions, conventions, or constraints that apply to all children. Each feature has a state:
 
 ◇ proposed — in the backlog, not yet started
 ○ in_progress — actively being worked on
