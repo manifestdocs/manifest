@@ -293,6 +293,7 @@ WORKFLOW:
 
 3. BUILD — implement against the spec:
    - The feature details ARE your specification
+   - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
    - Write tests first, then implement, then verify
    - Use update_feature to evolve the spec as you learn more
 

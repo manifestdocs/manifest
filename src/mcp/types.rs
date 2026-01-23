@@ -285,10 +285,14 @@ pub struct FeatureSummaryContextInfo {
 }
 
 /// Breadcrumb item for navigation path (root → feature).
+/// Includes details for ancestor context that flows down to children.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BreadcrumbItemInfo {
     pub id: Uuid,
     pub title: String,
+    /// Contextual details from this ancestor (architectural decisions, conventions, constraints).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
 }
 
 /// A feature with its hierarchical context (parent, siblings, children, breadcrumb).
@@ -640,6 +644,7 @@ impl From<&BreadcrumbItem> for BreadcrumbItemInfo {
         Self {
             id: b.id,
             title: b.title.clone(),
+            details: b.details.clone(),
         }
     }
 }
