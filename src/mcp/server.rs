@@ -80,7 +80,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (◇ proposed, ○ in_progress, ● implemented)."
+        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (◇ proposed, ○ in_progress, ● implemented, ✗ archived)."
     )]
     async fn render_feature_tree(
         &self,
@@ -114,7 +114,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DISCOVER: Generate a feature tree from an existing codebase by analyzing code structure and git history. Returns a markdown document describing system capabilities. Use this to understand what features exist in an undocumented codebase."
+        description = "DISCOVER: Generate a feature tree from an existing codebase by analyzing code structure and git history. Use `since` to limit to recent commits (e.g., 'v1.0.0'). Returns a markdown document describing system capabilities."
     )]
     async fn generate_feature_tree(
         &self,
@@ -148,7 +148,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details with breadcrumb context—this is your spec to implement. IMPORTANT: Do not change the feature's target version during implementation."
+        description = "CLAIM: Signal you are starting work. Transitions proposed → in_progress (safe to call if already in_progress). Returns full feature details with breadcrumb context—this is your spec. IMPORTANT: Do not change the feature's target version during implementation."
     )]
     async fn start_feature(
         &self,
@@ -158,7 +158,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Call this only after verification."
+        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Set mark_implemented=false to record progress without changing state. Call only after verification."
     )]
     async fn complete_feature(
         &self,
@@ -178,7 +178,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Get the next workable feature. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'now' version. Use this to find what to work on."
+        description = "ORIENT: Get the next workable feature, or null if none. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'now' version (or filter by version_id). Use this to find what to work on."
     )]
     async fn get_next_feature(
         &self,
