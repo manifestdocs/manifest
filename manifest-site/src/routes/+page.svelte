@@ -264,7 +264,7 @@
 
     <footer class="site-footer">
         <div class="footer-content">
-            <p>&copy; 2026 Rocket Tycoon</p>
+            <p>&copy; 2026 Dawson Design Ltd.</p>
         </div>
     </footer>
 </div>
