@@ -5,7 +5,7 @@
     import illustrationRunningRobot from "$lib/assets/illustration-running-robot.png";
     import illustrationCowboy from "$lib/assets/illustration-cowboy.png";
 
-    const brewCommand = "brew install rocket-tycoon/tap/manifest";
+    const brewCommand = "brew install manifestdocs/tap/manifest";
 
     let copied = $state(false);
     let highlightInstall = $state(false);

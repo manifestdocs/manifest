@@ -9,7 +9,7 @@ Manifest is an MCP server and HTTP API that tracks **features** (system capabili
 ### Quick Start
 
 ```bash
-brew install rocket-tycoon/tap/manifest
+brew install manifestdocs/tap/manifest
 ```
 
 After installation, start Manifest as a background service:
@@ -161,7 +161,7 @@ manifest mcp --verbose
 Run this inside Claude Code for slash commands:
 
 ```
-/plugin install rocket-tycoon/claude-plugins/manifest
+/plugin install manifestdocs/claude-plugins/manifest
 ```
 
 ## Core Concepts

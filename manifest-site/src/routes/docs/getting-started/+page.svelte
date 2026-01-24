@@ -13,7 +13,7 @@
 
 <h2>1. Install via Homebrew</h2>
 
-<CopyableCommand command="brew install rocket-tycoon/tap/manifest" />
+<CopyableCommand command="brew install manifestdocs/tap/manifest" />
 
 <p>
     This installs the <code>manifest</code> binary which runs the MCP server for AI
@@ -70,7 +70,7 @@
 </p>
 
 <CopyableCommand
-    command="/plugin install rocket-tycoon/claude-plugins/manifest"
+    command="/plugin install manifestdocs/claude-plugins/manifest"
 />
 
 <Admonition type="note">

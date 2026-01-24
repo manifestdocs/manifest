@@ -28,7 +28,7 @@ jobs:
       - name: Checkout manifest-web
         uses: actions/checkout@v4
         with:
-          repository: rocket-tycoon/manifest-web
+          repository: manifestdocs/manifest-web
           path: manifest-web-repo
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
@@ -110,7 +110,7 @@ jobs:
       - name: Checkout homebrew-tap
         uses: actions/checkout@v4
         with:
-          repository: rocket-tycoon/homebrew-tap
+          repository: manifestdocs/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
@@ -136,7 +136,7 @@ jobs:
           cat > homebrew-tap/Formula/manifest.rb << 'FORMULA'
           class Manifest < Formula
             desc "MCP server for living feature documentation"
-            homepage "https://github.com/rocket-tycoon/manifest"
+            homepage "https://github.com/manifestdocs/manifest"
             license "BUSL-1.1"
           FORMULA
           echo "  version \"${VERSION#v}\"" >> homebrew-tap/Formula/manifest.rb
@@ -144,17 +144,17 @@ jobs:
 
             on_macos do
               on_arm do
-                url "https://github.com/rocket-tycoon/manifest/releases/download/${VERSION}/manifest-${VERSION}-aarch64-apple-darwin.tar.gz"
+                url "https://github.com/manifestdocs/manifest/releases/download/${VERSION}/manifest-${VERSION}-aarch64-apple-darwin.tar.gz"
                 sha256 "${SHA_ARM}"
               end
               on_intel do
-                url "https://github.com/rocket-tycoon/manifest/releases/download/${VERSION}/manifest-${VERSION}-x86_64-apple-darwin.tar.gz"
+                url "https://github.com/manifestdocs/manifest/releases/download/${VERSION}/manifest-${VERSION}-x86_64-apple-darwin.tar.gz"
                 sha256 "${SHA_INTEL}"
               end
             end
 
             on_linux do
-              url "https://github.com/rocket-tycoon/manifest/releases/download/${VERSION}/manifest-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+              url "https://github.com/manifestdocs/manifest/releases/download/${VERSION}/manifest-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
               sha256 "${SHA_LINUX}"
             end
 
@@ -244,7 +244,7 @@ jobs:
       - name: Checkout claude-plugins
         uses: actions/checkout@v4
         with:
-          repository: rocket-tycoon/claude-plugins
+          repository: manifestdocs/claude-plugins
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: claude-plugins
 
