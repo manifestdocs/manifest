@@ -6,35 +6,157 @@ Manifest is an MCP server and HTTP API that tracks **features** (system capabili
 
 ## Installation
 
-### 1. Install via Homebrew
+### Quick Start
 
 ```bash
 brew install rocket-tycoon/tap/manifest
 ```
 
-### 2. Configure your AI agent
-
-Add Manifest as an MCP server:
+After installation, start Manifest as a background service:
 
 ```bash
-# Claude Code
-claude mcp add manifest -- manifest mcp
-
-# Goose
-goose mcp add manifest -- manifest mcp
-
-# OpenAI Operator
-operator mcp add manifest -- manifest mcp
+brew services start manifest
 ```
 
-### 3. Verify installation
+Manifest runs at `http://localhost:17010` by default.
+
+Other service commands:
 
 ```bash
-manifest --version
-manifest serve        # Opens web UI at http://localhost:17010
+brew services stop manifest    # Stop the service
+brew services restart manifest # Restart the service
+brew services info manifest    # Check service status
 ```
 
-### 4. Claude Code plugin (optional)
+To run manually in the foreground instead:
+
+```bash
+manifest serve
+```
+
+---
+
+### MCP Configuration
+
+Manifest includes an MCP server that lets AI agents read your product features as specs and write history when they complete work. Configure it for your preferred coding agent below.
+
+#### Claude Code
+
+Add via CLI:
+
+```bash
+claude mcp add manifest --scope user -- manifest mcp
+```
+
+Or edit `~/.claude.json` directly:
+
+```json
+{
+  "mcpServers": {
+    "manifest": {
+      "command": "manifest",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Code for changes to take effect.
+
+---
+
+#### Cursor
+
+Edit your Cursor MCP config:
+
+**macOS:** `~/.cursor/mcp.json`
+**Windows:** `%USERPROFILE%\.cursor\mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "manifest": {
+      "command": "manifest",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Cursor after saving.
+
+---
+
+#### Windsurf
+
+Edit your Windsurf MCP config:
+
+**macOS:** `~/.codeium/windsurf/mcp_config.json`
+**Windows:** `%USERPROFILE%\.codeium\windsurf\mcp_config.json`
+
+```json
+{
+  "mcpServers": {
+    "manifest": {
+      "command": "manifest",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Windsurf after saving.
+
+---
+
+### Verify Installation
+
+After configuring your coding agent, verify the MCP server is working:
+
+1. Start a new session
+2. Ask the agent to list your Manifest projects
+3. The agent should be able to read your feature tree from Manifest
+
+---
+
+### Configuration Options
+
+If Manifest is running on a non-default port or host, pass the URL:
+
+```json
+{
+  "mcpServers": {
+    "manifest": {
+      "command": "manifest",
+      "args": ["mcp", "--url", "http://localhost:8080"]
+    }
+  }
+}
+```
+
+---
+
+### Troubleshooting
+
+**Server not connecting?**
+- Ensure Manifest is running (`brew services info manifest` or `manifest serve`)
+- Check that the `manifest` binary is in your PATH
+- Restart your coding agent after config changes
+
+**Permission issues on macOS?**
+```bash
+which manifest
+# Should return /opt/homebrew/bin/manifest or /usr/local/bin/manifest
+```
+
+**Check MCP server logs:**
+```bash
+manifest mcp --verbose
+```
+
+---
+
+### Claude Code plugin (optional)
 
 Run this inside Claude Code for slash commands:
 
