@@ -1,6 +1,6 @@
 [package]
 name = "manifest"
-version = "0.1.32"
+version = "0.1.33"
 edition = "2021"
 description = "Living feature documentation server for AI-assisted development"
 license = "MIT"
