@@ -6,7 +6,7 @@ const PROPOSED: char = '◇';
 const IN_PROGRESS: char = '○';
 const IMPLEMENTED: char = '●';
 const ARCHIVED: char = '✗';
-const PROJECT_ROOT: char = '▣'; // Special symbol for project root feature
+const PROJECT_ROOT: char = '▣'; // Square for project root feature
 
 /// Get the status symbol for a feature state.
 fn state_symbol(state: FeatureState) -> char {

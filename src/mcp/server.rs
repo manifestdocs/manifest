@@ -148,7 +148,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "CLAIM: Signal you are starting work. Transitions proposed → in_progress (safe to call if already in_progress). Returns full feature details with breadcrumb context—this is your spec. IMPORTANT: Do not change the feature's target version during implementation."
+        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement. IMPORTANT: You MUST call this tool when a user asks you to implement, work on, or build a feature—even if you just created the feature or already have context. Do not change the feature's target version during implementation."
     )]
     async fn start_feature(
         &self,
@@ -287,8 +287,10 @@ WORKFLOW:
    - get_feature (include_history=true) — read the spec AND what's been done before
    - get_next_feature — find highest-priority work
 
-2. CLAIM — signal you're starting:
-   - start_feature — transitions proposed → in_progress, returns full spec
+2. CLAIM — MANDATORY before implementing:
+   - ALWAYS call start_feature when asked to implement, work on, or build a feature
+   - This is required even if you just created the feature or already have context
+   - start_feature transitions proposed → in_progress and returns the full spec
    - IMPORTANT: The feature's target version is locked during implementation. Do not call set_feature_version while working on a feature.
 
 3. BUILD — implement against the spec:
