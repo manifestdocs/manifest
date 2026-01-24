@@ -379,7 +379,7 @@ fn flatten_feature_tree(
         parent_id,
         title: proposed.title.clone(),
         details: proposed.details.clone(),
-        state: Some(FeatureState::InProgress),
+        state: Some(FeatureState::Proposed),
         priority: Some(proposed.priority),
         target_version_id: None,
     });
