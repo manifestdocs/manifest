@@ -283,6 +283,7 @@ impl ManifestClient {
     pub async fn bulk_create_features(
         &self,
         project_id: Uuid,
+        target_version_id: Uuid,
         features: &[ProposedFeature],
         confirm: bool,
     ) -> Result<PlanFeaturesResponse, ClientError> {
@@ -292,6 +293,7 @@ impl ManifestClient {
                 &format!("/projects/{}/features/bulk", project_id),
             )
             .json(&serde_json::json!({
+                "target_version_id": target_version_id,
                 "features": features,
                 "confirm": confirm
             }))

@@ -318,6 +318,8 @@ pub async fn search_features(
 /// Input for bulk feature creation.
 #[derive(Debug, Deserialize)]
 pub struct BulkCreateFeaturesInput {
+    /// The target version for all features.
+    pub target_version_id: Uuid,
     /// The proposed feature tree.
     pub features: Vec<ProposedFeature>,
     /// If true, creates the features in the database. If false, returns preview only.
@@ -343,11 +345,23 @@ pub async fn bulk_create_features(
     let mut created_ids = Vec::new();
 
     if input.confirm {
+        // Verify version exists
+        db.get_version(input.target_version_id)
+            .await
+            .map_err(internal_error)?
+            .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))?;
+
         // Flatten the tree into a list of inputs with pre-generated UUIDs
         // This allows us to use the transactional bulk insert
         let mut feature_inputs = Vec::new();
         for feature in &input.features {
-            flatten_feature_tree(None, feature, &mut feature_inputs, &mut created_ids);
+            flatten_feature_tree(
+                None,
+                feature,
+                input.target_version_id,
+                &mut feature_inputs,
+                &mut created_ids,
+            );
         }
 
         // Create all features in a single transaction
@@ -368,6 +382,7 @@ pub async fn bulk_create_features(
 fn flatten_feature_tree(
     parent_id: Option<Uuid>,
     proposed: &ProposedFeature,
+    target_version_id: Uuid,
     inputs: &mut Vec<CreateFeatureInput>,
     created_ids: &mut Vec<Uuid>,
 ) -> Uuid {
@@ -381,12 +396,12 @@ fn flatten_feature_tree(
         details: proposed.details.clone(),
         state: Some(FeatureState::Proposed),
         priority: Some(proposed.priority),
-        target_version_id: None,
+        target_version_id: Some(target_version_id),
     });
 
     // Recursively flatten children with this feature's ID as parent
     for child in &proposed.children {
-        flatten_feature_tree(Some(id), child, inputs, created_ids);
+        flatten_feature_tree(Some(id), child, target_version_id, inputs, created_ids);
     }
 
     id

@@ -198,7 +198,11 @@ pub struct PlanFeaturesRequest {
     #[schemars(description = "The UUID of the project to plan features for")]
     pub project_id: Uuid,
     #[schemars(
-        description = "The proposed feature tree. Parent features can include contextual details (architectural decisions, shared conventions). Apply the user story test to leaf features: 'As a [user], I can [feature]...'"
+        description = "The target version UUID. All features created will be assigned to this version. Call list_versions first to get available versions, or create_version to create one."
+    )]
+    pub target_version_id: Uuid,
+    #[schemars(
+        description = "The proposed feature tree. Apply the user story test before proposing: 'As a [user], I can [feature]...'"
     )]
     pub features: Vec<ProposedFeature>,
     #[schemars(

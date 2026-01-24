@@ -131,7 +131,12 @@ pub async fn plan(
     req: PlanFeaturesRequest,
 ) -> Result<CallToolResult, McpError> {
     let response = client
-        .bulk_create_features(req.project_id, &req.features, req.confirm)
+        .bulk_create_features(
+            req.project_id,
+            req.target_version_id,
+            &req.features,
+            req.confirm,
+        )
         .await
         .map_err(client_err)?;
 

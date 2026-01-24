@@ -124,7 +124,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features can have details for shared context (architecture, conventions). With confirm=false, returns a proposal. With confirm=true, creates the features."
+        description = "SETUP: Decompose a PRD or vision into a feature tree. REQUIRES target_version_id - call list_versions first or create_version if none exist. With confirm=false, returns a proposal. With confirm=true, creates the features."
     )]
     async fn plan(
         &self,
