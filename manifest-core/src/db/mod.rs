@@ -279,6 +279,8 @@ impl Database {
         self.migrate_deprecated_to_archived().await?;
         // Migration: add slug column to projects
         self.migrate_add_project_slug().await?;
+        // Migration: add default_feature_destination column to projects
+        self.migrate_add_default_feature_destination().await?;
         Ok(())
     }
 
@@ -522,6 +524,45 @@ impl Database {
         Ok(())
     }
 
+    /// Add default_feature_destination column to projects table if it doesn't exist.
+    async fn migrate_add_default_feature_destination(&self) -> Result<()> {
+        let has_column = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("default_feature_destination"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'projects' AND column_name = 'default_feature_destination'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_column {
+            tracing::debug!("default_feature_destination migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Adding default_feature_destination column to projects table");
+        sqlx::query(
+            "ALTER TABLE projects ADD COLUMN default_feature_destination TEXT NOT NULL DEFAULT 'backlog'",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     /// Execute the initial schema SQL.
     async fn run_schema(&self) -> Result<()> {
         let schema = include_str!("../../migrations/20240101000000_initial.sql");
@@ -564,7 +605,7 @@ impl Database {
 
     pub async fn get_all_projects(&self) -> Result<Vec<Project>> {
         let rows = sqlx::query(
-            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
+            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, created_at, updated_at
              FROM projects ORDER BY name",
         )
         .fetch_all(&self.pool)
@@ -575,7 +616,7 @@ impl Database {
 
     pub async fn get_project(&self, id: Uuid) -> Result<Option<Project>> {
         let row = sqlx::query(
-            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
+            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, created_at, updated_at
              FROM projects WHERE id = $1",
         )
         .bind(id.to_string())
@@ -587,7 +628,7 @@ impl Database {
 
     pub async fn get_project_by_slug(&self, slug: &str) -> Result<Option<Project>> {
         let row = sqlx::query(
-            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, created_at, updated_at
+            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, created_at, updated_at
              FROM projects WHERE slug = $1",
         )
         .bind(slug)
@@ -643,6 +684,7 @@ impl Database {
             instructions: input.instructions,
             current_version_id: None,
             root_feature_id: Some(root_feature_id),
+            default_feature_destination: "backlog".to_string(),
             created_at: now,
             updated_at: now,
         })
@@ -664,15 +706,19 @@ impl Database {
         let description = input.description.or(existing.description);
         let instructions = input.instructions.or(existing.instructions);
         let current_version_id = input.current_version_id.or(existing.current_version_id);
+        let default_feature_destination = input
+            .default_feature_destination
+            .unwrap_or(existing.default_feature_destination);
 
         sqlx::query(
-            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, updated_at = $6 WHERE id = $7",
+            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, updated_at = $7 WHERE id = $8",
         )
         .bind(&slug)
         .bind(&name)
         .bind(&description)
         .bind(&instructions)
         .bind(current_version_id.map(|u| u.to_string()))
+        .bind(&default_feature_destination)
         .bind(now.to_rfc3339())
         .bind(id.to_string())
         .execute(&self.pool)
@@ -698,6 +744,7 @@ impl Database {
             instructions,
             current_version_id,
             root_feature_id: existing.root_feature_id,
+            default_feature_destination,
             created_at: existing.created_at,
             updated_at: now,
         }))
@@ -892,6 +939,40 @@ impl Database {
         .await?;
 
         Ok(row.as_ref().map(row_to_version))
+    }
+
+    /// Ensure at least `min_count` unreleased versions exist for a project.
+    /// Auto-creates versions with incremented minor version numbers as needed.
+    pub async fn ensure_minimum_versions(
+        &self,
+        project_id: Uuid,
+        min_count: usize,
+    ) -> Result<Vec<Version>> {
+        let mut all_versions = self.get_versions_by_project(project_id).await?;
+        let unreleased_count = all_versions.iter().filter(|v| v.released_at.is_none()).count();
+
+        let mut created = Vec::new();
+        if unreleased_count >= min_count {
+            return Ok(created);
+        }
+
+        let needed = min_count - unreleased_count;
+        for _ in 0..needed {
+            let next_name = compute_next_version_name(&all_versions);
+            let version = self
+                .create_version(
+                    project_id,
+                    CreateVersionInput {
+                        name: next_name,
+                        description: None,
+                    },
+                )
+                .await?;
+            all_versions.push(version.clone());
+            created.push(version);
+        }
+
+        Ok(created)
     }
 
     pub async fn create_version(
@@ -1134,10 +1215,16 @@ impl Database {
         let state = input.state.unwrap_or(FeatureState::Proposed);
         let priority = input.priority.unwrap_or(0);
 
-        // Default to "Now" version (first unreleased) if not specified
+        // Default based on project setting: "now" assigns to first unreleased, "backlog" leaves unassigned
         let target_version_id = match input.target_version_id {
             Some(vid) => Some(vid),
-            None => self.get_latest_version(project_id).await?.map(|v| v.id),
+            None => {
+                if project.default_feature_destination == "now" {
+                    self.get_now_version(project_id).await?.map(|v| v.id)
+                } else {
+                    None // backlog
+                }
+            }
         };
 
         sqlx::query(
@@ -1187,15 +1274,19 @@ impl Database {
         let now = Utc::now();
         let mut features = Vec::with_capacity(inputs.len());
 
-        // Get "Now" version once for defaulting
-        let latest_version_id = self.get_latest_version(project_id).await?.map(|v| v.id);
+        // Get default version based on project setting
+        let default_version_id = if project.default_feature_destination == "now" {
+            self.get_now_version(project_id).await?.map(|v| v.id)
+        } else {
+            None // backlog
+        };
 
         for input in inputs {
             let id = input.id.unwrap_or_else(Uuid::new_v4);
             let state = input.state.unwrap_or(FeatureState::Proposed);
             let priority = input.priority.unwrap_or(0);
             let parent_id = input.parent_id.or(project.root_feature_id);
-            let target_version_id = input.target_version_id.or(latest_version_id);
+            let target_version_id = input.target_version_id.or(default_version_id);
 
             sqlx::query(
                 "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
@@ -1250,9 +1341,19 @@ impl Database {
         let state = input.state.unwrap_or(existing.state);
         let parent_id = input.parent_id.or(existing.parent_id);
         let priority = input.priority.unwrap_or(existing.priority);
-        let target_version_id = input
+        let mut target_version_id = input
             .target_version_id
             .unwrap_or(existing.target_version_id);
+
+        // Auto-move to Now when transitioning to in_progress from backlog
+        if state == FeatureState::InProgress && existing.state != FeatureState::InProgress {
+            if target_version_id.is_none() {
+                target_version_id = self
+                    .get_now_version(existing.project_id)
+                    .await?
+                    .map(|v| v.id);
+            }
+        }
 
         sqlx::query(
             "UPDATE features SET parent_id = $1, title = $2, details = $3, desired_details = $4, state = $5, priority = $6, target_version_id = $7, updated_at = $8 WHERE id = $9",
@@ -2033,7 +2134,7 @@ impl Database {
     /// Get all projects a user can access (via membership).
     pub async fn get_user_projects(&self, user_id: Uuid) -> Result<Vec<Project>> {
         let rows = sqlx::query(
-            "SELECT p.id, p.name, p.description, p.instructions, p.current_version_id, p.root_feature_id, p.created_at, p.updated_at
+            "SELECT p.id, p.slug, p.name, p.description, p.instructions, p.current_version_id, p.root_feature_id, p.default_feature_destination, p.created_at, p.updated_at
              FROM projects p
              INNER JOIN project_memberships pm ON p.id = pm.project_id
              WHERE pm.user_id = $1
@@ -2112,6 +2213,7 @@ impl Database {
             instructions: input.instructions,
             current_version_id: None,
             root_feature_id: Some(root_feature_id),
+            default_feature_destination: "backlog".to_string(),
             created_at: now,
             updated_at: now,
         })
@@ -2172,6 +2274,38 @@ fn slugify(name: &str) -> String {
     slug
 }
 
+/// Compute the next version name by parsing existing versions and incrementing the minor version.
+/// Falls back to "0.1.0" if no parseable versions exist.
+fn compute_next_version_name(versions: &[Version]) -> String {
+    struct SemVer {
+        major: u32,
+        minor: u32,
+    }
+
+    let parsed: Vec<SemVer> = versions
+        .iter()
+        .filter_map(|v| {
+            // Match "0.1.0" or "v0.1.0" style names
+            let name = v.name.strip_prefix('v').unwrap_or(&v.name);
+            let parts: Vec<&str> = name.split('.').collect();
+            if parts.len() >= 2 {
+                let major = parts[0].parse::<u32>().ok()?;
+                let minor = parts[1].parse::<u32>().ok()?;
+                Some(SemVer { major, minor })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if parsed.is_empty() {
+        return "0.1.0".to_string();
+    }
+
+    let highest = parsed.iter().max_by_key(|v| (v.major, v.minor)).unwrap();
+    format!("{}.{}.0", highest.major, highest.minor + 1)
+}
+
 fn row_to_project(row: &AnyRow) -> Project {
     Project {
         id: parse_uuid(row.get("id")),
@@ -2185,6 +2319,9 @@ fn row_to_project(row: &AnyRow) -> Project {
         root_feature_id: row
             .get::<Option<String>, _>("root_feature_id")
             .map(parse_uuid),
+        default_feature_destination: row
+            .get::<Option<String>, _>("default_feature_destination")
+            .unwrap_or_else(|| "backlog".to_string()),
         created_at: parse_datetime(row.get("created_at")),
         updated_at: parse_datetime(row.get("updated_at")),
     }

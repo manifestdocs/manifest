@@ -198,9 +198,10 @@ pub struct PlanFeaturesRequest {
     #[schemars(description = "The UUID of the project to plan features for")]
     pub project_id: Uuid,
     #[schemars(
-        description = "The target version UUID. All features created will be assigned to this version. Call list_versions first to get available versions, or create_version to create one."
+        description = "Optional target version UUID. Features will be assigned to this version. If not provided, features go to the backlog (unassigned). Call list_versions first to get available versions."
     )]
-    pub target_version_id: Uuid,
+    #[serde(default)]
+    pub target_version_id: Option<Uuid>,
     #[schemars(
         description = "The proposed feature tree. Apply the user story test before proposing: 'As a [user], I can [feature]...'"
     )]
@@ -378,6 +379,9 @@ pub struct VersionListResponse {
     /// ID of the second unreleased version (queued up)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<Uuid>,
+    /// Number of features in the backlog (no version assigned)
+    #[serde(default)]
+    pub backlog_count: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

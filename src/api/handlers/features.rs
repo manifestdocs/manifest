@@ -318,8 +318,8 @@ pub async fn search_features(
 /// Input for bulk feature creation.
 #[derive(Debug, Deserialize)]
 pub struct BulkCreateFeaturesInput {
-    /// The target version for all features.
-    pub target_version_id: Uuid,
+    /// The target version for all features. If null, features go to backlog.
+    pub target_version_id: Option<Uuid>,
     /// The proposed feature tree.
     pub features: Vec<ProposedFeature>,
     /// If true, creates the features in the database. If false, returns preview only.
@@ -345,11 +345,13 @@ pub async fn bulk_create_features(
     let mut created_ids = Vec::new();
 
     if input.confirm {
-        // Verify version exists
-        db.get_version(input.target_version_id)
-            .await
-            .map_err(internal_error)?
-            .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))?;
+        // Verify version exists if one was specified
+        if let Some(vid) = input.target_version_id {
+            db.get_version(vid)
+                .await
+                .map_err(internal_error)?
+                .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))?;
+        }
 
         // Flatten the tree into a list of inputs with pre-generated UUIDs
         // This allows us to use the transactional bulk insert
@@ -382,7 +384,7 @@ pub async fn bulk_create_features(
 fn flatten_feature_tree(
     parent_id: Option<Uuid>,
     proposed: &ProposedFeature,
-    target_version_id: Uuid,
+    target_version_id: Option<Uuid>,
     inputs: &mut Vec<CreateFeatureInput>,
     created_ids: &mut Vec<Uuid>,
 ) -> Uuid {
@@ -396,7 +398,7 @@ fn flatten_feature_tree(
         details: proposed.details.clone(),
         state: Some(FeatureState::Proposed),
         priority: Some(proposed.priority),
-        target_version_id: Some(target_version_id),
+        target_version_id,
     });
 
     // Recursively flatten children with this feature's ID as parent

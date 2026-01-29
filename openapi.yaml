@@ -791,6 +791,11 @@ components:
           format: uuid
           nullable: true
           description: ID of the current/active version for this project
+        default_feature_destination:
+          type: string
+          enum: [backlog, now]
+          default: backlog
+          description: Where new features go by default. "backlog" leaves them unassigned, "now" assigns to the current version.
         created_at:
           type: string
           format: date-time
@@ -839,6 +844,10 @@ components:
           format: uuid
           nullable: true
           description: Set the current/active version for this project
+        default_feature_destination:
+          type: string
+          enum: [backlog, now]
+          description: Where new features go by default. "backlog" leaves them unassigned, "now" assigns to the current version.
 
     ProjectDirectory:
       type: object

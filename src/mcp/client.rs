@@ -283,7 +283,7 @@ impl ManifestClient {
     pub async fn bulk_create_features(
         &self,
         project_id: Uuid,
-        target_version_id: Uuid,
+        target_version_id: Option<Uuid>,
         features: &[ProposedFeature],
         confirm: bool,
     ) -> Result<PlanFeaturesResponse, ClientError> {

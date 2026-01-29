@@ -28,6 +28,7 @@ CREATE TABLE projects (
     root_feature_id TEXT,
     owner_id TEXT,
     visibility TEXT NOT NULL DEFAULT 'private',
+    default_feature_destination TEXT NOT NULL DEFAULT 'backlog',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CONSTRAINT chk_projects_visibility CHECK (visibility IN ('private', 'public'))
