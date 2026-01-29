@@ -1,10 +1,12 @@
 mod analysis;
+mod assist;
 mod features;
 mod health;
 mod projects;
 mod versions;
 
 pub use analysis::*;
+pub use assist::*;
 pub use features::*;
 pub use health::*;
 pub use projects::*;

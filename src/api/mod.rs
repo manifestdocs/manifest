@@ -179,7 +179,9 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         .route(
             "/features/{id}/history",
             get(handlers::get_feature_history).post(handlers::create_feature_history),
-        );
+        )
+        // Chat completions (AI assistance via Claude CLI)
+        .route("/chat/completions", post(handlers::chat_completions));
 
     // Apply auth middleware to protected routes if API key is configured
     let protected_api = if config.api_key.is_some() {
