@@ -77,15 +77,23 @@ The OpenAPI spec is the source of truth for the HTTP API. Keeping it current is 
 ```
 src/
 ├── main.rs         # CLI (clap) with serve/status/stop subcommands
-├── api/
+├── api/            # HTTP API — validation & presentation layer
 │   ├── mod.rs      # Router setup, all routes under /api/v1
 │   └── handlers/   # Request handlers (extract State<Database>)
 ├── db/
-│   ├── mod.rs      # Database wrapper with CRUD operations
+│   ├── mod.rs      # Database wrapper with CRUD operations + business logic
 │   └── schema.rs   # SQLite schema (embedded, auto-migrated)
 ├── models/         # Domain types with serde + enums with as_str/from_str
-└── mcp/            # MCP server for AI agent integration
+└── mcp/            # MCP server — execution layer for AI agents
 ```
+
+### API vs MCP: Layering
+
+The **API layer** (`src/api/`) is the validation and presentation layer. It validates input (via `validation.rs`), maps HTTP concerns (status codes, JSON), and delegates to the DB layer. It does not contain business logic.
+
+The **MCP layer** (`src/mcp/`) is the execution layer for AI agents. MCP tools call through a `ManifestClient` which hits the HTTP API, so they inherit all API validation. MCP tools add agent-specific orchestration (e.g., rendering trees, formatting responses as text).
+
+**Business logic lives in the DB layer** (`manifest-core/src/db/mod.rs`). Both API handlers and MCP tools converge here. Examples: auto-assigning features to the "now" version when started, enforcing minimum unreleased version counts after release, respecting `default_feature_destination` project settings. This ensures consistent behavior regardless of whether a human (web UI → API) or an AI agent (MCP → API) triggers the action.
 
 ### Data Model
 
