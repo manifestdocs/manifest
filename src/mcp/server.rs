@@ -271,8 +271,10 @@ DISCOVERING FEATURES:
 - get_next_feature — get the highest priority proposed or in_progress feature
 - render_feature_tree — display the full tree as ASCII art for the user
 
-VERSIONS:
+VERSIONS & BACKLOG:
 Versions use semantic versioning (e.g., 0.1.0, 0.2.0, 1.0.0) and organize features into releases. The first unreleased version is "now"—the current focus. The second unreleased version is "next". Everything after that is "later". Features in "now" are highest priority.
+
+Features without a version assignment are in the **Backlog**—unscheduled work. By default, new features go to the Backlog. When you start working on a backlog feature (start_feature), it automatically moves to the "now" version.
 
 FEATURES AS LIVING DOCUMENTATION:
 Features describe system capabilities, not work items to close. A feature titled "Router" should make sense years from now. Before creating one, apply the user story test: "As a [user], I can [capability] so that [benefit]."
@@ -313,12 +315,12 @@ update_feature is the Swiss Army knife for modifying features. Use it to:
 - Reprioritize: Adjust priority to reorder within parent
 
 VERSIONS & PLANNING:
-- list_versions — see Now (current focus), Next (queued), Later (backlog)
+- list_versions — see Now (current focus), Next (queued), Later, and Backlog counts
 - create_version — define milestones like "v0.2.0"
-- set_feature_version — assign features to releases
-- release_version — mark a version as shipped
+- set_feature_version — assign features to releases (pass null to move to Backlog)
+- release_version — mark a version as shipped (auto-creates new versions to maintain minimum of 4 unreleased)
 
-When all features in the "now" version are implemented, ask the user before calling release_version. Releasing shifts "next" to become the new "now".
+When all features in the "now" version are implemented, ask the user before calling release_version. Releasing shifts "next" to become the new "now". New versions are auto-created to maintain at least 4 unreleased versions.
 
 SETUP (when starting fresh):
 1. init_project — analyze codebase, create project, link directory

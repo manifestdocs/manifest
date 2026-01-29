@@ -72,7 +72,7 @@ pub async fn update_version(
         .map_err(internal_error)?
         .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))?;
 
-    // If version was just released, create history entry on root feature
+    // If version was just released, create history entry and ensure minimum versions
     if was_unreleased && updated.released_at.is_some() {
         // Get project to find root_feature_id
         if let Ok(Some(project)) = db.get_project(updated.project_id).await {
@@ -89,6 +89,9 @@ pub async fn update_version(
                     .await;
             }
         }
+
+        // Ensure at least 4 unreleased versions exist after release
+        let _ = db.ensure_minimum_versions(updated.project_id, 4).await;
     }
 
     Ok(Json(updated))

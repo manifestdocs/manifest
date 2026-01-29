@@ -31,12 +31,15 @@ pub async fn list_versions(
         .await
         .map_err(client_err)?;
 
-    // Count features per version
+    // Count features per version and backlog
     let mut version_feature_counts: std::collections::HashMap<Uuid, u32> =
         std::collections::HashMap::new();
+    let mut backlog_count: u32 = 0;
     for feature in &features {
         if let Some(vid) = feature.target_version_id {
             *version_feature_counts.entry(vid).or_insert(0) += 1;
+        } else {
+            backlog_count += 1;
         }
     }
 
@@ -64,6 +67,7 @@ pub async fn list_versions(
             .collect(),
         now,
         next,
+        backlog_count,
     };
 
     let json = serde_json::to_string_pretty(&result)
