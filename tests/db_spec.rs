@@ -2140,6 +2140,42 @@ mod version_guard_rails {
     }
 
     #[tokio::test]
+    async fn rejects_version_creation_beyond_cap() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+
+        for i in 1..=6 {
+            db.create_version(
+                project.id,
+                CreateVersionInput {
+                    name: format!("0.{}.0", i),
+                    description: None,
+                },
+            )
+            .await
+            .expect("Failed to create version");
+        }
+
+        let result = db
+            .create_version(
+                project.id,
+                CreateVersionInput {
+                    name: "0.7.0".to_string(),
+                    description: None,
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("max 6"),
+            "Expected max versions error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
     async fn rejects_update_feature_to_released_version() {
         let db = setup().await;
         let project = create_test_project(&db).await;

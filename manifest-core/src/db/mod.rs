@@ -1026,6 +1026,17 @@ impl Database {
             .await?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
 
+        // Guard rail: cap unreleased versions at 6
+        let versions = self.get_versions_by_project(project_id).await?;
+        let unreleased_count = versions.iter().filter(|v| v.released_at.is_none()).count();
+        if unreleased_count >= 6 {
+            return Err(ManifestError::validation(format!(
+                "Project already has {} unreleased versions (max 6). Release or delete existing versions before creating new ones.",
+                unreleased_count
+            ))
+            .into());
+        }
+
         let id = Uuid::new_v4();
         let now = Utc::now();
 
