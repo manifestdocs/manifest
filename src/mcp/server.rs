@@ -281,6 +281,29 @@ Features describe system capabilities, not work items to close. A feature titled
 - Good: "As a developer, I can match dynamic URL paths so that I can build REST APIs" → Router
 - Bad: "As a user, I can have data persistence" → quality attribute, not capability
 
+SPECIFICATION:
+Features scheduled for a version should have a structured spec. The expected format in the details field:
+
+## Story
+As a [user], I can [capability] so that [benefit].
+
+## Acceptance Criteria
+- Given [precondition], when [action], then [expected outcome]
+
+## Constraints
+- [Technical constraints, performance requirements, security considerations]
+
+start_feature will block if a leaf feature has no details at all — write a spec first using update_feature.
+If details exist but lack acceptance criteria, you will receive a warning.
+
+To write a spec:
+- Use update_feature with `details` to set the spec directly
+- Use update_feature with `desired_details` to propose a spec for human review (they see a diff in the web UI)
+
+Parent features (those with children) are exempt — they carry architectural context and shared conventions, not user stories.
+
+Specs are living documentation. During implementation, update details to reflect what was actually built. After implementation, the spec describes what EXISTS, not what was planned. This is why Manifest features are better than Jira tickets — the spec survives as system documentation.
+
 WORKFLOW:
 
 1. ORIENT — understand what exists and what's needed:
@@ -291,8 +314,9 @@ WORKFLOW:
 
 2. CLAIM — MANDATORY before implementing:
    - ALWAYS call start_feature when asked to implement, work on, or build a feature
-   - This is required even if you just created the feature or already have context
-   - start_feature transitions proposed → in_progress and returns the full spec
+   - start_feature checks specification completeness and transitions proposed → in_progress
+   - If the feature has no details, start_feature will refuse — write a spec first using update_feature
+   - If details lack acceptance criteria, you will see a warning — add AC before or during implementation
    - IMPORTANT: The feature's target version is locked during implementation. Do not call set_feature_version while working on a feature.
 
 3. BUILD — implement against the spec:
@@ -339,7 +363,7 @@ Tool results are collapsed JSON. Always summarize for humans:
 - init_project: "Initialized 'Name' with N detected modules"
 - generate_feature_tree: "Extracted N features from codebase" + summary
 - plan: "Proposed N features" (confirm=false) or "Created N features" (confirm=true)
-- start_feature: "Started 'Title' — now in_progress" + note any breadcrumb context
+- start_feature: "Started 'Title' — now in_progress" + note any spec warnings or breadcrumb context. If blocked: "Cannot start 'Title' — specification required"
 - complete_feature: "Completed 'Title' — recorded N commits"
 - update_feature: "Updated 'Title'" + what changed
 - list_versions: "0.1.0 (released), 0.2.0 (now, 3 features), 0.3.0 (next)"
