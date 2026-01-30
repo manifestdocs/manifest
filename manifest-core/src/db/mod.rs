@@ -1209,20 +1209,32 @@ impl Database {
             .await?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
 
-        let parent_id = input.parent_id.or(project.root_feature_id);
+        // Guard rail: features must always have a parent
+        let parent_id = input
+            .parent_id
+            .or(project.root_feature_id)
+            .ok_or_else(|| ManifestError::validation("Feature must have a parent"))?;
+
         let id = input.id.unwrap_or_else(Uuid::new_v4);
         let now = Utc::now();
         let state = input.state.unwrap_or(FeatureState::Proposed);
         let priority = input.priority.unwrap_or(0);
 
-        // Default based on project setting: "now" assigns to first unreleased, "backlog" leaves unassigned
-        let target_version_id = match input.target_version_id {
-            Some(vid) => Some(vid),
-            None => {
-                if project.default_feature_destination == "now" {
-                    self.get_now_version(project_id).await?.map(|v| v.id)
-                } else {
-                    None // backlog
+        // Guard rail: in-progress/implemented features must be in the "now" version
+        let target_version_id = if state == FeatureState::InProgress
+            || state == FeatureState::Implemented
+        {
+            let now_version = self.get_now_version(project_id).await?.map(|v| v.id);
+            now_version.or(input.target_version_id)
+        } else {
+            match input.target_version_id {
+                Some(vid) => Some(vid),
+                None => {
+                    if project.default_feature_destination == "now" {
+                        self.get_now_version(project_id).await?.map(|v| v.id)
+                    } else {
+                        None // backlog
+                    }
                 }
             }
         };
@@ -1233,7 +1245,7 @@ impl Database {
         )
         .bind(id.to_string())
         .bind(project_id.to_string())
-        .bind(parent_id.map(|u| u.to_string()))
+        .bind(Some(parent_id.to_string()))
         .bind(&input.title)
         .bind(&input.details)
         .bind(state.as_str())
@@ -1249,7 +1261,7 @@ impl Database {
         Ok(Feature {
             id,
             project_id,
-            parent_id,
+            parent_id: Some(parent_id),
             title: input.title,
             details: input.details,
             desired_details: None,
@@ -1274,9 +1286,10 @@ impl Database {
         let now = Utc::now();
         let mut features = Vec::with_capacity(inputs.len());
 
-        // Get default version based on project setting
+        // Get default version and "now" version based on project setting
+        let now_version_id = self.get_now_version(project_id).await?.map(|v| v.id);
         let default_version_id = if project.default_feature_destination == "now" {
-            self.get_now_version(project_id).await?.map(|v| v.id)
+            now_version_id
         } else {
             None // backlog
         };
@@ -1285,8 +1298,21 @@ impl Database {
             let id = input.id.unwrap_or_else(Uuid::new_v4);
             let state = input.state.unwrap_or(FeatureState::Proposed);
             let priority = input.priority.unwrap_or(0);
-            let parent_id = input.parent_id.or(project.root_feature_id);
-            let target_version_id = input.target_version_id.or(default_version_id);
+
+            // Guard rail: features must always have a parent
+            let parent_id = input
+                .parent_id
+                .or(project.root_feature_id)
+                .ok_or_else(|| ManifestError::validation("Feature must have a parent"))?;
+
+            // Guard rail: in-progress/implemented features must be in the "now" version
+            let target_version_id = if state == FeatureState::InProgress
+                || state == FeatureState::Implemented
+            {
+                now_version_id.or(input.target_version_id)
+            } else {
+                input.target_version_id.or(default_version_id)
+            };
 
             sqlx::query(
                 "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
@@ -1294,7 +1320,7 @@ impl Database {
             )
             .bind(id.to_string())
             .bind(project_id.to_string())
-            .bind(parent_id.map(|u| u.to_string()))
+            .bind(Some(parent_id.to_string()))
             .bind(&input.title)
             .bind(&input.details)
             .bind(state.as_str())
@@ -1308,7 +1334,7 @@ impl Database {
             features.push(Feature {
                 id,
                 project_id,
-                parent_id,
+                parent_id: Some(parent_id),
                 title: input.title,
                 details: input.details,
                 desired_details: None,
@@ -1337,22 +1363,35 @@ impl Database {
         let now = Utc::now();
         let title = input.title.unwrap_or(existing.title);
         let details = input.details.or(existing.details);
-        let desired_details = input.desired_details.or(existing.desired_details);
-        let state = input.state.unwrap_or(existing.state);
+        // Guard rail: setting desired_details (proposing changes) must not change state.
+        // AI agents may accidentally set state alongside desired_details.
+        let had_desired_details = existing.desired_details.is_some();
+        let desired_details = input.desired_details.unwrap_or(existing.desired_details);
+        let is_proposing_changes = desired_details.is_some() && !had_desired_details;
+        let state = if is_proposing_changes {
+            existing.state
+        } else {
+            input.state.unwrap_or(existing.state)
+        };
         let parent_id = input.parent_id.or(existing.parent_id);
         let priority = input.priority.unwrap_or(existing.priority);
         let mut target_version_id = input
             .target_version_id
             .unwrap_or(existing.target_version_id);
 
-        // Auto-move to Now when transitioning to in_progress from backlog
+        // Guard rail: in-progress features must always be in the "now" version
         if state == FeatureState::InProgress && existing.state != FeatureState::InProgress {
-            if target_version_id.is_none() {
-                target_version_id = self
-                    .get_now_version(existing.project_id)
-                    .await?
-                    .map(|v| v.id);
+            if let Some(now_ver) = self.get_now_version(existing.project_id).await? {
+                target_version_id = Some(now_ver.id);
             }
+        }
+
+        // Guard rail: implemented features must have a version (assign to "now" if none)
+        if state == FeatureState::Implemented && target_version_id.is_none() {
+            target_version_id = self
+                .get_now_version(existing.project_id)
+                .await?
+                .map(|v| v.id);
         }
 
         sqlx::query(

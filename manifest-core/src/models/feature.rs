@@ -213,7 +213,13 @@ pub struct UpdateFeatureInput {
     pub title: Option<String>,
     pub details: Option<String>,
     /// Desired details for pending changes. Set to implement declarative editing workflow.
-    pub desired_details: Option<String>,
+    /// Uses double Option to distinguish "field absent" (None) from "set to null" (Some(None)).
+    #[serde(
+        default,
+        deserialize_with = "double_option::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub desired_details: Option<Option<String>>,
     pub state: Option<FeatureState>,
     /// Update priority for ordering within parent.
     pub priority: Option<i32>,

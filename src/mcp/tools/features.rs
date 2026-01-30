@@ -219,7 +219,7 @@ pub async fn update_feature(
         parent_id: req.parent_id,
         title: req.title,
         details: req.details,
-        desired_details: req.desired_details,
+        desired_details: req.desired_details.map(Some),
         state,
         priority: req.priority,
         target_version_id,
