@@ -23,6 +23,7 @@ use crate::db::Database;
 // ============================================================
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     #[allow(dead_code)]
@@ -30,6 +31,7 @@ pub struct ChatRequest {
     pub model: Option<String>,
     #[allow(dead_code)]
     pub stream: Option<bool>,
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,8 +78,16 @@ pub async fn chat_completions(
         }
     }
 
-    // Build the user prompt from conversation history
-    let user_prompt = build_conversation_prompt(&conversation);
+    // Build the user prompt — when resuming a session, Claude already has
+    // prior context so we only send the latest user message.
+    let user_prompt = if input.session_id.is_some() {
+        conversation
+            .last()
+            .map(|m| m.content.clone())
+            .unwrap_or_default()
+    } else {
+        build_conversation_prompt(&conversation)
+    };
 
     if user_prompt.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "No user message provided".into()));
@@ -105,14 +115,30 @@ pub async fn chat_completions(
         "".to_string(), // Disable built-in tools (Read, Edit, Bash, etc.)
     ];
 
-    // When a system prompt is present (slash commands), whitelist MCP tools
-    // so Claude can read/update features.
-    if !system_prompt.is_empty() {
-        args.extend([
-            "--allowed-tools".into(),
-            "mcp__manifest__update_feature,mcp__manifest__get_feature".into(),
-        ]);
-    }
+    // Always whitelist MCP tools so Claude can read/update features,
+    // regardless of whether a slash command system prompt is present.
+    args.extend([
+        "--allowed-tools".into(),
+        [
+            "mcp__manifest__update_feature",
+            "mcp__manifest__get_feature",
+            "mcp__manifest__find_features",
+            "mcp__manifest__list_projects",
+        ]
+        .join(","),
+    ]);
+
+    // Session support: resume existing or start new
+    let new_session_id = if let Some(ref sid) = input.session_id {
+        // Resuming an existing session
+        args.extend(["--resume".into(), sid.clone()]);
+        sid.clone()
+    } else {
+        // First turn: generate a new session ID
+        let sid = uuid::Uuid::new_v4().to_string();
+        args.extend(["--session-id".into(), sid.clone()]);
+        sid
+    };
 
     // Add system prompt if present
     if !system_prompt.is_empty() {
@@ -177,6 +203,17 @@ pub async fn chat_completions(
 
     // Transform Claude's stream-json into SSE events matching the client's StreamEvent format
     let stream = stream! {
+        // Emit session ID immediately so the client can track it
+        yield Ok::<_, std::convert::Infallible>(
+            axum::response::sse::Event::default().data(
+                serde_json::json!({
+                    "type": "session",
+                    "session_id": new_session_id
+                })
+                .to_string(),
+            )
+        );
+
         while let Ok(Some(line)) = lines.next_line().await {
             if line.is_empty() {
                 continue;
