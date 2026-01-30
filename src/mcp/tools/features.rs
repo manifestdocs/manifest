@@ -241,6 +241,7 @@ pub async fn update_feature(
 /// Signal start of work on a feature.
 /// Returns full context including breadcrumb with ancestor details.
 /// Also transitions all proposed children to in_progress (cascading start).
+/// Blocks if a leaf feature has no details; warns if details lack acceptance criteria.
 pub async fn start_feature(
     client: &ManifestClient,
     req: StartFeatureRequest,
@@ -250,6 +251,20 @@ pub async fn start_feature(
         .get_feature_with_context(req.feature_id)
         .await
         .map_err(client_err)?;
+
+    // Spec gate: analyze specification completeness
+    let spec_status = super::spec::analyze_spec(
+        feature_with_context.feature.details.as_deref(),
+        !feature_with_context.children.is_empty(),
+    );
+
+    if spec_status.should_block() {
+        let guidance = spec_status.guidance().unwrap_or_default();
+        return Ok(CallToolResult::error(vec![Content::text(format!(
+            "Cannot start '{}' — specification required.\n\n{}",
+            feature_with_context.feature.title, guidance
+        ))]));
+    }
 
     // Transition to in_progress if proposed
     if feature_with_context.feature.state == FeatureState::Proposed {
@@ -281,8 +296,22 @@ pub async fn start_feature(
 
     let result: FeatureInfoWithContext = (&feature_with_context).into();
 
-    let json = serde_json::to_string_pretty(&result)
+    // Build response JSON with spec_status injected
+    let mut result_json =
+        serde_json::to_value(&result).map_err(|e| McpError::internal_error(e.to_string(), None))?;
+    result_json["spec_status"] = serde_json::json!(spec_status.summary());
+
+    let json = serde_json::to_string_pretty(&result_json)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+    // If spec has warnings, prepend a warning text block
+    if spec_status.has_warnings() {
+        let warning = spec_status.guidance().unwrap_or_default();
+        return Ok(CallToolResult::success(vec![
+            Content::text(format!("⚠ {}", warning)),
+            Content::text(json),
+        ]));
+    }
 
     Ok(CallToolResult::success(vec![Content::text(json)]))
 }
@@ -374,6 +403,7 @@ pub async fn complete_feature(
 }
 
 /// Get the next workable feature for a project.
+/// Includes spec status so the agent knows if specification is needed first.
 pub async fn get_next_feature(
     client: &ManifestClient,
     req: GetNextFeatureRequest,
@@ -385,8 +415,19 @@ pub async fn get_next_feature(
 
     let json = match result {
         Some(feature_ctx) => {
+            let spec_status = super::spec::analyze_spec(
+                feature_ctx.feature.details.as_deref(),
+                !feature_ctx.children.is_empty(),
+            );
+
             let info: FeatureInfoWithContext = (&feature_ctx).into();
-            serde_json::to_string_pretty(&info)
+            let mut result_json = serde_json::to_value(&info)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            result_json["spec_status"] = serde_json::json!(spec_status.summary());
+            if let Some(guidance) = spec_status.guidance() {
+                result_json["spec_guidance"] = serde_json::json!(guidance);
+            }
+            serde_json::to_string_pretty(&result_json)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?
         }
         None => "null".to_string(),

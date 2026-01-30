@@ -107,6 +107,7 @@ pub async fn create_version(
 }
 
 /// Assign a feature to a target version.
+/// Notes when a feature assigned to a version has no details.
 pub async fn set_feature_version(
     client: &ManifestClient,
     req: SetFeatureVersionRequest,
@@ -133,7 +134,17 @@ pub async fn set_feature_version(
 
     let result: FeatureInfo = (&feature).into();
 
-    let json = serde_json::to_string_pretty(&result)
+    let mut result_json =
+        serde_json::to_value(&result).map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+    // Note when assigning an unspecified feature to a version
+    if req.version_id.is_some() && feature.details.is_none() {
+        result_json["spec_note"] = serde_json::json!(
+            "This feature has no details. Consider adding a specification with update_feature before starting work."
+        );
+    }
+
+    let json = serde_json::to_string_pretty(&result_json)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     Ok(CallToolResult::success(vec![Content::text(json)]))
