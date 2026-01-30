@@ -1013,6 +1013,15 @@ impl Database {
         project_id: Uuid,
         input: CreateVersionInput,
     ) -> Result<Version> {
+        // Guard rail: version names must be semantic versions
+        if !is_valid_semver(&input.name) {
+            return Err(ManifestError::validation(format!(
+                "'{}' is not a valid semantic version. Use the format MAJOR.MINOR.PATCH (e.g., '0.1.0', '1.0.0') with an optional 'v' prefix (e.g., 'v0.1.0').",
+                input.name
+            ))
+            .into());
+        }
+
         self.get_project(project_id)
             .await?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
@@ -1086,6 +1095,25 @@ impl Database {
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Validate that a version has not been released.
+    /// Returns an error if the version is released, preventing feature assignment to past versions.
+    async fn validate_version_not_released(&self, version_id: Uuid) -> Result<()> {
+        let version = self
+            .get_version(version_id)
+            .await?
+            .ok_or_else(|| ManifestError::not_found("Version"))?;
+
+        if version.released_at.is_some() {
+            return Err(ManifestError::validation(format!(
+                "Cannot assign features to released version '{}'. Use list_versions to find unreleased versions.",
+                version.name
+            ))
+            .into());
+        }
+
+        Ok(())
     }
 
     // ============================================================
@@ -1253,6 +1281,11 @@ impl Database {
         let state = input.state.unwrap_or(FeatureState::Proposed);
         let priority = input.priority.unwrap_or(0);
 
+        // Guard rail: reject assignment to released versions
+        if let Some(vid) = input.target_version_id {
+            self.validate_version_not_released(vid).await?;
+        }
+
         // Guard rail: in-progress/implemented features must be in the "now" version
         let target_version_id = if state == FeatureState::InProgress
             || state == FeatureState::Implemented
@@ -1326,6 +1359,16 @@ impl Database {
         } else {
             None // backlog
         };
+
+        // Guard rail: reject assignment to released versions (validate once per unique version)
+        let mut validated_versions = std::collections::HashSet::new();
+        for input in &inputs {
+            if let Some(vid) = input.target_version_id {
+                if validated_versions.insert(vid) {
+                    self.validate_version_not_released(vid).await?;
+                }
+            }
+        }
 
         for input in inputs {
             let id = input.id.unwrap_or_else(Uuid::new_v4);
@@ -1408,6 +1451,11 @@ impl Database {
         };
         let parent_id = input.parent_id.or(existing.parent_id);
         let priority = input.priority.unwrap_or(existing.priority);
+        // Guard rail: reject explicit assignment to released versions
+        if let Some(Some(vid)) = &input.target_version_id {
+            self.validate_version_not_released(*vid).await?;
+        }
+
         let mut target_version_id = input
             .target_version_id
             .unwrap_or(existing.target_version_id);
@@ -2344,6 +2392,14 @@ fn slugify(name: &str) -> String {
     }
 
     slug
+}
+
+/// Validate that a version name is a semantic version: `MAJOR.MINOR.PATCH` with optional `v` prefix.
+/// Examples: `0.1.0`, `v1.0.0`, `v2.3.1`.
+fn is_valid_semver(name: &str) -> bool {
+    let name = name.strip_prefix('v').unwrap_or(name);
+    let parts: Vec<&str> = name.split('.').collect();
+    parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.parse::<u32>().is_ok())
 }
 
 /// Compute the next version name by parsing existing versions and incrementing the minor version.
