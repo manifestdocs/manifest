@@ -43,6 +43,65 @@ echo "Current version: $CURRENT_VERSION"
 echo "New version: $VERSION"
 echo
 
+# ── Pre-release checks ──────────────────────────────────────────────
+echo "Running pre-release checks..."
+echo
+
+WORKSPACE_ROOT="$(dirname "$PROJECT_ROOT")"
+CHECKS_FAILED=0
+
+# 1. Server: cargo test
+echo "[1/5] Running server tests..."
+if ! cargo test --all --quiet 2>&1; then
+    echo "FAIL: cargo test"
+    CHECKS_FAILED=1
+fi
+
+# 2. Server: cargo clippy
+echo "[2/5] Running clippy..."
+if ! cargo clippy --all --quiet -- -D warnings 2>&1; then
+    echo "FAIL: cargo clippy"
+    CHECKS_FAILED=1
+fi
+
+# 3. Server: release build
+echo "[3/5] Building server (release)..."
+if ! cargo build --release --quiet 2>&1; then
+    echo "FAIL: cargo build --release"
+    CHECKS_FAILED=1
+fi
+
+# 4. Web: build
+WEB_DIR="$WORKSPACE_ROOT/manifest-web"
+if [ -d "$WEB_DIR" ]; then
+    echo "[4/5] Building manifest-web..."
+    if ! (cd "$WORKSPACE_ROOT" && pnpm --filter app build) 2>&1; then
+        echo "FAIL: manifest-web build"
+        CHECKS_FAILED=1
+    fi
+
+    # 5. Web: tests
+    echo "[5/5] Running manifest-web tests..."
+    if ! (cd "$WORKSPACE_ROOT" && pnpm --filter app test:run) 2>&1; then
+        echo "FAIL: manifest-web tests"
+        CHECKS_FAILED=1
+    fi
+else
+    echo "[4/5] Skipping manifest-web build (not found at $WEB_DIR)"
+    echo "[5/5] Skipping manifest-web tests"
+fi
+
+if [ "$CHECKS_FAILED" -ne 0 ]; then
+    echo
+    echo "Pre-release checks FAILED. Fix issues before releasing."
+    exit 1
+fi
+
+echo
+echo "All pre-release checks passed."
+echo "────────────────────────────────────────────────────────────────────"
+echo
+
 # Confirm
 read -p "Release v$VERSION? [y/N] " -n 1 -r
 echo

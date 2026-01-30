@@ -25,11 +25,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout manifest-svelte
+        uses: actions/checkout@v4
+        with:
+          repository: manifestdocs/manifest-svelte
+          path: web-workspace/manifest-svelte
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
       - name: Checkout manifest-web
         uses: actions/checkout@v4
         with:
           repository: manifestdocs/manifest-web
-          path: manifest-web-repo
+          path: web-workspace/manifest-web
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Install Node.js
@@ -48,13 +55,20 @@ jobs:
           PUBLIC_MANIFEST_API_URL: http://localhost:17010/api/v1
           PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_dummy
         run: |
-          cd manifest-web-repo
-          pnpm install
-          pnpm build
+          # Set up pnpm workspace so workspace:* resolves
+          cat > web-workspace/pnpm-workspace.yaml << 'EOF'
+          packages:
+            - manifest-svelte
+            - manifest-web
+          EOF
+          cd web-workspace
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @manifest/svelte build
+          pnpm --filter app build
           cd ..
           # Copy build to where rust-embed expects it
           mkdir -p ../manifest-web
-          cp -r manifest-web-repo/build ../manifest-web/
+          cp -r web-workspace/manifest-web/build ../manifest-web/
           ls -la ../manifest-web/
 
       - name: Install Rust
