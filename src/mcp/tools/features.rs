@@ -8,8 +8,8 @@ use rmcp::{
 use crate::mcp::{
     tree_render,
     types::{
-        CommitInfo, CompleteFeatureRequest, CreateFeatureRequest, FeatureInfo,
-        FeatureInfoWithContext, FeatureListSummaryResponse, FeatureSummaryInfo,
+        CommitInfo, CompleteFeatureRequest, CreateFeatureRequest, DeleteFeatureRequest,
+        FeatureInfo, FeatureInfoWithContext, FeatureListSummaryResponse, FeatureSummaryInfo,
         FindFeaturesRequest, GetFeatureRequest, GetNextFeatureRequest, HistoryEntryInfo,
         PlanFeaturesRequest, RenderFeatureTreeRequest, StartFeatureRequest, UpdateFeatureRequest,
     },
@@ -236,6 +236,28 @@ pub async fn update_feature(
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     Ok(CallToolResult::success(vec![Content::text(json)]))
+}
+
+/// Permanently delete a feature and its descendants.
+pub async fn delete_feature(
+    client: &ManifestClient,
+    req: DeleteFeatureRequest,
+) -> Result<CallToolResult, McpError> {
+    // Fetch the feature first so we can confirm what was deleted
+    let feature = client
+        .get_feature(req.feature_id)
+        .await
+        .map_err(client_err)?;
+
+    client
+        .delete_feature(req.feature_id)
+        .await
+        .map_err(client_err)?;
+
+    Ok(CallToolResult::success(vec![Content::text(format!(
+        "Deleted feature '{}' ({})",
+        feature.title, feature.id
+    ))]))
 }
 
 /// Signal start of work on a feature.

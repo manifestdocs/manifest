@@ -9,10 +9,10 @@
 use super::tools;
 use super::types::{
     AddProjectDirectoryRequest, CompleteFeatureRequest, CreateFeatureRequest, CreateVersionRequest,
-    FindFeaturesRequest, GenerateFeatureTreeRequest, GetFeatureRequest, GetNextFeatureRequest,
-    InitProjectRequest, ListProjectsRequest, ListVersionsRequest, PlanFeaturesRequest,
-    ReleaseVersionRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest,
-    UpdateFeatureRequest,
+    DeleteFeatureRequest, FindFeaturesRequest, GenerateFeatureTreeRequest, GetFeatureRequest,
+    GetNextFeatureRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
+    PlanFeaturesRequest, ReleaseVersionRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest,
+    StartFeatureRequest, UpdateFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -178,6 +178,16 @@ impl McpServer {
     }
 
     #[tool(
+        description = "CLEANUP: Permanently delete a feature and all its descendants. Use this only for archived features that are no longer needed. This action cannot be undone."
+    )]
+    async fn delete_feature(
+        &self,
+        params: Parameters<DeleteFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::delete_feature(&self.client, params.0).await
+    }
+
+    #[tool(
         description = "ORIENT: Get the next workable feature, or null if none. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'now' version (or filter by version_id). Use this to find what to work on."
     )]
     async fn get_next_feature(
@@ -337,6 +347,9 @@ update_feature is the Swiss Army knife for modifying features. Use it to:
 - Propose changes: Set desired_details to suggest changes for human review (they see a diff in web UI)
 - Reorganize: Change parent_id to move features in the tree
 - Reprioritize: Adjust priority to reorder within parent
+
+DELETING FEATURES:
+delete_feature permanently removes a feature and all its descendants. Use it only for archived features that are no longer needed. This cannot be undone. Prefer archiving (update_feature with state='archived') to preserve history.
 
 VERSIONS & PLANNING:
 - list_versions — see Now (current focus), Next (queued), Later, and Backlog counts

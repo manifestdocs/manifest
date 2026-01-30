@@ -248,6 +248,26 @@ impl ManifestClient {
         self.handle_response(response).await
     }
 
+    /// Delete a feature and its descendants.
+    pub async fn delete_feature(&self, id: Uuid) -> Result<(), ClientError> {
+        let response = self
+            .request(reqwest::Method::DELETE, &format!("/features/{}", id))
+            .send()
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            let body = response.text().await.unwrap_or_default();
+            match status {
+                StatusCode::NOT_FOUND => Err(ClientError::NotFound(body)),
+                StatusCode::BAD_REQUEST => Err(ClientError::BadRequest(body)),
+                StatusCode::UNAUTHORIZED => Err(ClientError::Unauthorized),
+                _ => Err(ClientError::Server(format!("{}: {}", status, body))),
+            }
+        }
+    }
+
     /// Update a feature.
     pub async fn update_feature(
         &self,

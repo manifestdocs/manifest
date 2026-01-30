@@ -74,6 +74,12 @@ pub struct GetFeatureRequest {
     pub include_history: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DeleteFeatureRequest {
+    #[schemars(description = "The UUID of the feature to permanently delete")]
+    pub feature_id: Uuid,
+}
+
 /// General-purpose tool for updating any feature field.
 /// Replaces narrow tools (archive, restore, specify, reopen, deprecate) with one flexible tool.
 #[derive(Debug, Deserialize, JsonSchema)]
