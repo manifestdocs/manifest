@@ -4,6 +4,7 @@ use rmcp::ErrorData as McpError;
 pub mod features;
 pub mod generate;
 pub mod projects;
+pub mod spec;
 pub mod versions;
 
 /// Convert a ManifestClient error to an MCP error.
