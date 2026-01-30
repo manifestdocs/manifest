@@ -1,7 +1,7 @@
-/// Spec analysis for MCP tool responses.
-///
-/// Pure analysis — no I/O, no database. Checks the `details` markdown field
-/// for structured sections (story, acceptance criteria, constraints).
+//! Spec analysis for MCP tool responses.
+//!
+//! Pure analysis — no I/O, no database. Checks the `details` markdown field
+//! for structured sections (story, acceptance criteria, constraints).
 
 /// Status of a feature's specification completeness.
 pub struct SpecStatus {
