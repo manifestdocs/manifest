@@ -212,7 +212,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "PLAN: Create a release milestone (e.g., 'v0.2', 'MVP'). Defines the target for a group of features."
+        description = "PLAN: Create a release milestone. Names must be semantic versions in MAJOR.MINOR.PATCH format (e.g., '0.2.0', 'v1.0.0'). Freeform text like 'MVP' or status labels like 'now' are rejected."
     )]
     async fn create_version(
         &self,
@@ -222,7 +222,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "PLAN: Assign a feature to a release version. Use this to schedule features for specific milestones. Pass null to unassign."
+        description = "PLAN: Assign a feature to a release version. Only unreleased versions are valid targets. Pass null to unassign."
     )]
     async fn set_feature_version(
         &self,
@@ -282,9 +282,15 @@ DISCOVERING FEATURES:
 - render_feature_tree — display the full tree as ASCII art for the user
 
 VERSIONS & BACKLOG:
-Versions use semantic versioning (e.g., 0.1.0, 0.2.0, 1.0.0) and organize features into releases. The first unreleased version is "now"—the current focus. The second unreleased version is "next". Everything after that is "later". Features in "now" are highest priority.
+Versions use semantic versioning (e.g., 0.1.0, 0.2.0, 1.0.0) and organize features into releases. Each version has a lifecycle status:
+- **now** — first unreleased version, current focus, highest priority
+- **next** — second unreleased version, queued up
+- **later** — remaining unreleased versions
+- **released** — shipped; features CANNOT be assigned to released versions
 
 Features without a version assignment are in the **Backlog**—unscheduled work. By default, new features go to the Backlog. When you start working on a backlog feature (start_feature), it automatically moves to the "now" version.
+
+Assigning features to a released version will be rejected with an error. Use list_versions to find valid (unreleased) targets.
 
 FEATURES AS LIVING DOCUMENTATION:
 Features describe system capabilities, not work items to close. A feature titled "Router" should make sense years from now. Before creating one, apply the user story test: "As a [user], I can [capability] so that [benefit]."
@@ -352,9 +358,9 @@ DELETING FEATURES:
 delete_feature permanently removes a feature and all its descendants. Use it only for archived features that are no longer needed. This cannot be undone. Prefer archiving (update_feature with state='archived') to preserve history.
 
 VERSIONS & PLANNING:
-- list_versions — see Now (current focus), Next (queued), Later, and Backlog counts
-- create_version — define milestones like "v0.2.0"
-- set_feature_version — assign features to releases (pass null to move to Backlog)
+- list_versions — see Now (current focus), Next (queued), Later, Released, and Backlog counts. Each version includes a `status` field.
+- create_version — define milestones with semantic versions (e.g., "0.2.0", "v1.0.0")
+- set_feature_version — assign features to unreleased versions only (pass null to move to Backlog). Released versions are rejected.
 - release_version — mark a version as shipped (auto-creates new versions to maintain minimum of 4 unreleased)
 
 When all features in the "now" version are implemented, ask the user before calling release_version. Releasing shifts "next" to become the new "now". New versions are auto-created to maintain at least 4 unreleased versions.

@@ -57,12 +57,24 @@ pub async fn list_versions(
     let result = VersionListResponse {
         versions: versions
             .into_iter()
-            .map(|v| VersionInfo {
-                id: v.id,
-                name: v.name,
-                description: v.description,
-                released_at: v.released_at.map(|dt| dt.to_rfc3339()),
-                feature_count: version_feature_counts.get(&v.id).copied().unwrap_or(0),
+            .map(|v| {
+                let status = if v.released_at.is_some() {
+                    "released"
+                } else if Some(v.id) == now {
+                    "now"
+                } else if Some(v.id) == next {
+                    "next"
+                } else {
+                    "later"
+                };
+                VersionInfo {
+                    id: v.id,
+                    name: v.name,
+                    description: v.description,
+                    released_at: v.released_at.map(|dt| dt.to_rfc3339()),
+                    feature_count: version_feature_counts.get(&v.id).copied().unwrap_or(0),
+                    status: status.to_string(),
+                }
             })
             .collect(),
         now,
@@ -97,7 +109,8 @@ pub async fn create_version(
         name: version.name,
         description: version.description,
         released_at: version.released_at.map(|dt| dt.to_rfc3339()),
-        feature_count: 0, // New version has no features yet
+        feature_count: 0,            // New version has no features yet
+        status: "later".to_string(), // New versions start as unreleased
     };
 
     let json = serde_json::to_string_pretty(&result)
@@ -173,6 +186,7 @@ pub async fn release_version(
         description: version.description,
         released_at: version.released_at.map(|dt| dt.to_rfc3339()),
         feature_count: 0, // Would need to fetch features to count
+        status: "released".to_string(),
     };
 
     let json = serde_json::to_string_pretty(&result)

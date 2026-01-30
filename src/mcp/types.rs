@@ -122,7 +122,7 @@ pub struct UpdateFeatureRequest {
     pub parent_id: Option<Uuid>,
 
     #[schemars(
-        description = "Assign to a version for release planning. Pass version UUID to assign, or use set_version_null=true to unassign."
+        description = "Assign to a version for release planning. Pass version UUID to assign, or use set_version_null=true to unassign. Released versions cannot be targeted."
     )]
     #[serde(default)]
     pub target_version_id: Option<Uuid>,
@@ -204,7 +204,7 @@ pub struct PlanFeaturesRequest {
     #[schemars(description = "The UUID of the project to plan features for")]
     pub project_id: Uuid,
     #[schemars(
-        description = "Optional target version UUID. Features will be assigned to this version. If not provided, features go to the backlog (unassigned). Call list_versions first to get available versions."
+        description = "Optional target version UUID (must be unreleased). Features will be assigned to this version. If not provided, features go to the backlog (unassigned). Call list_versions first to get available versions."
     )]
     #[serde(default)]
     pub target_version_id: Option<Uuid>,
@@ -401,6 +401,8 @@ pub struct VersionInfo {
     pub released_at: Option<String>,
     /// Number of features targeting this version
     pub feature_count: u32,
+    /// Version status: "now" (current focus), "next" (upcoming), "later" (future), "released" (shipped)
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -459,7 +461,9 @@ pub struct ListVersionsRequest {
 pub struct CreateVersionRequest {
     #[schemars(description = "The UUID of the project")]
     pub project_id: Uuid,
-    #[schemars(description = "Version name (e.g., 'v0.2', '2024.1', 'MVP')")]
+    #[schemars(
+        description = "Version name in MAJOR.MINOR.PATCH format (e.g., '0.2.0', '1.0.0'). Optional 'v' prefix (e.g., 'v0.2.0'). No freeform text—only semantic versions."
+    )]
     pub name: String,
     #[schemars(description = "Optional description of what this version includes")]
     #[serde(default)]
@@ -470,7 +474,9 @@ pub struct CreateVersionRequest {
 pub struct SetFeatureVersionRequest {
     #[schemars(description = "The UUID of the feature to update")]
     pub feature_id: Uuid,
-    #[schemars(description = "The UUID of the target version, or null to unassign")]
+    #[schemars(
+        description = "The UUID of the target version (must be unreleased), or null to unassign"
+    )]
     pub version_id: Option<Uuid>,
 }
 
