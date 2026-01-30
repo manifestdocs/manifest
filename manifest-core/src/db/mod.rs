@@ -206,15 +206,48 @@ impl Database {
     /// Open the default SQLite database location.
     pub async fn open_default() -> Result<Self> {
         let db_path = if let Ok(data_dir) = std::env::var("MANIFEST_DATA_DIR") {
-            PathBuf::from(data_dir).join("manifest.db")
+            let path = PathBuf::from(data_dir).join("manifest.db");
+            tracing::info!("Using database from MANIFEST_DATA_DIR: {}", path.display());
+            path
         } else if let Ok(url) = std::env::var("DATABASE_URL") {
+            tracing::info!("Using database from DATABASE_URL");
             return Self::connect(&url).await;
         } else {
             let dirs = directories::ProjectDirs::from("", "", "manifest")
                 .ok_or_else(|| anyhow::anyhow!("Could not determine data directory"))?;
-            dirs.data_dir().join("manifest.db")
+            let path = dirs.data_dir().join("manifest.db");
+            tracing::info!("Using default database: {}", path.display());
+            path
         };
         Self::open(db_path).await
+    }
+
+    /// Open a database with an explicit path override, falling back through
+    /// config file → env vars → platform default.
+    ///
+    /// Precedence:
+    /// 1. `db_path_override` (from --db flag or MANIFEST_DB env)
+    /// 2. `config.json` database_path
+    /// 3. MANIFEST_DATA_DIR env
+    /// 4. DATABASE_URL env
+    /// 5. Platform default
+    pub async fn open_with_override(db_path_override: Option<PathBuf>) -> Result<Self> {
+        if let Some(path) = db_path_override {
+            tracing::info!("Using database from --db flag: {}", path.display());
+            return Self::open(path).await;
+        }
+
+        // Check config file
+        if let Ok(config) = crate::config::ServerConfig::load() {
+            if let Some(ref db_path) = config.database_path {
+                let path = PathBuf::from(db_path);
+                tracing::info!("Using database from config file: {}", path.display());
+                return Self::open(path).await;
+            }
+        }
+
+        // Fall through to default resolution
+        Self::open_default().await
     }
 
     /// Open an in-memory SQLite database for testing.

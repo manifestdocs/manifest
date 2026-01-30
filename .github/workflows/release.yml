@@ -250,10 +250,12 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout manifest (for plugin source)
+      - name: Checkout manifest-plugin
         uses: actions/checkout@v4
         with:
-          path: manifest
+          repository: manifestdocs/manifest-plugin
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: manifest-plugin
 
       - name: Checkout claude-plugins
         uses: actions/checkout@v4
@@ -268,13 +270,14 @@ jobs:
           VERSION_NUM="${VERSION#v}"
 
           # Update plugin.json version
-          cd manifest/manifest-plugin
+          cd manifest-plugin
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION_NUM}\"/" plugin.json
+          cd ..
 
           # Copy plugin to claude-plugins repo
-          cd ../../claude-plugins
+          cd claude-plugins
           rm -rf manifest
-          cp -r ../manifest/manifest-plugin manifest
+          cp -r ../manifest-plugin manifest
 
           # Commit and push
           git config user.name "github-actions[bot]"

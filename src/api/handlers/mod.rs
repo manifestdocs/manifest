@@ -3,6 +3,7 @@ mod assist;
 mod features;
 mod health;
 mod projects;
+mod settings;
 mod versions;
 
 pub use analysis::*;
@@ -10,6 +11,7 @@ pub use assist::*;
 pub use features::*;
 pub use health::*;
 pub use projects::*;
+pub use settings::*;
 pub use versions::*;
 
 use crate::db::ManifestError;

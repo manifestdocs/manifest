@@ -16,8 +16,10 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
+pub mod config;
 pub mod db;
 pub mod models;
 
 // Re-export commonly used types at crate root
+pub use config::ServerConfig;
 pub use db::{Database, FeatureEvent, RootFeatureMigrationReport};

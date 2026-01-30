@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::io::Write;
+use std::path::PathBuf;
+use tokio::sync::watch;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use manifest::api;
@@ -26,6 +28,10 @@ fn print_banner<W: Write>(mut w: W, url: &str) {
 #[command(version)]
 #[command(about = "Living feature documentation for AI-assisted development")]
 struct Cli {
+    /// Path to the SQLite database file
+    #[arg(long, global = true, env = "MANIFEST_DB")]
+    db: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -76,6 +82,38 @@ fn init_tracing(use_stderr: bool) {
     }
 }
 
+/// Start the HTTP server with graceful shutdown support.
+/// Returns `true` if the server should restart (e.g. after a settings change).
+async fn run_server(
+    bind_addr: String,
+    port: u16,
+    db_path: Option<PathBuf>,
+    shutdown_rx: watch::Receiver<bool>,
+) -> anyhow::Result<bool> {
+    let database = db::Database::open_with_override(db_path).await?;
+    database.migrate().await?;
+
+    let app = api::create_router_with_shutdown(database, shutdown_rx.clone());
+
+    let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port)).await?;
+    tracing::info!("Manifest server listening on http://{}:{}", bind_addr, port);
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            let mut rx = shutdown_rx;
+            // Wait for the shutdown signal
+            while !*rx.borrow_and_update() {
+                if rx.changed().await.is_err() {
+                    break;
+                }
+            }
+            tracing::info!("Shutdown signal received, draining connections...");
+        })
+        .await?;
+
+    Ok(true)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load .env file if present (ignored if missing)
@@ -99,15 +137,14 @@ async fn main() -> anyhow::Result<()> {
             print_banner(std::io::stdout(), &format!("http://{}:{}", bind_addr, port));
             tracing::info!("Starting Manifest server on {}:{}", bind_addr, port);
 
-            let db = db::Database::open_default().await?;
-            db.migrate().await?;
+            let (shutdown_tx, shutdown_rx) = watch::channel(false);
+            api::set_shutdown_sender(shutdown_tx);
 
-            let app = api::create_router(db);
+            let should_restart = run_server(bind_addr, port, cli.db, shutdown_rx).await?;
 
-            let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port)).await?;
-            tracing::info!("Manifest server listening on http://{}:{}", bind_addr, port);
-
-            axum::serve(listener, app).await?;
+            if should_restart {
+                re_exec();
+            }
         }
         Some(Commands::Mcp) => {
             // MCP server uses HTTP client to connect to the API
@@ -125,10 +162,10 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::MigrateRoots) => {
             println!("Migrating existing projects to use root features...");
-            let db = db::Database::open_default().await?;
-            db.migrate().await?;
+            let database = db::Database::open_with_override(cli.db).await?;
+            database.migrate().await?;
 
-            let report = db.migrate_to_root_features().await?;
+            let report = database.migrate_to_root_features().await?;
             println!("Migration complete:");
             println!("  Projects migrated: {}", report.projects_migrated);
             println!("  Features reparented: {}", report.features_reparented);
@@ -149,17 +186,43 @@ async fn main() -> anyhow::Result<()> {
             print_banner(std::io::stdout(), &format!("http://{}:{}", bind_addr, port));
             tracing::info!("Starting Manifest server on {}:{}", bind_addr, port);
 
-            let db = db::Database::open_default().await?;
-            db.migrate().await?;
+            let (shutdown_tx, shutdown_rx) = watch::channel(false);
+            api::set_shutdown_sender(shutdown_tx);
 
-            let app = api::create_router(db);
+            let should_restart = run_server(bind_addr, port, cli.db, shutdown_rx).await?;
 
-            let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port)).await?;
-            tracing::info!("Manifest server listening on http://{}:{}", bind_addr, port);
-
-            axum::serve(listener, app).await?;
+            if should_restart {
+                re_exec();
+            }
         }
     }
 
     Ok(())
+}
+
+/// Re-execute the current process to restart with new configuration.
+fn re_exec() -> ! {
+    let exe = std::env::current_exe().expect("Failed to get current executable path");
+    let args: Vec<String> = std::env::args().collect();
+
+    tracing::info!("Re-executing server process...");
+
+    // On Unix, use exec to replace the current process
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = std::process::Command::new(&exe).args(&args[1..]).exec();
+        // exec() only returns on error
+        panic!("Failed to re-exec: {}", err);
+    }
+
+    #[cfg(not(unix))]
+    {
+        // On non-Unix, spawn a new process and exit
+        let _ = std::process::Command::new(&exe)
+            .args(&args[1..])
+            .spawn()
+            .expect("Failed to spawn new process");
+        std::process::exit(0);
+    }
 }
