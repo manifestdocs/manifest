@@ -8,6 +8,7 @@ pub mod validation;
 use std::sync::OnceLock;
 
 use axum::{
+    extract::DefaultBodyLimit,
     http::{header::HeaderName, HeaderValue},
     routing::{delete, get, post, put},
     Router,
@@ -50,7 +51,10 @@ fn security_headers_layer() -> ServiceBuilder<
                 SetResponseHeaderLayer<HeaderValue>,
                 tower::layer::util::Stack<
                     SetResponseHeaderLayer<HeaderValue>,
-                    tower::layer::util::Identity,
+                    tower::layer::util::Stack<
+                        SetResponseHeaderLayer<HeaderValue>,
+                        tower::layer::util::Identity,
+                    >,
                 >,
             >,
         >,
@@ -61,6 +65,7 @@ fn security_headers_layer() -> ServiceBuilder<
     let x_content_type_options = HeaderName::from_static("x-content-type-options");
     let referrer_policy = HeaderName::from_static("referrer-policy");
     let x_xss_protection = HeaderName::from_static("x-xss-protection");
+    let csp = HeaderName::from_static("content-security-policy");
 
     ServiceBuilder::new()
         // Prevent clickjacking
@@ -83,6 +88,13 @@ fn security_headers_layer() -> ServiceBuilder<
             x_xss_protection,
             HeaderValue::from_static("1; mode=block"),
         ))
+        // Content Security Policy
+        .layer(SetResponseHeaderLayer::overriding(
+            csp,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
+            ),
+        ))
 }
 
 /// Build CORS layer based on configuration
@@ -103,7 +115,27 @@ fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
             ])
             .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
     } else {
-        CorsLayer::permissive()
+        // Default: allow localhost origins only
+        let localhost_origins = [
+            "http://localhost:5173",  // Vite dev
+            "http://localhost:17010", // Self
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:17010",
+        ];
+        let origins: Vec<_> = localhost_origins
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
+            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
     }
 }
 
@@ -244,6 +276,7 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         .with_state(db)
         .nest("/mcp", mcp_router)
         .fallback(static_handler)
+        .layer(DefaultBodyLimit::max(2_000_000)) // 2MB
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
         .layer(security_headers_layer())
