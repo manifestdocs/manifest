@@ -13,6 +13,7 @@ use crate::models::{
 };
 
 use super::internal_error;
+use crate::api::validation::ValidatedJson;
 
 // ============================================================
 // Projects
@@ -65,7 +66,7 @@ pub async fn get_project_by_slug(
 /// Create a new project.
 pub async fn create_project(
     State(db): State<Database>,
-    Json(input): Json<CreateProjectInput>,
+    ValidatedJson(input): ValidatedJson<CreateProjectInput>,
 ) -> Result<(StatusCode, Json<Project>), (StatusCode, String)> {
     db.create_project(input)
         .await
@@ -77,7 +78,7 @@ pub async fn create_project(
 pub async fn update_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-    Json(input): Json<UpdateProjectInput>,
+    ValidatedJson(input): ValidatedJson<UpdateProjectInput>,
 ) -> Result<Json<Project>, (StatusCode, String)> {
     db.update_project(id, input)
         .await
@@ -162,7 +163,7 @@ pub async fn list_project_directories(
 pub async fn add_project_directory(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
-    Json(input): Json<AddDirectoryInput>,
+    ValidatedJson(input): ValidatedJson<AddDirectoryInput>,
 ) -> Result<(StatusCode, Json<ProjectDirectory>), (StatusCode, String)> {
     db.add_project_directory(project_id, input)
         .await

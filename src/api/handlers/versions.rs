@@ -11,6 +11,7 @@ use crate::models::{
 };
 
 use super::internal_error;
+use crate::api::validation::ValidatedJson;
 
 // ============================================================
 // Versions
@@ -31,7 +32,7 @@ pub async fn list_project_versions(
 pub async fn create_version(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
-    Json(input): Json<CreateVersionInput>,
+    ValidatedJson(input): ValidatedJson<CreateVersionInput>,
 ) -> Result<(StatusCode, Json<Version>), (StatusCode, String)> {
     db.create_version(project_id, input)
         .await
@@ -55,7 +56,7 @@ pub async fn get_version(
 pub async fn update_version(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-    Json(input): Json<UpdateVersionInput>,
+    ValidatedJson(input): ValidatedJson<UpdateVersionInput>,
 ) -> Result<Json<Version>, (StatusCode, String)> {
     // Get existing version to check if this is a release (released_at: None -> Some)
     let existing = db

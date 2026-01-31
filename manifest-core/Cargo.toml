@@ -32,6 +32,7 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 directories = "6"
 thiserror = "2"
+validator = { version = "0.20", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"

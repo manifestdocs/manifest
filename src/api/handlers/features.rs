@@ -19,6 +19,7 @@ use crate::models::{
 };
 
 use super::internal_error;
+use crate::api::validation::{ValidatedJson, MAX_BULK_FEATURES};
 use crate::serde_helpers::default_true;
 
 // ============================================================
@@ -255,7 +256,7 @@ pub async fn get_feature_diff(
 pub async fn create_feature(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
-    Json(input): Json<CreateFeatureInput>,
+    ValidatedJson(input): ValidatedJson<CreateFeatureInput>,
 ) -> Result<(StatusCode, Json<Feature>), (StatusCode, String)> {
     db.create_feature(project_id, input)
         .await
@@ -267,7 +268,7 @@ pub async fn create_feature(
 pub async fn update_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-    Json(input): Json<UpdateFeatureInput>,
+    ValidatedJson(input): ValidatedJson<UpdateFeatureInput>,
 ) -> Result<Json<Feature>, (StatusCode, String)> {
     db.update_feature(id, input)
         .await
@@ -336,6 +337,15 @@ pub async fn bulk_create_features(
     Path(project_id): Path<Uuid>,
     Json(input): Json<BulkCreateFeaturesInput>,
 ) -> Result<Json<PlanFeaturesResponse>, (StatusCode, String)> {
+    // Guard rail: cap total features in the tree
+    let total = count_proposed_features(&input.features);
+    if total > MAX_BULK_FEATURES {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Too many features ({total}, max {MAX_BULK_FEATURES})"),
+        ));
+    }
+
     // Verify project exists
     db.get_project(project_id)
         .await
@@ -407,6 +417,14 @@ fn flatten_feature_tree(
     }
 
     id
+}
+
+/// Count total features in a proposed feature tree (including nested children).
+fn count_proposed_features(features: &[ProposedFeature]) -> usize {
+    features
+        .iter()
+        .map(|f| 1 + count_proposed_features(&f.children))
+        .sum()
 }
 
 /// Subscribe to real-time feature change notifications via SSE.

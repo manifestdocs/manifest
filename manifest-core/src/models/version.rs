@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use validator::Validate;
 
 /// A version for release planning.
 ///
@@ -22,16 +23,20 @@ pub struct Version {
 }
 
 /// Input for creating a new version.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreateVersionInput {
+    #[validate(length(min = 1, max = 100))]
     pub name: String,
+    #[validate(length(max = 5_000))]
     pub description: Option<String>,
 }
 
 /// Input for updating an existing version. All fields are optional for partial updates.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct UpdateVersionInput {
+    #[validate(length(min = 1, max = 100))]
     pub name: Option<String>,
+    #[validate(length(max = 5_000))]
     pub description: Option<String>,
     /// Set to mark the version as released
     pub released_at: Option<DateTime<Utc>>,

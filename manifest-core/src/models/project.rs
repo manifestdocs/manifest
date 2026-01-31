@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use validator::Validate;
 
 /// A project containing features.
 ///
@@ -48,22 +49,30 @@ pub struct ProjectDirectory {
 }
 
 /// Input for creating a new project.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreateProjectInput {
+    #[validate(length(min = 1, max = 200))]
     pub name: String,
     /// URL-friendly identifier. If not provided, auto-generated from name.
+    #[validate(length(max = 200))]
     pub slug: Option<String>,
+    #[validate(length(max = 10_000))]
     pub description: Option<String>,
+    #[validate(length(max = 50_000))]
     pub instructions: Option<String>,
 }
 
 /// Input for updating an existing project. All fields are optional for partial updates.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct UpdateProjectInput {
+    #[validate(length(min = 1, max = 200))]
     pub name: Option<String>,
     /// URL-friendly identifier. Must be unique.
+    #[validate(length(max = 200))]
     pub slug: Option<String>,
+    #[validate(length(max = 10_000))]
     pub description: Option<String>,
+    #[validate(length(max = 50_000))]
     pub instructions: Option<String>,
     /// Set the current/active version for this project.
     pub current_version_id: Option<Uuid>,
@@ -72,12 +81,15 @@ pub struct UpdateProjectInput {
 }
 
 /// Input for adding a directory to a project.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct AddDirectoryInput {
+    #[validate(length(min = 1, max = 4_096))]
     pub path: String,
+    #[validate(length(max = 1_000))]
     pub git_remote: Option<String>,
     #[serde(default)]
     pub is_primary: bool,
+    #[validate(length(max = 10_000))]
     pub instructions: Option<String>,
 }
 

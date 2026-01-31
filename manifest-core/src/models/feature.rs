@@ -3,6 +3,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use validator::Validate;
 
 /// Serde helper for Option<Option<T>> - distinguishes "field absent" from "field is null".
 /// - JSON field absent → None (don't update)
@@ -186,7 +187,7 @@ impl FromStr for FeatureState {
 }
 
 /// Input for creating a new feature.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreateFeatureInput {
     /// Pre-generated feature ID. If not provided, a new UUID will be generated.
     /// Use this for bulk creation where parent-child relationships need known IDs.
@@ -194,8 +195,10 @@ pub struct CreateFeatureInput {
     pub id: Option<Uuid>,
     /// Parent feature ID for nesting. `None` creates a root feature.
     pub parent_id: Option<Uuid>,
+    #[validate(length(min = 1, max = 500))]
     pub title: String,
     /// Feature details including user stories, implementation notes, and technical context.
+    #[validate(length(max = 100_000))]
     pub details: Option<String>,
     /// Initial state. Defaults to `Proposed` if not specified.
     pub state: Option<FeatureState>,
@@ -206,11 +209,13 @@ pub struct CreateFeatureInput {
 }
 
 /// Input for updating an existing feature. All fields are optional for partial updates.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct UpdateFeatureInput {
     /// Move feature under a different parent.
     pub parent_id: Option<Uuid>,
+    #[validate(length(min = 1, max = 500))]
     pub title: Option<String>,
+    #[validate(length(max = 100_000))]
     pub details: Option<String>,
     /// Desired details for pending changes. Set to implement declarative editing workflow.
     /// Uses double Option to distinguish "field absent" (None) from "set to null" (Some(None)).
