@@ -27,7 +27,12 @@ fn print_banner<W: Write>(mut w: W, url: &str) {
 #[command(name = "manifest")]
 #[command(version)]
 #[command(about = "Living feature documentation for AI-assisted development")]
+#[command(disable_version_flag = true)]
 struct Cli {
+    /// Print version
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    version: (),
+
     /// Path to the SQLite database file
     #[arg(long, global = true, env = "MANIFEST_DB")]
     db: Option<PathBuf>,
@@ -54,6 +59,12 @@ enum Commands {
     },
     /// Start MCP server via stdio (for Claude Code integration)
     Mcp,
+    /// Open the Manifest dashboard in the browser
+    Open {
+        /// Port the server is running on
+        #[arg(short, long, default_value = "17010")]
+        port: u16,
+    },
     /// Check server status
     Status,
     /// Stop the daemon
@@ -151,6 +162,29 @@ async fn main() -> anyhow::Result<()> {
             // No local database needed - configure via MANIFEST_URL env var
             print_banner(std::io::stderr(), "MCP");
             mcp::run_stdio_server().await?;
+        }
+        Some(Commands::Open { port }) => {
+            let url = format!("http://localhost:{}", port);
+
+            // Check if server is running
+            match reqwest::Client::new()
+                .get(format!("{}/health", url))
+                .timeout(std::time::Duration::from_secs(2))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    open::that(&url)?;
+                    println!("Opened {}", url);
+                }
+                _ => {
+                    eprintln!(
+                        "Server is not running on port {}. Start it with: manifest serve",
+                        port
+                    );
+                    std::process::exit(1);
+                }
+            }
         }
         Some(Commands::Status) => {
             println!("Checking Manifest server status...");

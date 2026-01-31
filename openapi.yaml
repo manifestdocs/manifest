@@ -34,6 +34,8 @@ tags:
     description: Feature tree management
   - name: History
     description: Feature implementation history
+  - name: Filesystem
+    description: Local filesystem browsing for directory selection
   - name: Health
     description: Server health checks
 
@@ -54,6 +56,53 @@ paths:
                   status:
                     type: string
                     example: ok
+
+  # ============================================================
+  # Filesystem
+  # ============================================================
+  /filesystem/browse:
+    get:
+      tags: [Filesystem]
+      summary: Browse directories
+      description: |
+        Lists subdirectories at a given path for building a directory browser UI.
+        Skips hidden directories and common noise directories (node_modules, target, etc.).
+        Defaults to the user's home directory if no path is provided.
+        Only available on the local self-hosted server.
+      operationId: browseFilesystem
+      parameters:
+        - name: path
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Absolute path to browse. Defaults to user's home directory.
+          example: "/Users/dev/projects"
+      responses:
+        "200":
+          description: Directory listing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowseResponse"
+        "400":
+          description: Invalid path (not absolute or not a directory)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Access denied (path restricted)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Directory not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   # ============================================================
   # Projects
@@ -1344,3 +1393,52 @@ components:
           format: date-time
           nullable: true
           description: Set to mark the version as released
+
+    # ============================================================
+    # Filesystem schemas
+    # ============================================================
+    BrowseResponse:
+      type: object
+      required: [path, entries]
+      description: Directory listing for the filesystem browser
+      properties:
+        path:
+          type: string
+          description: The absolute path being browsed
+          example: "/Users/dev/projects"
+        parent:
+          type: string
+          nullable: true
+          description: Parent directory path, or null if at filesystem root
+          example: "/Users/dev"
+        entries:
+          type: array
+          description: Subdirectories at this path
+          items:
+            $ref: "#/components/schemas/DirectoryEntry"
+
+    DirectoryEntry:
+      type: object
+      required: [name, path, has_children]
+      description: A subdirectory entry in the filesystem browser
+      properties:
+        name:
+          type: string
+          description: Directory name
+          example: "my-project"
+        path:
+          type: string
+          description: Full absolute path
+          example: "/Users/dev/projects/my-project"
+        has_children:
+          type: boolean
+          description: Whether this directory contains visible subdirectories
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Path must be absolute"

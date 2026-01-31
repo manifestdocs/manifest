@@ -161,6 +161,8 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
     let protected_api = Router::new()
         // Codebase analysis (separate path to avoid {id} conflicts)
         .route("/codebase/analyze", get(handlers::analyze_project))
+        // Filesystem browsing
+        .route("/filesystem/browse", get(handlers::browse_filesystem))
         // Projects
         .route("/projects", get(handlers::list_projects))
         .route("/projects", post(handlers::create_project))
