@@ -18,7 +18,7 @@ use crate::models::{
     UpdateFeatureInput,
 };
 
-use super::internal_error;
+use super::{internal_error, ApiError};
 use crate::api::validation::{ValidatedJson, MAX_BULK_FEATURES};
 use crate::serde_helpers::default_true;
 
@@ -30,7 +30,7 @@ use crate::serde_helpers::default_true;
 pub async fn list_features(
     State(db): State<Database>,
     Query(query): Query<ListFeaturesQuery>,
-) -> Result<Json<Vec<FeatureSummary>>, (StatusCode, String)> {
+) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
     // Use SQL-based pagination for efficiency
     let features = db
         .get_all_features_paginated(query.limit, query.offset)
@@ -47,7 +47,7 @@ pub async fn list_project_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
     Query(query): Query<ListFeaturesQuery>,
-) -> Result<Json<Vec<FeatureSummary>>, (StatusCode, String)> {
+) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
     // Use SQL-based pagination for efficiency
     let features = db
         .get_features_by_project_paginated(project_id, query.limit, query.offset)
@@ -62,7 +62,7 @@ pub async fn list_project_features(
 pub async fn list_root_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
-) -> Result<Json<Vec<Feature>>, (StatusCode, String)> {
+) -> Result<Json<Vec<Feature>>, ApiError> {
     db.get_root_features(project_id)
         .await
         .map(Json)
@@ -73,7 +73,7 @@ pub async fn list_root_features(
 pub async fn get_feature_tree(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
-) -> Result<Json<Vec<FeatureTreeNode>>, (StatusCode, String)> {
+) -> Result<Json<Vec<FeatureTreeNode>>, ApiError> {
     db.get_feature_tree(project_id)
         .await
         .map(Json)
@@ -99,7 +99,7 @@ pub async fn get_next_feature(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
     Query(query): Query<GetNextFeatureQuery>,
-) -> Result<Json<Option<crate::models::FeatureWithContext>>, (StatusCode, String)> {
+) -> Result<Json<Option<crate::models::FeatureWithContext>>, ApiError> {
     // Get the next workable feature
     let feature = db
         .get_next_workable_feature(project_id, query.version_id)
@@ -123,7 +123,7 @@ pub async fn get_next_feature(
 pub async fn list_children(
     State(db): State<Database>,
     Path(parent_id): Path<Uuid>,
-) -> Result<Json<Vec<Feature>>, (StatusCode, String)> {
+) -> Result<Json<Vec<Feature>>, ApiError> {
     db.get_children(parent_id)
         .await
         .map(Json)
@@ -134,7 +134,7 @@ pub async fn list_children(
 pub async fn get_feature_history(
     State(db): State<Database>,
     Path(feature_id): Path<Uuid>,
-) -> Result<Json<Vec<FeatureHistory>>, (StatusCode, String)> {
+) -> Result<Json<Vec<FeatureHistory>>, ApiError> {
     db.get_feature_history(feature_id)
         .await
         .map(Json)
@@ -162,20 +162,23 @@ pub async fn create_feature_history(
     State(db): State<Database>,
     Path(feature_id): Path<Uuid>,
     Json(input): Json<CreateFeatureHistoryInput>,
-) -> Result<(StatusCode, Json<FeatureHistory>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<FeatureHistory>), ApiError> {
     // Verify feature exists
     let feature = db
         .get_feature(feature_id)
         .await
         .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))?;
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Feature not found".to_string(),
+        )))?;
 
     // Verify it's a leaf feature
     if !db.is_leaf(feature_id).await.map_err(internal_error)? {
-        return Err((
+        return Err(ApiError::from((
             StatusCode::BAD_REQUEST,
             "Cannot create history on a non-leaf feature".to_string(),
-        ));
+        )));
     }
 
     // Create history entry directly
@@ -217,12 +220,15 @@ pub async fn create_feature_history(
 pub async fn get_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Feature>, (StatusCode, String)> {
+) -> Result<Json<Feature>, ApiError> {
     db.get_feature(id)
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Feature not found".to_string(),
+        )))
 }
 
 /// Get a feature with hierarchical context (parent, siblings, children, breadcrumb).
@@ -232,24 +238,30 @@ pub async fn get_feature(
 pub async fn get_feature_with_context(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-) -> Result<Json<crate::models::FeatureWithContext>, (StatusCode, String)> {
+) -> Result<Json<crate::models::FeatureWithContext>, ApiError> {
     db.get_feature_with_context(id)
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Feature not found".to_string(),
+        )))
 }
 
 /// Get the diff between current and desired details for a feature.
 pub async fn get_feature_diff(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-) -> Result<Json<FeatureDiff>, (StatusCode, String)> {
+) -> Result<Json<FeatureDiff>, ApiError> {
     db.get_feature_diff(id)
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Feature not found".to_string(),
+        )))
 }
 
 /// Create a new feature in a project.
@@ -257,7 +269,7 @@ pub async fn create_feature(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<CreateFeatureInput>,
-) -> Result<(StatusCode, Json<Feature>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<Feature>), ApiError> {
     db.create_feature(project_id, input)
         .await
         .map(|f| (StatusCode::CREATED, Json(f)))
@@ -269,23 +281,29 @@ pub async fn update_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<UpdateFeatureInput>,
-) -> Result<Json<Feature>, (StatusCode, String)> {
+) -> Result<Json<Feature>, ApiError> {
     db.update_feature(id, input)
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Feature not found".to_string()))
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Feature not found".to_string(),
+        )))
 }
 
 /// Delete a feature and its descendants.
 pub async fn delete_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, ApiError> {
     if db.delete_feature(id).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err((StatusCode::NOT_FOUND, "Feature not found".to_string()))
+        Err(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Feature not found".to_string(),
+        )))
     }
 }
 
@@ -305,7 +323,7 @@ pub struct SearchFeaturesQuery {
 pub async fn search_features(
     State(db): State<Database>,
     Query(query): Query<SearchFeaturesQuery>,
-) -> Result<Json<Vec<FeatureSummary>>, (StatusCode, String)> {
+) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
     db.search_features(&query.q, query.project_id, query.limit)
         .await
         .map(Json)
@@ -336,21 +354,24 @@ pub async fn bulk_create_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
     Json(input): Json<BulkCreateFeaturesInput>,
-) -> Result<Json<PlanFeaturesResponse>, (StatusCode, String)> {
+) -> Result<Json<PlanFeaturesResponse>, ApiError> {
     // Guard rail: cap total features in the tree
     let total = count_proposed_features(&input.features);
     if total > MAX_BULK_FEATURES {
-        return Err((
+        return Err(ApiError::from((
             StatusCode::BAD_REQUEST,
             format!("Too many features ({total}, max {MAX_BULK_FEATURES})"),
-        ));
+        )));
     }
 
     // Verify project exists
     db.get_project(project_id)
         .await
         .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Project not found".to_string(),
+        )))?;
 
     let mut created_ids = Vec::new();
 
@@ -360,7 +381,10 @@ pub async fn bulk_create_features(
             db.get_version(vid)
                 .await
                 .map_err(internal_error)?
-                .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))?;
+                .ok_or(ApiError::from((
+                    StatusCode::NOT_FOUND,
+                    "Version not found".to_string(),
+                )))?;
         }
 
         // Flatten the tree into a list of inputs with pre-generated UUIDs

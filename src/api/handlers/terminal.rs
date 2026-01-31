@@ -25,6 +25,7 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 use uuid::Uuid;
 
+use super::ApiError;
 use crate::db::Database;
 
 /// Terminal session state for tracking active connections.
@@ -100,28 +101,25 @@ pub async fn ws_terminal_handler(
     State(sessions): State<TerminalSessions>,
     Path(project_id): Path<Uuid>,
     Query(query): Query<TerminalQuery>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<impl IntoResponse, ApiError> {
     // Verify project exists and get working directory
     // Directories are ordered by is_primary DESC, so first one is primary (or first by path)
-    let directories = db
-        .get_project_directories(project_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to get project directories: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to get project".to_string(),
-            )
-        })?;
+    let directories = db.get_project_directories(project_id).await.map_err(|e| {
+        tracing::error!("Failed to get project directories: {}", e);
+        ApiError::from((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to get project".to_string(),
+        ))
+    })?;
 
     let working_directory = directories
         .into_iter()
         .next() // First directory (primary if exists, otherwise first by path)
         .ok_or_else(|| {
-            (
+            ApiError::from((
                 StatusCode::NOT_FOUND,
                 "Project has no directory configured".to_string(),
-            )
+            ))
         })?;
 
     let session_id = query.session_id.unwrap_or_else(Uuid::new_v4);
@@ -184,8 +182,13 @@ async fn handle_terminal_session(
 
 fn spawn_claude_pty(
     working_dir: &str,
-) -> Result<(Box<dyn portable_pty::MasterPty + Send>, Box<dyn portable_pty::Child + Send + Sync>), anyhow::Error>
-{
+) -> Result<
+    (
+        Box<dyn portable_pty::MasterPty + Send>,
+        Box<dyn portable_pty::Child + Send + Sync>,
+    ),
+    anyhow::Error,
+> {
     let pty_system = native_pty_system();
 
     let pair = pty_system.openpty(PtySize {
@@ -399,28 +402,22 @@ pub async fn open_native_terminal(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
     Json(_input): Json<OpenTerminalRequest>,
-) -> Result<Json<OpenTerminalResponse>, (StatusCode, String)> {
+) -> Result<Json<OpenTerminalResponse>, ApiError> {
     // Get project's primary directory
-    let directories = db
-        .get_project_directories(project_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to get project directories: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to get project".to_string(),
-            )
-        })?;
+    let directories = db.get_project_directories(project_id).await.map_err(|e| {
+        tracing::error!("Failed to get project directories: {}", e);
+        ApiError::from((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to get project".to_string(),
+        ))
+    })?;
 
-    let working_directory = directories
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                "Project has no directory configured".to_string(),
-            )
-        })?;
+    let working_directory = directories.into_iter().next().ok_or_else(|| {
+        ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Project has no directory configured".to_string(),
+        ))
+    })?;
 
     let directory = working_directory.path;
 
@@ -461,9 +458,9 @@ pub async fn open_native_terminal(
 
         // Clean up temp script after a delay (fire and forget)
         let script_path_clone = script_path.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            let _ = std::fs::remove_file(script_path_clone);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            let _ = tokio::fs::remove_file(script_path_clone).await;
         });
 
         match result {
@@ -493,9 +490,9 @@ pub async fn open_native_terminal(
     #[cfg(not(target_os = "macos"))]
     {
         tracing::warn!(project_id = %project_id, "Native terminal not supported on this platform");
-        Err((
+        Err(ApiError::from((
             StatusCode::NOT_IMPLEMENTED,
             "Native terminal launch only supported on macOS".to_string(),
-        ))
+        )))
     }
 }

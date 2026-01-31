@@ -6,6 +6,7 @@ use axum::{
 use serde::Deserialize;
 use std::path::Path;
 
+use super::ApiError;
 use crate::db::Database;
 use crate::mcp::ProjectAnalysis;
 use crate::serde_helpers::default_true;
@@ -33,32 +34,38 @@ pub struct AnalyzeProjectQuery {
 pub async fn analyze_project(
     State(_db): State<Database>,
     Query(query): Query<AnalyzeProjectQuery>,
-) -> Result<Json<ProjectAnalysis>, (StatusCode, String)> {
+) -> Result<Json<ProjectAnalysis>, ApiError> {
     let root = Path::new(&query.path);
 
     // Validate path is absolute (security requirement)
     if !root.is_absolute() {
-        return Err((StatusCode::BAD_REQUEST, "Path must be absolute".to_string()));
+        return Err(ApiError::from((
+            StatusCode::BAD_REQUEST,
+            "Path must be absolute".to_string(),
+        )));
     }
 
     // Validate path against security restrictions
     let restrictions = crate::api::config::PathRestrictions::from_env();
     if let Err(e) = restrictions.validate(root) {
-        return Err((StatusCode::FORBIDDEN, format!("Access denied: {}", e)));
+        return Err(ApiError::from((
+            StatusCode::FORBIDDEN,
+            format!("Access denied: {}", e),
+        )));
     }
 
     // Validate directory exists
     if !root.exists() {
-        return Err((
+        return Err(ApiError::from((
             StatusCode::NOT_FOUND,
             format!("Directory not found: {}", query.path),
-        ));
+        )));
     }
     if !root.is_dir() {
-        return Err((
+        return Err(ApiError::from((
             StatusCode::BAD_REQUEST,
             format!("Path is not a directory: {}", query.path),
-        ));
+        )));
     }
 
     // Delegate to analysis module

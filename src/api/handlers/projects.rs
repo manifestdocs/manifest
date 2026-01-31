@@ -12,7 +12,7 @@ use crate::models::{
     ProjectWithDirectories, UpdateProjectInput,
 };
 
-use super::internal_error;
+use super::{internal_error, ApiError};
 use crate::api::validation::ValidatedJson;
 
 // ============================================================
@@ -20,9 +20,7 @@ use crate::api::validation::ValidatedJson;
 // ============================================================
 
 /// List all projects.
-pub async fn list_projects(
-    State(db): State<Database>,
-) -> Result<Json<Vec<Project>>, (StatusCode, String)> {
+pub async fn list_projects(State(db): State<Database>) -> Result<Json<Vec<Project>>, ApiError> {
     db.get_all_projects()
         .await
         .map(Json)
@@ -33,24 +31,30 @@ pub async fn list_projects(
 pub async fn get_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-) -> Result<Json<ProjectWithDirectories>, (StatusCode, String)> {
+) -> Result<Json<ProjectWithDirectories>, ApiError> {
     db.get_project_with_directories(id)
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Project not found".to_string(),
+        )))
 }
 
 /// Get a project by slug with its associated directories.
 pub async fn get_project_by_slug(
     State(db): State<Database>,
     Path(slug): Path<String>,
-) -> Result<Json<ProjectWithDirectories>, (StatusCode, String)> {
+) -> Result<Json<ProjectWithDirectories>, ApiError> {
     let project = db
         .get_project_by_slug(&slug)
         .await
         .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Project not found".to_string(),
+        )))?;
 
     let directories = db
         .get_project_directories(project.id)
@@ -67,7 +71,7 @@ pub async fn get_project_by_slug(
 pub async fn create_project(
     State(db): State<Database>,
     ValidatedJson(input): ValidatedJson<CreateProjectInput>,
-) -> Result<(StatusCode, Json<Project>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<Project>), ApiError> {
     db.create_project(input)
         .await
         .map(|p| (StatusCode::CREATED, Json(p)))
@@ -79,23 +83,29 @@ pub async fn update_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<UpdateProjectInput>,
-) -> Result<Json<Project>, (StatusCode, String)> {
+) -> Result<Json<Project>, ApiError> {
     db.update_project(id, input)
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Project not found".to_string(),
+        )))
 }
 
 /// Delete a project and all associated data.
 pub async fn delete_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, ApiError> {
     if db.delete_project(id).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err((StatusCode::NOT_FOUND, "Project not found".to_string()))
+        Err(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Project not found".to_string(),
+        )))
     }
 }
 
@@ -124,7 +134,7 @@ pub async fn get_project_history(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
     Query(query): Query<ProjectHistoryQuery>,
-) -> Result<Json<Vec<ProjectHistoryEntry>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ProjectHistoryEntry>>, ApiError> {
     // Parse optional since datetime
     let since = query
         .since
@@ -152,7 +162,7 @@ pub async fn get_project_history(
 pub async fn list_project_directories(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
-) -> Result<Json<Vec<ProjectDirectory>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ProjectDirectory>>, ApiError> {
     db.get_project_directories(project_id)
         .await
         .map(Json)
@@ -164,7 +174,7 @@ pub async fn add_project_directory(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<AddDirectoryInput>,
-) -> Result<(StatusCode, Json<ProjectDirectory>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<ProjectDirectory>), ApiError> {
     db.add_project_directory(project_id, input)
         .await
         .map(|d| (StatusCode::CREATED, Json(d)))
@@ -175,7 +185,7 @@ pub async fn add_project_directory(
 pub async fn remove_project_directory(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, ApiError> {
     if db
         .remove_project_directory(id)
         .await
@@ -183,7 +193,10 @@ pub async fn remove_project_directory(
     {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err((StatusCode::NOT_FOUND, "Directory not found".to_string()))
+        Err(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Directory not found".to_string(),
+        )))
     }
 }
 
@@ -199,13 +212,13 @@ pub struct GetProjectByDirectoryQuery {
 pub async fn get_project_by_directory(
     State(db): State<Database>,
     Query(query): Query<GetProjectByDirectoryQuery>,
-) -> Result<Json<ProjectWithDirectories>, (StatusCode, String)> {
+) -> Result<Json<ProjectWithDirectories>, ApiError> {
     db.get_project_by_directory(&query.path)
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or((
+        .ok_or(ApiError::from((
             StatusCode::NOT_FOUND,
             format!("No project found for directory: {}", query.path),
-        ))
+        )))
 }

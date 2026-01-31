@@ -149,7 +149,7 @@ impl RateLimiter {
         let now = Instant::now();
         let cutoff = now - self.window;
 
-        let mut requests = self.requests.lock().unwrap();
+        let mut requests = self.requests.lock().unwrap_or_else(|e| e.into_inner());
         let entry = requests.entry(ip).or_default();
 
         // Remove expired entries
@@ -164,15 +164,24 @@ impl RateLimiter {
     }
 
     /// Clean up old entries to prevent memory growth.
-    /// Call this periodically in production.
-    #[allow(dead_code)]
     pub fn cleanup(&self) {
         let cutoff = Instant::now() - self.window;
-        let mut requests = self.requests.lock().unwrap();
+        let mut requests = self.requests.lock().unwrap_or_else(|e| e.into_inner());
 
         requests.retain(|_, timestamps| {
             timestamps.retain(|&t| t > cutoff);
             !timestamps.is_empty()
+        });
+    }
+
+    /// Spawn a background task that periodically cleans up expired entries.
+    pub fn start_cleanup_task(&self) {
+        let limiter = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                limiter.cleanup();
+            }
         });
     }
 }
@@ -236,23 +245,33 @@ pub async fn rate_limit_middleware(
 }
 
 /// Extract client IP from request.
+///
+/// Only trusts proxy headers (X-Forwarded-For, X-Real-IP) when
+/// `MANIFEST_TRUST_PROXY=true` is set. Without this, a malicious client
+/// could spoof their IP to bypass rate limiting.
 fn extract_client_ip(request: &Request<Body>) -> IpAddr {
-    // Try X-Forwarded-For header first (for proxied requests)
-    if let Some(forwarded) = request.headers().get("X-Forwarded-For") {
-        if let Ok(value) = forwarded.to_str() {
-            if let Some(ip_str) = value.split(',').next() {
-                if let Ok(ip) = ip_str.trim().parse() {
-                    return ip;
+    let trust_proxy = std::env::var("MANIFEST_TRUST_PROXY")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
+    if trust_proxy {
+        // Try X-Forwarded-For header first (for proxied requests)
+        if let Some(forwarded) = request.headers().get("X-Forwarded-For") {
+            if let Ok(value) = forwarded.to_str() {
+                if let Some(ip_str) = value.split(',').next() {
+                    if let Ok(ip) = ip_str.trim().parse() {
+                        return ip;
+                    }
                 }
             }
         }
-    }
 
-    // Try X-Real-IP header
-    if let Some(real_ip) = request.headers().get("X-Real-IP") {
-        if let Ok(value) = real_ip.to_str() {
-            if let Ok(ip) = value.trim().parse() {
-                return ip;
+        // Try X-Real-IP header
+        if let Some(real_ip) = request.headers().get("X-Real-IP") {
+            if let Ok(value) = real_ip.to_str() {
+                if let Ok(ip) = value.trim().parse() {
+                    return ip;
+                }
             }
         }
     }

@@ -56,22 +56,24 @@ impl ManifestClient {
     pub fn from_env() -> Self {
         let base_url = std::env::var("MANIFEST_URL").unwrap_or_else(|_| DEFAULT_URL.to_string());
         let api_key = std::env::var("MANIFEST_API_KEY").ok();
-        Self::new(base_url, api_key)
+        Self::new(base_url, api_key).expect("Failed to build HTTP client")
     }
 
     /// Create a client with explicit base URL and optional API key.
-    pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
+    pub fn new(
+        base_url: impl Into<String>,
+        api_key: Option<String>,
+    ) -> Result<Self, reqwest::Error> {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
-            .build()
-            .expect("Failed to build HTTP client");
+            .build()?;
 
-        Self {
+        Ok(Self {
             base_url: base_url.into(),
             api_key,
             client,
-        }
+        })
     }
 
     /// Build a request with optional auth header.

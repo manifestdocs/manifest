@@ -16,19 +16,47 @@ pub use versions::*;
 
 use crate::db::ManifestError;
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 
 // ============================================================
 // Shared Error Handling
 // ============================================================
 
-fn manifest_error(e: ManifestError) -> (StatusCode, String) {
+/// Structured JSON error response.
+///
+/// Returns `{"error": "message"}` instead of plain text.
+pub struct ApiError {
+    status: StatusCode,
+    message: String,
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let body = serde_json::json!({ "error": self.message });
+        (self.status, Json(body)).into_response()
+    }
+}
+
+/// Allow `(StatusCode, String)` to convert to `ApiError` so that existing
+/// inline error returns like `Err((StatusCode::NOT_FOUND, "...".into()))` still work.
+impl From<(StatusCode, String)> for ApiError {
+    fn from((status, message): (StatusCode, String)) -> Self {
+        Self { status, message }
+    }
+}
+
+fn manifest_error(e: ManifestError) -> ApiError {
     let status = match &e {
         ManifestError::NotFound(_) => StatusCode::NOT_FOUND,
         ManifestError::Validation(_) => StatusCode::BAD_REQUEST,
         ManifestError::InvalidState(_) => StatusCode::CONFLICT,
     };
     tracing::warn!("Client error: {}", e);
-    (status, e.to_string())
+    ApiError {
+        status,
+        message: e.to_string(),
+    }
 }
 
 /// Convert an anyhow::Error to an HTTP response.
@@ -36,7 +64,7 @@ fn manifest_error(e: ManifestError) -> (StatusCode, String) {
 /// Other errors are treated as internal server errors.
 ///
 /// This is used by submodules via `super::internal_error`.
-pub(crate) fn internal_error(e: anyhow::Error) -> (StatusCode, String) {
+pub(crate) fn internal_error(e: anyhow::Error) -> ApiError {
     // Check if this is a wrapped ManifestError (domain error)
     if let Some(manifest_err) = e.downcast_ref::<ManifestError>() {
         return manifest_error(manifest_err.clone());
@@ -44,8 +72,8 @@ pub(crate) fn internal_error(e: anyhow::Error) -> (StatusCode, String) {
 
     // True internal error - log full details but return generic message
     tracing::error!("Internal error: {:?}", e);
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Internal server error".to_string(),
-    )
+    ApiError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: "Internal server error".to_string(),
+    }
 }

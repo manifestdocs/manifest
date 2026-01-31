@@ -11,6 +11,8 @@ use axum::Json;
 use serde::de::DeserializeOwned;
 use validator::Validate;
 
+use crate::api::handlers::ApiError;
+
 /// Maximum number of features allowed in a single bulk creation request.
 pub const MAX_BULK_FEATURES: usize = 200;
 
@@ -25,15 +27,15 @@ where
     T: DeserializeOwned + Validate,
     S: Send + Sync,
 {
-    type Rejection = (StatusCode, String);
+    type Rejection = ApiError;
 
     async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
         let Json(value) = Json::<T>::from_request(req, state)
             .await
-            .map_err(|e: JsonRejection| (StatusCode::BAD_REQUEST, e.body_text()))?;
-        value
-            .validate()
-            .map_err(|errors| (StatusCode::BAD_REQUEST, format_validation_errors(&errors)))?;
+            .map_err(|e: JsonRejection| ApiError::from((StatusCode::BAD_REQUEST, e.body_text())))?;
+        value.validate().map_err(|errors| {
+            ApiError::from((StatusCode::BAD_REQUEST, format_validation_errors(&errors)))
+        })?;
         Ok(ValidatedJson(value))
     }
 }

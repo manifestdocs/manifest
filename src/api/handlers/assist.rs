@@ -16,6 +16,7 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
+use super::ApiError;
 use crate::db::Database;
 
 // ============================================================
@@ -62,7 +63,7 @@ pub struct ChatContext {
 pub async fn chat_completions(
     State(_db): State<Database>,
     Json(input): Json<ChatRequest>,
-) -> Result<Response, (StatusCode, String)> {
+) -> Result<Response, ApiError> {
     // Separate system messages from conversation messages
     let mut system_prompt = String::new();
     let mut conversation: Vec<&ChatMessage> = Vec::new();
@@ -90,7 +91,10 @@ pub async fn chat_completions(
     };
 
     if user_prompt.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "No user message provided".into()));
+        return Err(ApiError::from((
+            StatusCode::BAD_REQUEST,
+            "No user message provided".to_string(),
+        )));
     }
 
     // Determine the model to use
@@ -157,18 +161,18 @@ pub async fn chat_completions(
         .spawn()
         .map_err(|e| {
             tracing::error!("Failed to spawn claude: {}", e);
-            (
+            ApiError::from((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to spawn claude: {}", e),
-            )
+            ))
         })?;
 
     // Write the prompt to stdin and close it
     let mut stdin = child.stdin.take().ok_or_else(|| {
-        (
+        ApiError::from((
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to open stdin".into(),
-        )
+            "Failed to open stdin".to_string(),
+        ))
     })?;
 
     // Write prompt and close stdin in a background task
@@ -180,10 +184,10 @@ pub async fn chat_completions(
     });
 
     let stdout = child.stdout.take().ok_or_else(|| {
-        (
+        ApiError::from((
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to capture stdout".into(),
-        )
+            "Failed to capture stdout".to_string(),
+        ))
     })?;
 
     // Log stderr in the background

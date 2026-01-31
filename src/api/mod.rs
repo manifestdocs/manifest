@@ -255,6 +255,7 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
 
     // Apply rate limiting if configured
     let protected_api = if let Some(rate_limiter) = config.rate_limiter.clone() {
+        rate_limiter.start_cleanup_task();
         protected_api.layer(axum::middleware::from_fn_with_state(
             rate_limiter,
             middleware::rate_limit_middleware,

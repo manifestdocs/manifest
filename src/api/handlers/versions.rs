@@ -10,7 +10,7 @@ use crate::models::{
     CreateHistoryInput, CreateVersionInput, HistoryDetails, UpdateVersionInput, Version,
 };
 
-use super::internal_error;
+use super::{internal_error, ApiError};
 use crate::api::validation::ValidatedJson;
 
 // ============================================================
@@ -21,7 +21,7 @@ use crate::api::validation::ValidatedJson;
 pub async fn list_project_versions(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
-) -> Result<Json<Vec<Version>>, (StatusCode, String)> {
+) -> Result<Json<Vec<Version>>, ApiError> {
     db.get_versions_by_project(project_id)
         .await
         .map(Json)
@@ -33,7 +33,7 @@ pub async fn create_version(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<CreateVersionInput>,
-) -> Result<(StatusCode, Json<Version>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<Version>), ApiError> {
     db.create_version(project_id, input)
         .await
         .map(|v| (StatusCode::CREATED, Json(v)))
@@ -44,12 +44,15 @@ pub async fn create_version(
 pub async fn get_version(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Version>, (StatusCode, String)> {
+) -> Result<Json<Version>, ApiError> {
     db.get_version(id)
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Version not found".to_string(),
+        )))
 }
 
 /// Update a version. Creates a release history entry when marking as released.
@@ -57,13 +60,16 @@ pub async fn update_version(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<UpdateVersionInput>,
-) -> Result<Json<Version>, (StatusCode, String)> {
+) -> Result<Json<Version>, ApiError> {
     // Get existing version to check if this is a release (released_at: None -> Some)
     let existing = db
         .get_version(id)
         .await
         .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))?;
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Version not found".to_string(),
+        )))?;
     let was_unreleased = existing.released_at.is_none();
 
     // Update the version
@@ -71,7 +77,10 @@ pub async fn update_version(
         .update_version(id, input)
         .await
         .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Version not found".to_string()))?;
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Version not found".to_string(),
+        )))?;
 
     // If version was just released, create history entry and ensure minimum versions
     if was_unreleased && updated.released_at.is_some() {
@@ -102,10 +111,13 @@ pub async fn update_version(
 pub async fn delete_version(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, ApiError> {
     if db.delete_version(id).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err((StatusCode::NOT_FOUND, "Version not found".to_string()))
+        Err(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Version not found".to_string(),
+        )))
     }
 }

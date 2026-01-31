@@ -1,6 +1,7 @@
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use manifest_core::config::ServerConfig;
 
+use super::ApiError;
 use crate::api::config::PathRestrictions;
 
 /// GET /api/v1/settings — returns current server configuration.
@@ -24,7 +25,7 @@ pub async fn get_settings() -> impl IntoResponse {
 /// If the database path changes, triggers a server restart.
 pub async fn update_settings(
     Json(body): Json<serde_json::Value>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
+) -> Result<impl IntoResponse, ApiError> {
     let new_db_path = body
         .get("database_path")
         .and_then(|v| {
@@ -53,10 +54,10 @@ pub async fn update_settings(
         };
         let restrictions = PathRestrictions::from_env();
         if let Err(e) = restrictions.validate(&validate_path) {
-            return Err((
+            return Err(ApiError::from((
                 StatusCode::BAD_REQUEST,
                 format!("Invalid database path: {e}"),
-            ));
+            )));
         }
     }
 
@@ -74,10 +75,10 @@ pub async fn update_settings(
 
     config.save().map_err(|e| {
         tracing::error!("Failed to save config: {:?}", e);
-        (
+        ApiError::from((
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to save configuration".to_string(),
-        )
+        ))
     })?;
 
     let config_file = ServerConfig::config_path()
