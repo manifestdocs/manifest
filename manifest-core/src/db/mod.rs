@@ -698,6 +698,8 @@ impl Database {
         // Generate slug from name if not provided
         let slug = input.slug.unwrap_or_else(|| slugify(&input.name));
 
+        let mut tx = self.pool.begin().await?;
+
         // Create project with root_feature_id
         sqlx::query(
             "INSERT INTO projects (id, slug, name, description, instructions, root_feature_id, created_at, updated_at)
@@ -711,7 +713,7 @@ impl Database {
         .bind(root_feature_id.to_string())
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         // Create root feature
@@ -725,8 +727,10 @@ impl Database {
         .bind(&input.instructions)
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
 
         Ok(Project {
             id: project_id,
@@ -803,37 +807,41 @@ impl Database {
     }
 
     pub async fn delete_project(&self, id: Uuid) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+
         // Delete feature history
         sqlx::query(
             "DELETE FROM feature_history WHERE feature_id IN (SELECT id FROM features WHERE project_id = $1)",
         )
         .bind(id.to_string())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         // Delete features
         sqlx::query("DELETE FROM features WHERE project_id = $1")
             .bind(id.to_string())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
         // Delete directories
         sqlx::query("DELETE FROM project_directories WHERE project_id = $1")
             .bind(id.to_string())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
         // Delete versions
         sqlx::query("DELETE FROM versions WHERE project_id = $1")
             .bind(id.to_string())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
         // Delete project
         let result = sqlx::query("DELETE FROM projects WHERE id = $1")
             .bind(id.to_string())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
+
+        tx.commit().await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -1402,6 +1410,8 @@ impl Database {
             }
         }
 
+        let mut tx = self.pool.begin().await?;
+
         for input in inputs {
             let id = input.id.unwrap_or_else(Uuid::new_v4);
             let state = input.state.unwrap_or(FeatureState::Proposed);
@@ -1435,7 +1445,7 @@ impl Database {
             .bind(target_version_id.map(|u| u.to_string()))
             .bind(now.to_rfc3339())
             .bind(now.to_rfc3339())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
             features.push(Feature {
@@ -1452,6 +1462,8 @@ impl Database {
                 updated_at: now,
             });
         }
+
+        tx.commit().await?;
 
         let _ = self.events.send(FeatureEvent::Created { project_id });
 
@@ -2045,6 +2057,8 @@ impl Database {
             let now = Utc::now();
             let root_feature_id = Uuid::new_v4();
 
+            let mut tx = self.pool.begin().await?;
+
             // Create root feature
             sqlx::query(
                 "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, created_at, updated_at)
@@ -2056,7 +2070,7 @@ impl Database {
             .bind(&project.instructions)
             .bind(now.to_rfc3339())
             .bind(now.to_rfc3339())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
             // Re-parent existing root features
@@ -2065,7 +2079,7 @@ impl Database {
             )
             .bind(root_feature_id.to_string())
             .bind(project.id.to_string())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
             report.features_reparented += result.rows_affected() as usize;
 
@@ -2074,8 +2088,10 @@ impl Database {
                 .bind(root_feature_id.to_string())
                 .bind(now.to_rfc3339())
                 .bind(project.id.to_string())
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await?;
+
+            tx.commit().await?;
 
             report.projects_migrated += 1;
         }
@@ -2322,6 +2338,8 @@ impl Database {
         // Generate slug from name if not provided
         let slug = input.slug.unwrap_or_else(|| slugify(&input.name));
 
+        let mut tx = self.pool.begin().await?;
+
         // Create project with owner_id
         sqlx::query(
             "INSERT INTO projects (id, slug, name, description, instructions, root_feature_id, owner_id, created_at, updated_at)
@@ -2336,7 +2354,7 @@ impl Database {
         .bind(owner_id.to_string())
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         // Create root feature
@@ -2350,7 +2368,7 @@ impl Database {
         .bind(&input.instructions)
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         // Create owner membership
@@ -2362,8 +2380,10 @@ impl Database {
         .bind(project_id.to_string())
         .bind(owner_id.to_string())
         .bind(now.to_rfc3339())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
 
         Ok(Project {
             id: project_id,
