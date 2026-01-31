@@ -379,10 +379,7 @@ pub struct PlanFeaturesResponse {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VersionListResponse {
     pub versions: Vec<VersionInfo>,
-    /// ID of the first unreleased version (current focus)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub now: Option<Uuid>,
-    /// ID of the second unreleased version (queued up)
+    /// ID of the first unreleased version (next to ship)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<Uuid>,
     /// Number of features in the backlog (no version assigned)
@@ -401,7 +398,7 @@ pub struct VersionInfo {
     pub released_at: Option<String>,
     /// Number of features targeting this version
     pub feature_count: u32,
-    /// Version status: "now" (current focus), "next" (upcoming), "later" (future), "released" (shipped)
+    /// Version status: "next" (first unreleased, next to ship), "planned" (other unreleased), "released" (shipped)
     pub status: String,
 }
 
@@ -442,7 +439,7 @@ pub struct GetNextFeatureRequest {
     #[schemars(description = "The UUID of the project to get the next feature for")]
     pub project_id: Uuid,
     #[schemars(
-        description = "Optional version ID to filter features. If not provided, prioritizes the 'now' version (first unreleased)."
+        description = "Optional version ID to filter features. If not provided, prioritizes the 'next' version (first unreleased)."
     )]
     pub version_id: Option<Uuid>,
 }

@@ -22,7 +22,7 @@ pub struct Project {
     /// The root feature's title = project name, details = project documentation,
     /// and its history tracks project-level events (version releases, etc.).
     pub root_feature_id: Option<Uuid>,
-    /// Where new features go by default: "backlog" (NULL version) or "now" (first unreleased).
+    /// Where new features go by default: "backlog" (NULL version) or "next" (first unreleased).
     pub default_feature_destination: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -67,7 +67,7 @@ pub struct UpdateProjectInput {
     pub instructions: Option<String>,
     /// Set the current/active version for this project.
     pub current_version_id: Option<Uuid>,
-    /// Where new features go by default: "backlog" or "now".
+    /// Where new features go by default: "backlog" or "next".
     pub default_feature_destination: Option<String>,
 }
 

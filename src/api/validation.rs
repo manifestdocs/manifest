@@ -75,7 +75,7 @@ pub struct UpdateProjectInput {
     #[validate(length(max = 50000))]
     pub instructions: Option<String>,
 
-    /// Where new features go by default: "backlog" or "now".
+    /// Where new features go by default: "backlog" or "next".
     #[validate(custom(function = "validate_feature_destination"))]
     pub default_feature_destination: Option<String>,
 }
@@ -121,10 +121,10 @@ pub struct AddDirectoryInput {
 /// Validate default_feature_destination is one of the allowed values.
 fn validate_feature_destination(dest: &str) -> Result<(), validator::ValidationError> {
     match dest {
-        "backlog" | "now" => Ok(()),
+        "backlog" | "next" => Ok(()),
         _ => {
             let mut err = validator::ValidationError::new("invalid_destination");
-            err.message = Some("default_feature_destination must be one of: backlog, now".into());
+            err.message = Some("default_feature_destination must be one of: backlog, next".into());
             Err(err)
         }
     }

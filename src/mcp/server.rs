@@ -188,7 +188,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Get the next workable feature, or null if none. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'now' version (or filter by version_id). Use this to find what to work on."
+        description = "ORIENT: Get the next workable feature, or null if none. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'next' version (or filter by version_id). Use this to find what to work on."
     )]
     async fn get_next_feature(
         &self,
@@ -202,7 +202,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "ORIENT: List versions. Returns release milestones with status indicators: 'now' (current focus), 'next' (upcoming), and 'later'."
+        description = "ORIENT: List versions. Returns release milestones with status indicators: 'next' (next to ship), 'planned' (upcoming), and 'released'."
     )]
     async fn list_versions(
         &self,
@@ -212,7 +212,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "PLAN: Create a release milestone. Names must be semantic versions in MAJOR.MINOR.PATCH format (e.g., '0.2.0', 'v1.0.0'). Freeform text like 'MVP' or status labels like 'now' are rejected."
+        description = "PLAN: Create a release milestone. Names must be semantic versions in MAJOR.MINOR.PATCH format (e.g., '0.2.0', 'v1.0.0'). Freeform text like 'MVP' or status labels like 'next' are rejected."
     )]
     async fn create_version(
         &self,
@@ -283,12 +283,11 @@ DISCOVERING FEATURES:
 
 VERSIONS & BACKLOG:
 Versions use semantic versioning (e.g., 0.1.0, 0.2.0, 1.0.0) and organize features into releases. Each version has a lifecycle status:
-- **now** — first unreleased version, current focus, highest priority
-- **next** — second unreleased version, queued up
-- **later** — remaining unreleased versions
+- **next** — first unreleased version, next to ship, highest priority
+- **planned** — remaining unreleased versions, queued for future releases
 - **released** — shipped; features CANNOT be assigned to released versions
 
-Features without a version assignment are in the **Backlog**—unscheduled work. By default, new features go to the Backlog. When you start working on a backlog feature (start_feature), it automatically moves to the "now" version.
+Features without a version assignment are in the **Backlog**—unscheduled work. By default, new features go to the Backlog. When you start working on a backlog feature (start_feature), it automatically moves to the "next" version.
 
 Assigning features to a released version will be rejected with an error. Use list_versions to find valid (unreleased) targets.
 
@@ -358,12 +357,12 @@ DELETING FEATURES:
 delete_feature permanently removes a feature and all its descendants. Use it only for archived features that are no longer needed. This cannot be undone. Prefer archiving (update_feature with state='archived') to preserve history.
 
 VERSIONS & PLANNING:
-- list_versions — see Now (current focus), Next (queued), Later, Released, and Backlog counts. Each version includes a `status` field.
+- list_versions — see Next (next to ship), Planned, Released, and Backlog counts. Each version includes a `status` field.
 - create_version — define milestones with semantic versions (e.g., "0.2.0", "v1.0.0")
 - set_feature_version — assign features to unreleased versions only (pass null to move to Backlog). Released versions are rejected.
 - release_version — mark a version as shipped (auto-creates new versions to maintain minimum of 4 unreleased)
 
-When all features in the "now" version are implemented, ask the user before calling release_version. Releasing shifts "next" to become the new "now". New versions are auto-created to maintain at least 4 unreleased versions.
+When all features in the "next" version are implemented, ask the user before calling release_version. Releasing promotes the next planned version to become the new "next". New versions are auto-created to maintain at least 4 unreleased versions.
 
 SETUP (when starting fresh):
 1. init_project — analyze codebase, create project, link directory
@@ -385,7 +384,7 @@ Tool results are collapsed JSON. Always summarize for humans:
 - start_feature: "Started 'Title' — now in_progress" + note any spec warnings or breadcrumb context. If blocked: "Cannot start 'Title' — specification required"
 - complete_feature: "Completed 'Title' — recorded N commits"
 - update_feature: "Updated 'Title'" + what changed
-- list_versions: "0.1.0 (released), 0.2.0 (now, 3 features), 0.3.0 (next)"
+- list_versions: "0.1.0 (released), 0.2.0 (next, 3 features), 0.3.0 (planned)"
 - create_version: "Created version 'Name'"
 - set_feature_version: "Assigned 'Feature' to version 'Name'" or "Unassigned from version"
 - release_version: "Released 'Name'""#;

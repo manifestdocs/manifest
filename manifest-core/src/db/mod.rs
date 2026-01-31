@@ -314,6 +314,8 @@ impl Database {
         self.migrate_add_project_slug().await?;
         // Migration: add default_feature_destination column to projects
         self.migrate_add_default_feature_destination().await?;
+        // Migration: rename default_feature_destination value "now" → "next"
+        self.migrate_feature_destination_now_to_next().await?;
         Ok(())
     }
 
@@ -589,6 +591,28 @@ impl Database {
         tracing::info!("Adding default_feature_destination column to projects table");
         sqlx::query(
             "ALTER TABLE projects ADD COLUMN default_feature_destination TEXT NOT NULL DEFAULT 'backlog'",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Migrate default_feature_destination from "now" to "next".
+    async fn migrate_feature_destination_now_to_next(&self) -> Result<()> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM projects WHERE default_feature_destination = 'now'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        if count == 0 {
+            return Ok(());
+        }
+
+        tracing::info!("Migrating default_feature_destination from 'now' to 'next'");
+        sqlx::query(
+            "UPDATE projects SET default_feature_destination = 'next' WHERE default_feature_destination = 'now'",
         )
         .execute(&self.pool)
         .await?;
@@ -946,9 +970,9 @@ impl Database {
         Ok(row.as_ref().map(row_to_version))
     }
 
-    /// Get the "Now" version (first unreleased version) for a project.
+    /// Get the "Next" version (first unreleased version) for a project.
     /// Returns None if no unreleased versions exist.
-    pub async fn get_now_version(&self, project_id: Uuid) -> Result<Option<Version>> {
+    pub async fn get_next_version(&self, project_id: Uuid) -> Result<Option<Version>> {
         let row = sqlx::query(
             "SELECT id, project_id, name, description, released_at, created_at, updated_at
              FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at LIMIT 1",
@@ -1297,18 +1321,18 @@ impl Database {
             self.validate_version_not_released(vid).await?;
         }
 
-        // Guard rail: in-progress/implemented features must be in the "now" version
+        // Guard rail: in-progress/implemented features must be in the "next" version
         let target_version_id = if state == FeatureState::InProgress
             || state == FeatureState::Implemented
         {
-            let now_version = self.get_now_version(project_id).await?.map(|v| v.id);
-            now_version.or(input.target_version_id)
+            let next_version = self.get_next_version(project_id).await?.map(|v| v.id);
+            next_version.or(input.target_version_id)
         } else {
             match input.target_version_id {
                 Some(vid) => Some(vid),
                 None => {
-                    if project.default_feature_destination == "now" {
-                        self.get_now_version(project_id).await?.map(|v| v.id)
+                    if project.default_feature_destination == "next" {
+                        self.get_next_version(project_id).await?.map(|v| v.id)
                     } else {
                         None // backlog
                     }
@@ -1363,10 +1387,10 @@ impl Database {
         let now = Utc::now();
         let mut features = Vec::with_capacity(inputs.len());
 
-        // Get default version and "now" version based on project setting
-        let now_version_id = self.get_now_version(project_id).await?.map(|v| v.id);
-        let default_version_id = if project.default_feature_destination == "now" {
-            now_version_id
+        // Get default version and "next" version based on project setting
+        let next_version_id = self.get_next_version(project_id).await?.map(|v| v.id);
+        let default_version_id = if project.default_feature_destination == "next" {
+            next_version_id
         } else {
             None // backlog
         };
@@ -1392,11 +1416,11 @@ impl Database {
                 .or(project.root_feature_id)
                 .ok_or_else(|| ManifestError::validation("Feature must have a parent"))?;
 
-            // Guard rail: in-progress/implemented features must be in the "now" version
+            // Guard rail: in-progress/implemented features must be in the "next" version
             let target_version_id = if state == FeatureState::InProgress
                 || state == FeatureState::Implemented
             {
-                now_version_id.or(input.target_version_id)
+                next_version_id.or(input.target_version_id)
             } else {
                 input.target_version_id.or(default_version_id)
             };
@@ -1471,17 +1495,17 @@ impl Database {
             .target_version_id
             .unwrap_or(existing.target_version_id);
 
-        // Guard rail: in-progress features must always be in the "now" version
+        // Guard rail: in-progress features must always be in the "next" version
         if state == FeatureState::InProgress && existing.state != FeatureState::InProgress {
-            if let Some(now_ver) = self.get_now_version(existing.project_id).await? {
-                target_version_id = Some(now_ver.id);
+            if let Some(next_ver) = self.get_next_version(existing.project_id).await? {
+                target_version_id = Some(next_ver.id);
             }
         }
 
-        // Guard rail: implemented features must have a version (assign to "now" if none)
+        // Guard rail: implemented features must have a version (assign to "next" if none)
         if state == FeatureState::Implemented && target_version_id.is_none() {
             target_version_id = self
-                .get_now_version(existing.project_id)
+                .get_next_version(existing.project_id)
                 .await?
                 .map(|v| v.id);
         }
@@ -1973,18 +1997,18 @@ impl Database {
             .await?
         } else {
             sqlx::query(
-                "WITH now_version AS (
+                "WITH next_version AS (
                     SELECT id FROM versions
                     WHERE project_id = $1 AND released_at IS NULL
                     ORDER BY created_at ASC LIMIT 1
                 )
                 SELECT f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.state, f.priority, f.target_version_id, f.created_at, f.updated_at
                 FROM features f
-                LEFT JOIN now_version nv ON f.target_version_id = nv.id
+                LEFT JOIN next_version nv ON f.target_version_id = nv.id
                 WHERE f.project_id = $1
                   AND f.state IN ('proposed', 'in_progress')
                 ORDER BY
-                    CASE WHEN f.target_version_id IS NOT NULL AND f.target_version_id = (SELECT id FROM now_version) THEN 0
+                    CASE WHEN f.target_version_id IS NOT NULL AND f.target_version_id = (SELECT id FROM next_version) THEN 0
                          WHEN f.target_version_id IS NULL THEN 1
                          ELSE 2 END,
                     f.priority ASC,

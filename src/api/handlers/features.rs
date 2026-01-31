@@ -90,7 +90,7 @@ pub struct GetNextFeatureQuery {
 ///
 /// Returns the single highest-priority feature that is workable (proposed or in_progress).
 /// Sort order: version > priority > created_at
-/// - Features targeting "now" version (first unreleased) come first
+/// - Features targeting "next" version (first unreleased) come first
 /// - Then features with no version (backlog)
 /// - Within each group: lower priority number wins
 /// - Same priority: oldest created wins

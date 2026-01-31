@@ -15,7 +15,7 @@ use crate::models::{CreateVersionInput, UpdateFeatureInput, UpdateVersionInput};
 
 use super::client_err;
 
-/// List versions for a project, including 'now' and 'next' indicators.
+/// List versions for a project, including 'next' indicator.
 pub async fn list_versions(
     client: &ManifestClient,
     req: ListVersionsRequest,
@@ -43,15 +43,14 @@ pub async fn list_versions(
         }
     }
 
-    // Find unreleased versions for Now/Next
+    // Find first unreleased version (next to ship)
     let mut unreleased: Vec<_> = versions
         .iter()
         .filter(|v| v.released_at.is_none())
         .collect();
     unreleased.sort_by(|a, b| a.created_at.cmp(&b.created_at));
 
-    let now = unreleased.first().map(|v| v.id);
-    let next = unreleased.get(1).map(|v| v.id);
+    let next_version_id = unreleased.first().map(|v| v.id);
 
     // Build response
     let result = VersionListResponse {
@@ -60,12 +59,10 @@ pub async fn list_versions(
             .map(|v| {
                 let status = if v.released_at.is_some() {
                     "released"
-                } else if Some(v.id) == now {
-                    "now"
-                } else if Some(v.id) == next {
+                } else if Some(v.id) == next_version_id {
                     "next"
                 } else {
-                    "later"
+                    "planned"
                 };
                 VersionInfo {
                     id: v.id,
@@ -77,8 +74,7 @@ pub async fn list_versions(
                 }
             })
             .collect(),
-        now,
-        next,
+        next: next_version_id,
         backlog_count,
     };
 
@@ -109,8 +105,8 @@ pub async fn create_version(
         name: version.name,
         description: version.description,
         released_at: version.released_at.map(|dt| dt.to_rfc3339()),
-        feature_count: 0,            // New version has no features yet
-        status: "later".to_string(), // New versions start as unreleased
+        feature_count: 0,              // New version has no features yet
+        status: "planned".to_string(), // New versions start as unreleased
     };
 
     let json = serde_json::to_string_pretty(&result)
