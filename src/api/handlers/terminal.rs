@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 use super::ApiError;
 use crate::db::Database;
+use crate::models::ProjectId;
 
 /// Terminal session state for tracking active connections.
 #[derive(Debug)]
@@ -104,13 +105,16 @@ pub async fn ws_terminal_handler(
 ) -> Result<impl IntoResponse, ApiError> {
     // Verify project exists and get working directory
     // Directories are ordered by is_primary DESC, so first one is primary (or first by path)
-    let directories = db.get_project_directories(project_id).await.map_err(|e| {
-        tracing::error!("Failed to get project directories: {}", e);
-        ApiError::from((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to get project".to_string(),
-        ))
-    })?;
+    let directories = db
+        .get_project_directories(ProjectId::from(project_id))
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get project directories: {}", e);
+            ApiError::from((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to get project".to_string(),
+            ))
+        })?;
 
     let working_directory = directories
         .into_iter()
@@ -404,13 +408,16 @@ pub async fn open_native_terminal(
     Json(_input): Json<OpenTerminalRequest>,
 ) -> Result<Json<OpenTerminalResponse>, ApiError> {
     // Get project's primary directory
-    let directories = db.get_project_directories(project_id).await.map_err(|e| {
-        tracing::error!("Failed to get project directories: {}", e);
-        ApiError::from((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to get project".to_string(),
-        ))
-    })?;
+    let directories = db
+        .get_project_directories(ProjectId::from(project_id))
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get project directories: {}", e);
+            ApiError::from((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to get project".to_string(),
+            ))
+        })?;
 
     let working_directory = directories.into_iter().next().ok_or_else(|| {
         ApiError::from((

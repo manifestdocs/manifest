@@ -14,8 +14,8 @@ use crate::db::Database;
 use crate::mcp::{PlanFeaturesResponse, ProposedFeature};
 use crate::models::{
     CommitRef, CreateFeatureInput, CreateHistoryInput, Feature, FeatureDiff, FeatureHistory,
-    FeatureState, FeatureSummary, FeatureTreeNode, HistoryDetails, ListFeaturesQuery,
-    UpdateFeatureInput,
+    FeatureId, FeatureState, FeatureSummary, FeatureTreeNode, HistoryDetails, ListFeaturesQuery,
+    ProjectId, UpdateFeatureInput, VersionId,
 };
 
 use super::{internal_error, ApiError};
@@ -50,7 +50,7 @@ pub async fn list_project_features(
 ) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
     // Use SQL-based pagination for efficiency
     let features = db
-        .get_features_by_project_paginated(project_id, query.limit, query.offset)
+        .get_features_by_project_paginated(project_id.into(), query.limit, query.offset)
         .await
         .map_err(internal_error)?;
     // Always return summaries only - use get_feature for full details
@@ -63,7 +63,7 @@ pub async fn list_root_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<Feature>>, ApiError> {
-    db.get_root_features(project_id)
+    db.get_root_features(project_id.into())
         .await
         .map(Json)
         .map_err(internal_error)
@@ -74,7 +74,7 @@ pub async fn get_feature_tree(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<FeatureTreeNode>>, ApiError> {
-    db.get_feature_tree(project_id)
+    db.get_feature_tree(project_id.into())
         .await
         .map(Json)
         .map_err(internal_error)
@@ -102,7 +102,7 @@ pub async fn get_next_feature(
 ) -> Result<Json<Option<crate::models::FeatureWithContext>>, ApiError> {
     // Get the next workable feature
     let feature = db
-        .get_next_workable_feature(project_id, query.version_id)
+        .get_next_workable_feature(project_id.into(), query.version_id.map(VersionId::from))
         .await
         .map_err(internal_error)?;
 
@@ -124,7 +124,7 @@ pub async fn list_children(
     State(db): State<Database>,
     Path(parent_id): Path<Uuid>,
 ) -> Result<Json<Vec<Feature>>, ApiError> {
-    db.get_children(parent_id)
+    db.get_children(parent_id.into())
         .await
         .map(Json)
         .map_err(internal_error)
@@ -135,7 +135,7 @@ pub async fn get_feature_history(
     State(db): State<Database>,
     Path(feature_id): Path<Uuid>,
 ) -> Result<Json<Vec<FeatureHistory>>, ApiError> {
-    db.get_feature_history(feature_id)
+    db.get_feature_history(feature_id.into())
         .await
         .map(Json)
         .map_err(internal_error)
@@ -165,7 +165,7 @@ pub async fn create_feature_history(
 ) -> Result<(StatusCode, Json<FeatureHistory>), ApiError> {
     // Verify feature exists
     let feature = db
-        .get_feature(feature_id)
+        .get_feature(feature_id.into())
         .await
         .map_err(internal_error)?
         .ok_or(ApiError::from((
@@ -174,7 +174,11 @@ pub async fn create_feature_history(
         )))?;
 
     // Verify it's a leaf feature
-    if !db.is_leaf(feature_id).await.map_err(internal_error)? {
+    if !db
+        .is_leaf(feature_id.into())
+        .await
+        .map_err(internal_error)?
+    {
         return Err(ApiError::from((
             StatusCode::BAD_REQUEST,
             "Cannot create history on a non-leaf feature".to_string(),
@@ -185,8 +189,8 @@ pub async fn create_feature_history(
     // If version_id not provided, database layer defaults to feature's target_version_id
     let history = db
         .create_history_entry(CreateHistoryInput {
-            feature_id,
-            version_id: input.version_id,
+            feature_id: feature_id.into(),
+            version_id: input.version_id.map(VersionId::from),
             details: HistoryDetails {
                 summary: input.summary,
                 commits: input.commits,
@@ -198,7 +202,7 @@ pub async fn create_feature_history(
     // Optionally update feature state to implemented
     if input.mark_implemented && feature.state != FeatureState::Implemented {
         db.update_feature(
-            feature_id,
+            feature_id.into(),
             UpdateFeatureInput {
                 parent_id: None,
                 title: None,
@@ -221,7 +225,7 @@ pub async fn get_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Feature>, ApiError> {
-    db.get_feature(id)
+    db.get_feature(id.into())
         .await
         .map_err(internal_error)?
         .map(Json)
@@ -239,7 +243,7 @@ pub async fn get_feature_with_context(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<crate::models::FeatureWithContext>, ApiError> {
-    db.get_feature_with_context(id)
+    db.get_feature_with_context(id.into())
         .await
         .map_err(internal_error)?
         .map(Json)
@@ -254,7 +258,7 @@ pub async fn get_feature_diff(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<FeatureDiff>, ApiError> {
-    db.get_feature_diff(id)
+    db.get_feature_diff(id.into())
         .await
         .map_err(internal_error)?
         .map(Json)
@@ -270,7 +274,7 @@ pub async fn create_feature(
     Path(project_id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<CreateFeatureInput>,
 ) -> Result<(StatusCode, Json<Feature>), ApiError> {
-    db.create_feature(project_id, input)
+    db.create_feature(project_id.into(), input)
         .await
         .map(|f| (StatusCode::CREATED, Json(f)))
         .map_err(internal_error)
@@ -282,7 +286,7 @@ pub async fn update_feature(
     Path(id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<UpdateFeatureInput>,
 ) -> Result<Json<Feature>, ApiError> {
-    db.update_feature(id, input)
+    db.update_feature(id.into(), input)
         .await
         .map_err(internal_error)?
         .map(Json)
@@ -297,7 +301,7 @@ pub async fn delete_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    if db.delete_feature(id).await.map_err(internal_error)? {
+    if db.delete_feature(id.into()).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::from((
@@ -324,7 +328,7 @@ pub async fn search_features(
     State(db): State<Database>,
     Query(query): Query<SearchFeaturesQuery>,
 ) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
-    db.search_features(&query.q, query.project_id, query.limit)
+    db.search_features(&query.q, query.project_id.map(ProjectId::from), query.limit)
         .await
         .map(Json)
         .map_err(internal_error)
@@ -365,7 +369,7 @@ pub async fn bulk_create_features(
     }
 
     // Verify project exists
-    db.get_project(project_id)
+    db.get_project(project_id.into())
         .await
         .map_err(internal_error)?
         .ok_or(ApiError::from((
@@ -378,7 +382,7 @@ pub async fn bulk_create_features(
     if input.confirm {
         // Verify version exists if one was specified
         if let Some(vid) = input.target_version_id {
-            db.get_version(vid)
+            db.get_version(vid.into())
                 .await
                 .map_err(internal_error)?
                 .ok_or(ApiError::from((
@@ -390,18 +394,19 @@ pub async fn bulk_create_features(
         // Flatten the tree into a list of inputs with pre-generated UUIDs
         // This allows us to use the transactional bulk insert
         let mut feature_inputs = Vec::new();
+        let target_version_id = input.target_version_id.map(VersionId::from);
         for feature in &input.features {
             flatten_feature_tree(
                 None,
                 feature,
-                input.target_version_id,
+                target_version_id,
                 &mut feature_inputs,
                 &mut created_ids,
             );
         }
 
         // Create all features in a single transaction
-        db.create_features_bulk(project_id, feature_inputs)
+        db.create_features_bulk(project_id.into(), feature_inputs)
             .await
             .map_err(internal_error)?;
     }
@@ -416,14 +421,14 @@ pub async fn bulk_create_features(
 /// Flatten a ProposedFeature tree into a list of CreateFeatureInput.
 /// Pre-generates UUIDs so parent-child relationships can be established.
 fn flatten_feature_tree(
-    parent_id: Option<Uuid>,
+    parent_id: Option<FeatureId>,
     proposed: &ProposedFeature,
-    target_version_id: Option<Uuid>,
+    target_version_id: Option<VersionId>,
     inputs: &mut Vec<CreateFeatureInput>,
     created_ids: &mut Vec<Uuid>,
-) -> Uuid {
-    let id = Uuid::new_v4();
-    created_ids.push(id);
+) {
+    let id = FeatureId::new();
+    created_ids.push(id.into());
 
     inputs.push(CreateFeatureInput {
         id: Some(id),
@@ -439,8 +444,6 @@ fn flatten_feature_tree(
     for child in &proposed.children {
         flatten_feature_tree(Some(id), child, target_version_id, inputs, created_ids);
     }
-
-    id
 }
 
 /// Count total features in a proposed feature tree (including nested children).
@@ -456,6 +459,7 @@ pub async fn subscribe_project_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let project_id: ProjectId = project_id.into();
     let rx = db.subscribe();
 
     let stream = BroadcastStream::new(rx).filter_map(move |result| {

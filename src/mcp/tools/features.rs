@@ -15,7 +15,9 @@ use crate::mcp::{
     },
     ManifestClient,
 };
-use crate::models::{CommitRef, CreateFeatureInput, FeatureState, UpdateFeatureInput};
+use crate::models::{
+    CommitRef, CreateFeatureInput, FeatureId, FeatureState, UpdateFeatureInput, VersionId,
+};
 
 use super::client_err;
 
@@ -41,11 +43,11 @@ pub async fn find_features(
         features: features
             .into_iter()
             .map(|f| FeatureSummaryInfo {
-                id: f.id,
+                id: f.id.into(),
                 title: f.title,
                 state: f.state.as_str().to_string(),
                 priority: f.priority,
-                parent_id: f.parent_id,
+                parent_id: f.parent_id.map(Into::into),
             })
             .collect(),
     };
@@ -82,8 +84,8 @@ pub async fn get_feature(
         let history_entries: Vec<HistoryEntryInfo> = history
             .into_iter()
             .map(|h| HistoryEntryInfo {
-                id: h.id,
-                version_id: h.version_id,
+                id: h.id.into(),
+                version_id: h.version_id.map(Into::into),
                 version_name: None,
                 summary: h.details.summary,
                 commits: h
@@ -166,7 +168,7 @@ pub async fn create_feature(
             req.project_id,
             &CreateFeatureInput {
                 id: None,
-                parent_id: req.parent_id,
+                parent_id: req.parent_id.map(FeatureId::from),
                 title: req.title,
                 details: req.details,
                 state: Some(state),
@@ -212,11 +214,11 @@ pub async fn update_feature(
     let target_version_id = if req.clear_version {
         Some(None) // Explicitly clear the version
     } else {
-        req.target_version_id.map(Some) // Set to provided value, or None if not provided
+        req.target_version_id.map(|v| Some(VersionId::from(v))) // Set to provided value, or None if not provided
     };
 
     let input = UpdateFeatureInput {
-        parent_id: req.parent_id,
+        parent_id: req.parent_id.map(FeatureId::from),
         title: req.title,
         details: req.details,
         desired_details: req.desired_details.map(Some),
@@ -352,10 +354,11 @@ async fn start_children_recursive(
         .iter()
         .filter(|child| child.state == FeatureState::Proposed)
         .map(|child| async move {
+            let child_uuid: uuid::Uuid = child.id.into();
             // Update this child to in_progress
             client
                 .update_feature(
-                    child.id,
+                    child_uuid,
                     &UpdateFeatureInput {
                         parent_id: None,
                         title: None,
@@ -371,7 +374,7 @@ async fn start_children_recursive(
 
             // Recursively start this child's children
             let child_context = client
-                .get_feature_with_context(child.id)
+                .get_feature_with_context(child_uuid)
                 .await
                 .map_err(client_err)?;
 
@@ -412,10 +415,11 @@ pub async fn complete_feature(
         .map_err(client_err)?;
 
     let feature_info: FeatureInfo = (&feature).into();
+    let history_id: uuid::Uuid = history.id.into();
     let result = serde_json::json!({
         "feature": feature_info,
         "history_entry": {
-            "id": history.id,
+            "id": history_id,
             "summary": history.details.summary,
             "created_at": history.created_at.to_rfc3339()
         }

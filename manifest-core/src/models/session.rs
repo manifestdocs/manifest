@@ -2,11 +2,11 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::feature::FeatureState;
 use super::history::CommitRef;
 use super::task::CreateTaskInput;
+use super::{FeatureId, SessionId};
 
 /// An active work session on a leaf feature.
 ///
@@ -18,8 +18,8 @@ use super::task::CreateTaskInput;
 /// This enforces work at the appropriate level of granularity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
-    pub id: Uuid,
-    pub feature_id: Uuid,
+    pub id: SessionId,
+    pub feature_id: FeatureId,
     /// High-level objective for this work session.
     pub goal: String,
     pub status: SessionStatus,
@@ -69,7 +69,7 @@ impl FromStr for SessionStatus {
 /// leaf node (no children) and must not have an active session already.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSessionInput {
-    pub feature_id: Uuid,
+    pub feature_id: FeatureId,
     /// High-level objective for this work session.
     pub goal: String,
     /// Initial tasks to create with the session.
@@ -106,7 +106,7 @@ pub struct SessionStatusResponse {
 /// Minimal feature info included in session status responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFeatureSummary {
-    pub id: Uuid,
+    pub id: FeatureId,
     pub title: String,
 }
 

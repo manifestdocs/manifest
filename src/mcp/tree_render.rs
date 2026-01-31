@@ -112,9 +112,8 @@ fn render_node_with_depth(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Feature;
+    use crate::models::{Feature, FeatureId, ProjectId};
     use chrono::Utc;
-    use uuid::Uuid;
 
     fn make_node(
         title: &str,
@@ -123,8 +122,8 @@ mod tests {
     ) -> FeatureTreeNode {
         FeatureTreeNode {
             feature: Feature {
-                id: Uuid::new_v4(),
-                project_id: Uuid::new_v4(),
+                id: FeatureId::new(),
+                project_id: ProjectId::new(),
                 parent_id: None,
                 title: title.to_string(),
                 details: None,

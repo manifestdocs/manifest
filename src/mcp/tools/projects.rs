@@ -13,7 +13,7 @@ use crate::mcp::{
     },
     ManifestClient,
 };
-use crate::models::{AddDirectoryInput, CreateProjectInput};
+use crate::models::{AddDirectoryInput, CreateProjectInput, ProjectId};
 
 use super::client_err;
 
@@ -63,7 +63,7 @@ pub async fn list_projects(
     for p in projects {
         let instructions = client.get_project_instructions(&p).await;
         project_infos.push(ProjectInfo {
-            id: p.id,
+            id: p.id.into(),
             name: p.name,
             description: p.description,
             instructions,
@@ -98,7 +98,10 @@ pub async fn init_project(
 
         // Try as UUID first
         let found = if let Ok(uuid) = Uuid::from_str(project_ref) {
-            projects.iter().find(|p| p.id == uuid).cloned()
+            projects
+                .iter()
+                .find(|p| p.id == ProjectId::from(uuid))
+                .cloned()
         } else {
             // Try exact name match
             projects.iter().find(|p| p.name == *project_ref).cloned()
@@ -146,7 +149,7 @@ pub async fn init_project(
     // Add directory to project
     let directory = client
         .add_project_directory(
-            project.id,
+            project.id.into(),
             &AddDirectoryInput {
                 path: req.directory_path.clone(),
                 git_remote: analysis.git_remote.clone(),
@@ -202,7 +205,7 @@ pub async fn add_project_directory(
         .map_err(client_err)?;
 
     let result = DirectoryInfo {
-        id: directory.id,
+        id: directory.id.into(),
         path: directory.path,
         git_remote: directory.git_remote,
         is_primary: directory.is_primary,

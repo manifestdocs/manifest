@@ -2,7 +2,6 @@ use rmcp::{
     model::{CallToolResult, Content},
     ErrorData as McpError,
 };
-use uuid::Uuid;
 
 use crate::mcp::{
     types::{
@@ -11,7 +10,7 @@ use crate::mcp::{
     },
     ManifestClient,
 };
-use crate::models::{CreateVersionInput, UpdateFeatureInput, UpdateVersionInput};
+use crate::models::{CreateVersionInput, UpdateFeatureInput, UpdateVersionInput, VersionId};
 
 use super::client_err;
 
@@ -32,7 +31,7 @@ pub async fn list_versions(
         .map_err(client_err)?;
 
     // Count features per version and backlog
-    let mut version_feature_counts: std::collections::HashMap<Uuid, u32> =
+    let mut version_feature_counts: std::collections::HashMap<VersionId, u32> =
         std::collections::HashMap::new();
     let mut backlog_count: u32 = 0;
     for feature in &features {
@@ -65,7 +64,7 @@ pub async fn list_versions(
                     "planned"
                 };
                 VersionInfo {
-                    id: v.id,
+                    id: v.id.into(),
                     name: v.name,
                     description: v.description,
                     released_at: v.released_at.map(|dt| dt.to_rfc3339()),
@@ -74,7 +73,7 @@ pub async fn list_versions(
                 }
             })
             .collect(),
-        next: next_version_id,
+        next: next_version_id.map(Into::into),
         backlog_count,
     };
 
@@ -101,7 +100,7 @@ pub async fn create_version(
         .map_err(client_err)?;
 
     let result = VersionInfo {
-        id: version.id,
+        id: version.id.into(),
         name: version.name,
         description: version.description,
         released_at: version.released_at.map(|dt| dt.to_rfc3339()),
@@ -121,9 +120,9 @@ pub async fn set_feature_version(
     client: &ManifestClient,
     req: SetFeatureVersionRequest,
 ) -> Result<CallToolResult, McpError> {
-    // Convert Option<Uuid> to Option<Option<Uuid>> for the update input
+    // Convert Option<Uuid> to Option<Option<VersionId>> for the update input
     // Some(Some(vid)) = set version, Some(None) = explicitly unassign
-    let version_id = Some(req.version_id);
+    let version_id = Some(req.version_id.map(VersionId::from));
 
     let feature = client
         .update_feature(
@@ -177,7 +176,7 @@ pub async fn release_version(
         .map_err(client_err)?;
 
     let result = VersionInfo {
-        id: version.id,
+        id: version.id.into(),
         name: version.name,
         description: version.description,
         released_at: version.released_at.map(|dt| dt.to_rfc3339()),

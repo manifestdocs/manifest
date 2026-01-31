@@ -22,7 +22,7 @@ pub async fn list_project_versions(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<Version>>, ApiError> {
-    db.get_versions_by_project(project_id)
+    db.get_versions_by_project(project_id.into())
         .await
         .map(Json)
         .map_err(internal_error)
@@ -34,7 +34,7 @@ pub async fn create_version(
     Path(project_id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<CreateVersionInput>,
 ) -> Result<(StatusCode, Json<Version>), ApiError> {
-    db.create_version(project_id, input)
+    db.create_version(project_id.into(), input)
         .await
         .map(|v| (StatusCode::CREATED, Json(v)))
         .map_err(internal_error)
@@ -45,7 +45,7 @@ pub async fn get_version(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Version>, ApiError> {
-    db.get_version(id)
+    db.get_version(id.into())
         .await
         .map_err(internal_error)?
         .map(Json)
@@ -63,7 +63,7 @@ pub async fn update_version(
 ) -> Result<Json<Version>, ApiError> {
     // Get existing version to check if this is a release (released_at: None -> Some)
     let existing = db
-        .get_version(id)
+        .get_version(id.into())
         .await
         .map_err(internal_error)?
         .ok_or(ApiError::from((
@@ -74,7 +74,7 @@ pub async fn update_version(
 
     // Update the version
     let updated = db
-        .update_version(id, input)
+        .update_version(id.into(), input)
         .await
         .map_err(internal_error)?
         .ok_or(ApiError::from((
@@ -112,7 +112,7 @@ pub async fn delete_version(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    if db.delete_version(id).await.map_err(internal_error)? {
+    if db.delete_version(id.into()).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::from((

@@ -9,12 +9,13 @@ use std::sync::LazyLock;
 use uuid::Uuid;
 
 use crate::db::Database;
+use crate::models::UserId;
 
 /// Stable synthetic user ID for local mode.
 /// This ensures consistent behavior when no authentication is configured.
-static LOCAL_USER_ID: LazyLock<Uuid> = LazyLock::new(|| {
+static LOCAL_USER_ID: LazyLock<UserId> = LazyLock::new(|| {
     // Use a stable UUID derived from a fixed seed so it's consistent across restarts
-    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()
+    UserId::from(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
 });
 
 /// Shared application state for all handlers.
@@ -46,7 +47,7 @@ impl FromRef<AppState> for Database {
 #[derive(Debug, Clone)]
 pub struct CurrentUser {
     /// User's internal UUID.
-    pub id: Uuid,
+    pub id: UserId,
     /// User's email (synthetic in local mode).
     pub email: String,
     /// Display name.

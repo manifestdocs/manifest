@@ -1,6 +1,7 @@
 mod analysis;
 mod assist;
 mod features;
+mod filesystem;
 mod health;
 mod projects;
 mod settings;
@@ -9,6 +10,7 @@ mod versions;
 pub use analysis::*;
 pub use assist::*;
 pub use features::*;
+pub use filesystem::*;
 pub use health::*;
 pub use projects::*;
 pub use settings::*;

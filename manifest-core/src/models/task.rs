@@ -2,7 +2,8 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use super::{SessionId, TaskId};
 
 /// A unit of work within a session, assigned to an AI agent.
 ///
@@ -14,10 +15,10 @@ use uuid::Uuid;
 /// Manifest tracking granular sub-items.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
-    pub id: Uuid,
-    pub session_id: Uuid,
+    pub id: TaskId,
+    pub session_id: SessionId,
     /// Optional parent task for sub-task relationships.
-    pub parent_id: Option<Uuid>,
+    pub parent_id: Option<TaskId>,
     pub title: String,
     /// Description of what work is included in this task.
     pub scope: String,
@@ -109,7 +110,7 @@ impl FromStr for AgentType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateTaskInput {
     /// Optional parent task for sub-task relationships.
-    pub parent_id: Option<Uuid>,
+    pub parent_id: Option<TaskId>,
     pub title: String,
     /// Description of what work is included in this task.
     pub scope: String,

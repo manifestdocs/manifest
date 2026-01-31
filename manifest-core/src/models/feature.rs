@@ -2,8 +2,9 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use validator::Validate;
+
+use super::{FeatureId, ProjectId, VersionId};
 
 /// Serde helper for Option<Option<T>> - distinguishes "field absent" from "field is null".
 /// - JSON field absent → None (don't update)
@@ -101,7 +102,7 @@ mod tests {
             desired_details: None,
             state: None,
             priority: None,
-            target_version_id: Some(Some(uuid)),
+            target_version_id: Some(Some(VersionId::from(uuid))),
         };
         let json = serde_json::to_string(&input).unwrap();
         assert!(
@@ -125,9 +126,9 @@ mod tests {
 /// until deprecated.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Feature {
-    pub id: Uuid,
-    pub project_id: Uuid,
-    pub parent_id: Option<Uuid>,
+    pub id: FeatureId,
+    pub project_id: ProjectId,
+    pub parent_id: Option<FeatureId>,
     pub title: String,
     /// Feature details including user stories, implementation notes, and technical context.
     /// User stories can be embedded here in "As a... I want... So that..." format.
@@ -141,7 +142,7 @@ pub struct Feature {
     pub priority: i32,
     /// Target version for this feature (for release planning).
     /// Null for implemented features or features not yet assigned to a version.
-    pub target_version_id: Option<Uuid>,
+    pub target_version_id: Option<VersionId>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -192,9 +193,9 @@ pub struct CreateFeatureInput {
     /// Pre-generated feature ID. If not provided, a new UUID will be generated.
     /// Use this for bulk creation where parent-child relationships need known IDs.
     #[serde(default)]
-    pub id: Option<Uuid>,
+    pub id: Option<FeatureId>,
     /// Parent feature ID for nesting. `None` creates a root feature.
-    pub parent_id: Option<Uuid>,
+    pub parent_id: Option<FeatureId>,
     #[validate(length(min = 1, max = 500))]
     pub title: String,
     /// Feature details including user stories, implementation notes, and technical context.
@@ -205,14 +206,14 @@ pub struct CreateFeatureInput {
     /// Priority for ordering within parent. Lower values first. Defaults to 0.
     pub priority: Option<i32>,
     /// Target version for release planning.
-    pub target_version_id: Option<Uuid>,
+    pub target_version_id: Option<VersionId>,
 }
 
 /// Input for updating an existing feature. All fields are optional for partial updates.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct UpdateFeatureInput {
     /// Move feature under a different parent.
-    pub parent_id: Option<Uuid>,
+    pub parent_id: Option<FeatureId>,
     #[validate(length(min = 1, max = 500))]
     pub title: Option<String>,
     #[validate(length(max = 100_000))]
@@ -235,7 +236,7 @@ pub struct UpdateFeatureInput {
         deserialize_with = "double_option::deserialize",
         skip_serializing_if = "Option::is_none"
     )]
-    pub target_version_id: Option<Option<Uuid>>,
+    pub target_version_id: Option<Option<VersionId>>,
 }
 
 /// A feature with its nested children, used for tree responses.
@@ -268,14 +269,14 @@ pub struct FeatureDiff {
 /// Lightweight feature summary without details (used for list operations).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureSummary {
-    pub id: Uuid,
-    pub project_id: Uuid,
-    pub parent_id: Option<Uuid>,
+    pub id: FeatureId,
+    pub project_id: ProjectId,
+    pub parent_id: Option<FeatureId>,
     pub title: String,
     pub state: FeatureState,
     pub priority: i32,
     /// Target version for release planning.
-    pub target_version_id: Option<Uuid>,
+    pub target_version_id: Option<VersionId>,
 }
 
 impl From<Feature> for FeatureSummary {
@@ -296,7 +297,7 @@ impl From<Feature> for FeatureSummary {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ListFeaturesQuery {
     /// Project ID to filter features (required in cloud mode).
-    pub project_id: Option<Uuid>,
+    pub project_id: Option<ProjectId>,
     /// Maximum number of features to return.
     pub limit: Option<u32>,
     /// Number of features to skip for pagination.
@@ -306,7 +307,7 @@ pub struct ListFeaturesQuery {
 /// Lightweight feature summary for context (parent, siblings, children).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureSummaryContext {
-    pub id: Uuid,
+    pub id: FeatureId,
     pub title: String,
     pub state: FeatureState,
 }
@@ -315,7 +316,7 @@ pub struct FeatureSummaryContext {
 /// Includes details for ancestor context that flows down to children.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BreadcrumbItem {
-    pub id: Uuid,
+    pub id: FeatureId,
     pub title: String,
     /// Contextual details from this ancestor (architectural decisions, conventions, constraints).
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::db::Database;
 use crate::models::{
     AddDirectoryInput, CreateProjectInput, Project, ProjectDirectory, ProjectHistoryEntry,
-    ProjectWithDirectories, UpdateProjectInput,
+    ProjectWithDirectories, UpdateProjectInput, VersionId,
 };
 
 use super::{internal_error, ApiError};
@@ -32,7 +32,7 @@ pub async fn get_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<ProjectWithDirectories>, ApiError> {
-    db.get_project_with_directories(id)
+    db.get_project_with_directories(id.into())
         .await
         .map_err(internal_error)?
         .map(Json)
@@ -84,7 +84,7 @@ pub async fn update_project(
     Path(id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<UpdateProjectInput>,
 ) -> Result<Json<Project>, ApiError> {
-    db.update_project(id, input)
+    db.update_project(id.into(), input)
         .await
         .map_err(internal_error)?
         .map(Json)
@@ -99,7 +99,7 @@ pub async fn delete_project(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    if db.delete_project(id).await.map_err(internal_error)? {
+    if db.delete_project(id.into()).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::from((
@@ -113,6 +113,7 @@ pub async fn delete_project(
 // Project History
 // ============================================================
 
+/// Query parameters for filtering project-wide history.
 #[derive(Debug, Deserialize)]
 pub struct ProjectHistoryQuery {
     /// Filter to entries for a specific version (useful for release notes).
@@ -143,8 +144,8 @@ pub async fn get_project_history(
         .map(|dt| dt.with_timezone(&chrono::Utc));
 
     db.get_project_history(
-        project_id,
-        query.version_id,
+        project_id.into(),
+        query.version_id.map(VersionId::from),
         query.limit,
         query.offset,
         since,
@@ -163,7 +164,7 @@ pub async fn list_project_directories(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<ProjectDirectory>>, ApiError> {
-    db.get_project_directories(project_id)
+    db.get_project_directories(project_id.into())
         .await
         .map(Json)
         .map_err(internal_error)
@@ -175,7 +176,7 @@ pub async fn add_project_directory(
     Path(project_id): Path<Uuid>,
     ValidatedJson(input): ValidatedJson<AddDirectoryInput>,
 ) -> Result<(StatusCode, Json<ProjectDirectory>), ApiError> {
-    db.add_project_directory(project_id, input)
+    db.add_project_directory(project_id.into(), input)
         .await
         .map(|d| (StatusCode::CREATED, Json(d)))
         .map_err(internal_error)
@@ -187,7 +188,7 @@ pub async fn remove_project_directory(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     if db
-        .remove_project_directory(id)
+        .remove_project_directory(id.into())
         .await
         .map_err(internal_error)?
     {
@@ -200,8 +201,10 @@ pub async fn remove_project_directory(
     }
 }
 
+/// Query parameters for looking up a project by directory path.
 #[derive(Debug, Deserialize)]
 pub struct GetProjectByDirectoryQuery {
+    /// Absolute file system path to match against registered project directories.
     pub path: String,
 }
 

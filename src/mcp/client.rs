@@ -469,7 +469,7 @@ impl ManifestClient {
     pub async fn get_project_instructions(&self, project: &Project) -> Option<String> {
         if let Some(root_id) = project.root_feature_id {
             // Fetch root feature and use its details
-            if let Ok(feature) = self.get_feature(root_id).await {
+            if let Ok(feature) = self.get_feature(root_id.into()).await {
                 return feature.details;
             }
         }
@@ -500,13 +500,13 @@ impl ManifestClient {
 
         Ok(ProjectContextResponse {
             project: ProjectInfo {
-                id: project_with_dirs.project.id,
+                id: project_with_dirs.project.id.into(),
                 name: project_with_dirs.project.name,
                 description: project_with_dirs.project.description,
                 instructions,
             },
             directory: DirectoryInfo {
-                id: matching_dir.id,
+                id: matching_dir.id.into(),
                 path: matching_dir.path.clone(),
                 git_remote: matching_dir.git_remote.clone(),
                 is_primary: matching_dir.is_primary,

@@ -77,7 +77,10 @@ mod projects {
         #[tokio::test]
         async fn returns_none_for_nonexistent_project() {
             let db = setup().await;
-            let result = db.get_project(Uuid::new_v4()).await.expect("Query failed");
+            let result = db
+                .get_project(ProjectId::new())
+                .await
+                .expect("Query failed");
             assert!(result.is_none());
         }
 
@@ -318,7 +321,10 @@ mod features {
         #[tokio::test]
         async fn returns_none_for_nonexistent_feature() {
             let db = setup().await;
-            let result = db.get_feature(Uuid::new_v4()).await.expect("Query failed");
+            let result = db
+                .get_feature(FeatureId::new())
+                .await
+                .expect("Query failed");
             assert!(result.is_none());
         }
 
@@ -420,7 +426,7 @@ mod features {
             };
 
             let result = db
-                .update_feature(Uuid::new_v4(), input)
+                .update_feature(FeatureId::new(), input)
                 .await
                 .expect("Query failed");
             assert!(result.is_none());
@@ -515,7 +521,7 @@ mod features {
         async fn returns_false_for_nonexistent_feature() {
             let db = setup().await;
             let result = db
-                .delete_feature(Uuid::new_v4())
+                .delete_feature(FeatureId::new())
                 .await
                 .expect("Query failed");
             assert!(!result);
@@ -631,7 +637,7 @@ mod features {
         async fn returns_none_for_nonexistent_feature() {
             let db = setup().await;
             let result = db
-                .get_feature_diff(Uuid::new_v4())
+                .get_feature_diff(FeatureId::new())
                 .await
                 .expect("Query failed");
             assert!(result.is_none());
@@ -2051,7 +2057,7 @@ mod feature_history {
 mod version_guard_rails {
     use super::*;
 
-    async fn create_released_version(db: &Database, project_id: Uuid) -> Version {
+    async fn create_released_version(db: &Database, project_id: ProjectId) -> Version {
         let version = db
             .create_version(
                 project_id,

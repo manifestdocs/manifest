@@ -23,32 +23,47 @@ use crate::db::Database;
 // Request types (matches web client's ChatRequest)
 // ============================================================
 
+/// Chat completions request from the web client.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatRequest {
+    /// Conversation messages including system, user, and assistant turns.
     pub messages: Vec<ChatMessage>,
+    /// Optional feature context to scope the conversation.
     #[allow(dead_code)]
     pub context: Option<ChatContext>,
+    /// Model to use (e.g., "sonnet", "opus"). Defaults to "sonnet".
     pub model: Option<String>,
+    /// Whether to stream the response. Currently always true.
     #[allow(dead_code)]
     pub stream: Option<bool>,
+    /// Session ID for multi-turn conversations. Omit for first turn.
     pub session_id: Option<String>,
 }
 
+/// A single message in a chat conversation.
 #[derive(Debug, Deserialize)]
 pub struct ChatMessage {
+    /// Message role: "system", "user", or "assistant".
     pub role: String,
+    /// The message text content.
     pub content: String,
 }
 
+/// Optional context scoping a chat conversation to a specific feature.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct ChatContext {
+    /// Feature being discussed, if any.
     pub feature_id: Option<String>,
+    /// Title of the feature for display.
     pub feature_title: Option<String>,
+    /// Full feature details/specification.
     pub feature_details: Option<String>,
+    /// Project the feature belongs to.
     pub project_id: Option<String>,
+    /// Whether the feature is a leaf node (can have sessions).
     pub is_leaf: Option<bool>,
 }
 

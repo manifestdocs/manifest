@@ -637,13 +637,13 @@ pub struct FeatureHint {
 impl From<&Feature> for FeatureInfo {
     fn from(f: &Feature) -> Self {
         Self {
-            id: f.id,
+            id: f.id.into(),
             title: f.title.clone(),
             details: f.details.clone(),
             desired_details: f.desired_details.clone(),
             state: f.state.as_str().to_string(),
             priority: f.priority,
-            target_version_id: f.target_version_id,
+            target_version_id: f.target_version_id.map(Into::into),
         }
     }
 }
@@ -651,7 +651,7 @@ impl From<&Feature> for FeatureInfo {
 impl From<&FeatureSummaryContext> for FeatureSummaryContextInfo {
     fn from(f: &FeatureSummaryContext) -> Self {
         Self {
-            id: f.id,
+            id: f.id.into(),
             title: f.title.clone(),
             state: f.state.as_str().to_string(),
         }
@@ -661,7 +661,7 @@ impl From<&FeatureSummaryContext> for FeatureSummaryContextInfo {
 impl From<&BreadcrumbItem> for BreadcrumbItemInfo {
     fn from(b: &BreadcrumbItem) -> Self {
         Self {
-            id: b.id,
+            id: b.id.into(),
             title: b.title.clone(),
             details: b.details.clone(),
         }
@@ -671,13 +671,13 @@ impl From<&BreadcrumbItem> for BreadcrumbItemInfo {
 impl From<&FeatureWithContext> for FeatureInfoWithContext {
     fn from(ctx: &FeatureWithContext) -> Self {
         Self {
-            id: ctx.feature.id,
+            id: ctx.feature.id.into(),
             title: ctx.feature.title.clone(),
             details: ctx.feature.details.clone(),
             desired_details: ctx.feature.desired_details.clone(),
             state: ctx.feature.state.as_str().to_string(),
             priority: ctx.feature.priority,
-            target_version_id: ctx.feature.target_version_id,
+            target_version_id: ctx.feature.target_version_id.map(Into::into),
             parent: ctx.parent.as_ref().map(Into::into),
             siblings: ctx.siblings.iter().map(Into::into).collect(),
             children: ctx.children.iter().map(Into::into).collect(),
