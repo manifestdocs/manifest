@@ -1,6 +1,8 @@
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use manifest_core::config::ServerConfig;
 
+use crate::api::config::PathRestrictions;
+
 /// GET /api/v1/settings — returns current server configuration.
 pub async fn get_settings() -> impl IntoResponse {
     let config = ServerConfig::load().unwrap_or_default();
@@ -33,6 +35,30 @@ pub async fn update_settings(
             }
         })
         .unwrap_or(None);
+
+    // Validate database path is not in a restricted directory
+    if let Some(ref path) = new_db_path {
+        let p = std::path::Path::new(path);
+        // Validate the parent directory (the file itself may not exist yet)
+        let validate_path = if p.exists() {
+            p.to_path_buf()
+        } else if let Some(parent) = p.parent() {
+            if parent.exists() {
+                parent.to_path_buf()
+            } else {
+                p.to_path_buf()
+            }
+        } else {
+            p.to_path_buf()
+        };
+        let restrictions = PathRestrictions::from_env();
+        if let Err(e) = restrictions.validate(&validate_path) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Invalid database path: {e}"),
+            ));
+        }
+    }
 
     let mut config = ServerConfig::load().unwrap_or_default();
     let old_path = config.database_path.clone();

@@ -33,6 +33,16 @@ pub async fn generate_feature_tree(
         ));
     }
 
+    // Validate path is not in a restricted directory
+    let restrictions = crate::api::config::PathRestrictions::from_env();
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if let Err(e) = restrictions.validate(&canonical) {
+        return Err(McpError::invalid_params(
+            format!("Path restricted: {e}"),
+            None,
+        ));
+    }
+
     // Check if it's a git repository
     if !path.join(".git").exists() {
         return Err(McpError::invalid_params(
