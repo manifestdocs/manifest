@@ -275,9 +275,11 @@ pub async fn start_feature(
         .map_err(client_err)?;
 
     // Spec gate: analyze specification completeness
+    let is_root = feature_with_context.feature.parent_id.is_none();
     let spec_status = super::spec::analyze_spec(
         feature_with_context.feature.details.as_deref(),
         !feature_with_context.children.is_empty(),
+        is_root,
     );
 
     if spec_status.should_block() {
@@ -322,6 +324,7 @@ pub async fn start_feature(
     let mut result_json =
         serde_json::to_value(&result).map_err(|e| McpError::internal_error(e.to_string(), None))?;
     result_json["spec_status"] = serde_json::json!(spec_status.summary());
+    result_json["feature_tier"] = serde_json::json!(spec_status.tier.as_str());
 
     let json = serde_json::to_string_pretty(&result_json)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -437,15 +440,18 @@ pub async fn get_next_feature(
 
     let json = match result {
         Some(feature_ctx) => {
+            let is_root = feature_ctx.feature.parent_id.is_none();
             let spec_status = super::spec::analyze_spec(
                 feature_ctx.feature.details.as_deref(),
                 !feature_ctx.children.is_empty(),
+                is_root,
             );
 
             let info: FeatureInfoWithContext = (&feature_ctx).into();
             let mut result_json = serde_json::to_value(&info)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             result_json["spec_status"] = serde_json::json!(spec_status.summary());
+            result_json["feature_tier"] = serde_json::json!(spec_status.tier.as_str());
             if let Some(guidance) = spec_status.guidance() {
                 result_json["spec_guidance"] = serde_json::json!(guidance);
             }

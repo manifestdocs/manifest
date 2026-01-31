@@ -23,7 +23,7 @@ pub struct CompleteFeatureRequest {
     #[schemars(description = "The UUID of the feature to complete")]
     pub feature_id: Uuid,
     #[schemars(
-        description = "Summary of work done (git-style format). First line is a concise headline shown in list views. Add details after a blank line if needed (bullet points, technical notes). Example:\n\nImplemented OAuth login flow\n\n- Added Google OAuth provider\n- Created session management\n- Updated user model with provider field"
+        description = "Summary of work done. First line is a concise headline shown in list views. After a blank line, include:\n- What was implemented\n- Key decisions made during implementation and why\n- Any deviations from the original spec and reasoning\n- Context for the next person working in this area\n\nExample:\n\nImplemented OAuth login flow\n\n- Added Google OAuth provider using passport.js\n- Chose session-based auth over JWT (simpler for SSR app)\n- Deviated from spec: skipped GitHub OAuth (rate limits too restrictive)\n- Note: refresh token rotation not yet implemented"
     )]
     pub summary: String,
     #[schemars(description = "Git commits created during this work")]
@@ -92,7 +92,7 @@ pub struct UpdateFeatureRequest {
     pub title: Option<String>,
 
     #[schemars(
-        description = "New details/specification for the feature. Use this to update living documentation as you learn more during implementation."
+        description = "New details for the feature. Content depends on the feature's role in the hierarchy: project-level features hold decisions and conventions; feature sets hold shared architectural context; leaf features hold user stories and acceptance criteria. Use this to update living documentation as you learn more during implementation."
     )]
     #[serde(default)]
     pub details: Option<String>,
@@ -179,7 +179,7 @@ pub struct CreateFeatureRequest {
     #[schemars(description = "Short title for the feature (e.g., 'User Authentication')")]
     pub title: String,
     #[schemars(
-        description = "Optional feature details including user stories, implementation notes, and technical context"
+        description = "Feature details. For leaf features: user story and acceptance criteria. For parent features: shared context (architecture, patterns, constraints) that flows to children."
     )]
     #[serde(default)]
     pub details: Option<String>,
@@ -209,7 +209,7 @@ pub struct PlanFeaturesRequest {
     #[serde(default)]
     pub target_version_id: Option<Uuid>,
     #[schemars(
-        description = "The proposed feature tree. Apply the user story test before proposing: 'As a [user], I can [feature]...'"
+        description = "The proposed feature tree. Parent features should have shared context in details (architecture, patterns, constraints for children). Leaf features should have specifications (story, acceptance criteria). Apply the user story test to leaves: 'As a [user], I can [feature]...'"
     )]
     pub features: Vec<ProposedFeature>,
     #[schemars(
@@ -406,9 +406,11 @@ pub struct VersionInfo {
 pub struct ProposedFeature {
     /// Short capability name (2-5 words). What users can DO.
     pub title: String,
-    /// Feature details: user story, technical notes, constraints, acceptance criteria.
-    /// For parent features, use details to provide shared context that flows to children.
-    /// User stories can be in "As a \[user\], I can \[capability\] so that \[benefit\]" format.
+    /// Feature details — content depends on position in hierarchy.
+    /// For parent features (those with children): shared architectural context, patterns,
+    /// constraints that apply to all children.
+    /// For leaf features (no children): user story, acceptance criteria (Given/When/Then),
+    /// and constraints. Parents provide context; leaves provide specifications.
     #[serde(default)]
     pub details: Option<String>,
     /// Priority for ordering. Lower values = implement first.

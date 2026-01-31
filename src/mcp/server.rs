@@ -124,7 +124,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Decompose a PRD or vision into a feature tree. REQUIRES target_version_id - call list_versions first or create_version if none exist. With confirm=false, returns a proposal. With confirm=true, creates the features."
+        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have user stories and acceptance criteria. REQUIRES target_version_id - call list_versions first or create_version if none exist. With confirm=false, returns a proposal. With confirm=true, creates the features."
     )]
     async fn plan(
         &self,
@@ -134,7 +134,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Create a single feature. Name by capability (e.g., 'Router') not task. Use parent_id for grouping. Use `plan` for bulk creation."
+        description = "SETUP: Create a single feature. Name by capability (e.g., 'Router') not task. Use parent_id for grouping. For leaf features, add a user story in details. For parent features, add shared context that applies to all children. Use `plan` for bulk creation."
     )]
     async fn create_feature(
         &self,
@@ -158,7 +158,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Set mark_implemented=false to record progress without changing state. Call only after verification."
+        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits. Your summary becomes living documentation — include decisions made, deviations from spec, and context for future agents. Sets state to 'implemented'. Set mark_implemented=false to record progress without changing state. Call only after verification."
     )]
     async fn complete_feature(
         &self,
@@ -296,8 +296,27 @@ Features describe system capabilities, not work items to close. A feature titled
 - Good: "As a developer, I can match dynamic URL paths so that I can build REST APIs" → Router
 - Bad: "As a user, I can have data persistence" → quality attribute, not capability
 
-SPECIFICATION:
-Features scheduled for a version should have a structured spec. The expected format in the details field:
+CONTENT GUIDANCE BY TIER:
+Features form a three-tier hierarchy. Write different content at each level:
+
+PROJECT LEVEL (root feature — the top-level feature with no parent):
+This is the project's source of truth for all agents. Write content that applies across every feature:
+- Tech stack and key dependencies (language, framework, database)
+- Architectural decisions and rationale ("We use X because Y")
+- Coding conventions and patterns ("Error handling uses Result<T,E>, never exceptions")
+- Security boundaries and constraints ("Never commit secrets", "All endpoints require auth")
+- Testing expectations ("TDD with property-based tests for core logic")
+- Domain terminology ("User means authenticated account, not session")
+
+FEATURE SET LEVEL (parent feature — has children):
+Shared context for a group of related capabilities. Write content that applies to all children:
+- Architectural context for this area ("Auth uses JWT with refresh tokens")
+- Shared patterns and interfaces ("All handlers implement the RequestHandler trait")
+- Cross-cutting constraints ("All endpoints in this group require admin role")
+- Design decisions specific to this scope ("We chose OAuth over SAML because...")
+
+LEAF FEATURE LEVEL (no children — the implementable unit):
+The specification an agent implements against. Use this structure:
 
 ## Story
 As a [user], I can [capability] so that [benefit].
@@ -308,14 +327,15 @@ As a [user], I can [capability] so that [benefit].
 ## Constraints
 - [Technical constraints, performance requirements, security considerations]
 
+## Notes
+- [Implementation hints, related features, edge cases]
+
 start_feature will block if a leaf feature has no details at all — write a spec first using update_feature.
 If details exist but lack acceptance criteria, you will receive a warning.
 
 To write a spec:
 - Use update_feature with `details` to set the spec directly
 - Use update_feature with `desired_details` to propose a spec for human review (they see a diff in the web UI)
-
-Parent features (those with children) are exempt — they carry architectural context and shared conventions, not user stories.
 
 Specs are living documentation. During implementation, update details to reflect what was actually built. After implementation, the spec describes what EXISTS, not what was planned. This is why Manifest features are better than Jira tickets — the spec survives as system documentation.
 
