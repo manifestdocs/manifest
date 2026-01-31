@@ -2372,4 +2372,23 @@ mod data_resilience {
             "Expected error for corrupted datetime, got Ok"
         );
     }
+
+    #[tokio::test]
+    async fn foreign_key_enforcement_rejects_orphan_feature() {
+        let db = setup().await;
+        let fake_project_id = Uuid::new_v4();
+
+        // Inserting a feature with a non-existent project_id should fail
+        // because PRAGMA foreign_keys = ON is set pool-wide
+        let result = sqlx::query(
+            "INSERT INTO features (id, project_id, title, state, priority, created_at, updated_at)
+             VALUES (?1, ?2, 'Orphan', 'proposed', 0, datetime('now'), datetime('now'))",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(fake_project_id.to_string())
+        .execute(db.pool())
+        .await;
+
+        assert!(result.is_err(), "Expected FK violation error, got Ok");
+    }
 }

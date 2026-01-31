@@ -3,8 +3,9 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use sqlx::any::AnyPoolOptions;
 use sqlx::any::AnyRow;
-use sqlx::{AnyPool, Row};
+use sqlx::{AnyPool, Executor, Row};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -157,7 +158,21 @@ impl Database {
         sqlx::any::install_default_drivers();
 
         let dialect = DbDialect::from_url(url);
-        let pool = AnyPool::connect(url).await?;
+
+        let mut pool_opts = AnyPoolOptions::new();
+
+        // For SQLite, set PRAGMAs on every new connection in the pool
+        if dialect == DbDialect::Sqlite {
+            pool_opts = pool_opts.after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    conn.execute("PRAGMA journal_mode = WAL").await?;
+                    conn.execute("PRAGMA foreign_keys = ON").await?;
+                    Ok(())
+                })
+            });
+        }
+
+        let pool = pool_opts.connect(url).await?;
 
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
 
@@ -181,21 +196,7 @@ impl Database {
         std::fs::create_dir_all(parent)?;
 
         let url = format!("sqlite:{}?mode=rwc", path.display());
-        let db = Self::connect(&url).await?;
-
-        // Enable WAL mode and foreign keys for SQLite
-        if url.starts_with("sqlite:") {
-            sqlx::query("PRAGMA journal_mode = WAL")
-                .execute(&db.pool)
-                .await
-                .ok();
-            sqlx::query("PRAGMA foreign_keys = ON")
-                .execute(&db.pool)
-                .await
-                .ok();
-        }
-
-        Ok(db)
+        Self::connect(&url).await
     }
 
     /// Open the default SQLite database location.
@@ -252,12 +253,7 @@ impl Database {
         // This ensures all connections in the pool share the same database
         let unique_id = uuid::Uuid::new_v4();
         let url = format!("sqlite:file:memdb_{}?mode=memory&cache=shared", unique_id);
-        let db = Self::connect(&url).await?;
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&db.pool)
-            .await
-            .ok();
-        Ok(db)
+        Self::connect(&url).await
     }
 
     /// Subscribe to feature change events.
