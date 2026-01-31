@@ -1,8 +1,8 @@
 //! Spec analysis for MCP tool responses.
 //!
-//! Pure analysis — no I/O, no database. Checks the `details` markdown field
-//! for structured sections (story, acceptance criteria, constraints).
-//! Provides tier-aware guidance for project, feature set, and leaf features.
+//! Pure analysis — no I/O, no database. Checks the `details` field for
+//! non-trivial content. Provides tier-aware guidance for project, feature set,
+//! and leaf features.
 
 /// The tier of a feature in the hierarchy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,7 +11,7 @@ pub enum FeatureTier {
     Project,
     /// Parent feature with children — shared architectural context.
     FeatureSet,
-    /// Leaf feature — implementable unit with story, AC, constraints.
+    /// Leaf feature — implementable unit with concise specification.
     Leaf,
 }
 
@@ -28,9 +28,7 @@ impl FeatureTier {
 /// Status of a feature's specification completeness.
 pub struct SpecStatus {
     pub has_details: bool,
-    pub has_story: bool,
-    pub has_acceptance_criteria: bool,
-    pub has_constraints: bool,
+    pub word_count: usize,
     pub tier: FeatureTier,
 }
 
@@ -40,9 +38,9 @@ impl SpecStatus {
         self.tier == FeatureTier::Leaf && !self.has_details
     }
 
-    /// True when details exist but acceptance criteria are missing (leaf only).
+    /// True when details exist but are very sparse (leaf only).
     pub fn has_warnings(&self) -> bool {
-        self.tier == FeatureTier::Leaf && self.has_details && !self.has_acceptance_criteria
+        self.tier == FeatureTier::Leaf && self.has_details && self.word_count < 20
     }
 
     /// One-line status string for MCP responses.
@@ -64,15 +62,10 @@ impl SpecStatus {
             }
             FeatureTier::Leaf => {
                 if !self.has_details {
-                    return "Spec: no details".to_string();
+                    "Spec: no details".to_string()
+                } else {
+                    format!("Spec: has details (~{} words)", self.word_count)
                 }
-                let check = |ok: bool| if ok { "✓" } else { "✗" };
-                format!(
-                    "Spec: story {}, acceptance criteria {}, constraints {}",
-                    check(self.has_story),
-                    check(self.has_acceptance_criteria),
-                    check(self.has_constraints),
-                )
             }
         }
     }
@@ -107,21 +100,18 @@ impl SpecStatus {
                 if !self.has_details {
                     return Some(
                         "This feature has no specification. Use update_feature to add details before starting.\n\n\
-                         Expected format:\n\n\
-                         ## Story\n\
-                         As a [user], I can [capability] so that [benefit].\n\n\
-                         ## Acceptance Criteria\n\
-                         - Given [precondition], when [action], then [expected outcome]\n\n\
-                         ## Constraints\n\
-                         - [Technical constraints, performance requirements, security considerations]"
+                         Write a concise specification (~50-150 words):\n\
+                         - Goal: what the feature does and why\n\
+                         - Constraints: performance, security, compatibility\n\
+                         - Key interfaces: function signatures with types (if applicable)\n\
+                         - Examples: 1-3 concrete examples of expected behavior (if helpful)"
                             .to_string(),
                     );
                 }
-                if !self.has_acceptance_criteria {
+                if self.word_count < 20 {
                     return Some(
-                        "Specification exists but is missing acceptance criteria. \
-                         Consider adding a '## Acceptance Criteria' section or \
-                         Given/When/Then scenarios before implementation."
+                        "Specification exists but is brief. Consider adding key constraints \
+                         or examples before implementing."
                             .to_string(),
                     );
                 }
@@ -131,24 +121,14 @@ impl SpecStatus {
     }
 }
 
-/// Analyze a feature's details for structured spec sections.
+/// Analyze a feature's details for specification completeness.
 ///
-/// Detection heuristics (case-insensitive):
-/// - **Story**: contains `"as a "` or has `## Story` header
-/// - **Acceptance Criteria**: has `## Acceptance Criteria` header, OR contains
-///   all three of `given`/`when`/`then`
-/// - **Constraints**: has `## Constraints` header
+/// Uses word count as the primary heuristic: specs under 20 words are
+/// considered sparse and trigger a warning for leaf features.
 pub fn analyze_spec(details: Option<&str>, has_children: bool, is_root: bool) -> SpecStatus {
     let text = details.unwrap_or("").trim();
     let has_details = !text.is_empty();
-    let lower = text.to_lowercase();
-
-    let has_story = lower.contains("as a ") || lower.contains("## story");
-
-    let has_acceptance_criteria = lower.contains("## acceptance criteria")
-        || (lower.contains("given") && lower.contains("when") && lower.contains("then"));
-
-    let has_constraints = lower.contains("## constraints");
+    let word_count = text.split_whitespace().count();
 
     let tier = if is_root {
         FeatureTier::Project
@@ -160,9 +140,7 @@ pub fn analyze_spec(details: Option<&str>, has_children: bool, is_root: bool) ->
 
     SpecStatus {
         has_details,
-        has_story,
-        has_acceptance_criteria,
-        has_constraints,
+        word_count,
         tier,
     }
 }
@@ -171,7 +149,7 @@ pub fn analyze_spec(details: Option<&str>, has_children: bool, is_root: bool) ->
 mod tests {
     use super::*;
 
-    // --- Leaf feature tests (existing behavior) ---
+    // --- Leaf feature tests ---
 
     #[test]
     fn empty_details_should_block() {
@@ -188,47 +166,34 @@ mod tests {
     }
 
     #[test]
-    fn details_without_ac_warns() {
-        let status = analyze_spec(Some("As a user, I can do things."), false, false);
+    fn sparse_details_warns() {
+        let status = analyze_spec(Some("Handle login."), false, false);
         assert!(!status.should_block());
         assert!(status.has_warnings());
-        assert!(status.guidance().is_some());
+        assert!(status.guidance().unwrap().contains("brief"));
     }
 
     #[test]
-    fn full_spec_no_block_no_warnings() {
-        let spec = "\
-## Story
-As a developer, I can index code so that I can navigate quickly.
-
-## Acceptance Criteria
-- Given a Rust project, when I run `index`, then all symbols are indexed
-
-## Constraints
-- Must complete in under 5 seconds for 100k LOC";
-
+    fn sufficient_details_no_warnings() {
+        let spec = "Accepts an email and password, validates credentials against the database, \
+                     returns a JWT on success. Must rate-limit to 5 attempts per minute. \
+                     Returns 401 with generic error on failure.";
         let status = analyze_spec(Some(spec), false, false);
         assert!(!status.should_block());
         assert!(!status.has_warnings());
         assert!(status.guidance().is_none());
-        assert!(status.has_story);
-        assert!(status.has_acceptance_criteria);
-        assert!(status.has_constraints);
     }
 
     #[test]
-    fn gherkin_style_detects_ac() {
-        let spec = "As a user, I can log in.\n\nGiven I am on the login page\nWhen I enter credentials\nThen I am authenticated";
-        let status = analyze_spec(Some(spec), false, false);
-        assert!(status.has_acceptance_criteria);
-        assert!(!status.has_warnings());
-    }
-
-    #[test]
-    fn summary_shows_checks() {
-        let status = analyze_spec(Some("As a user, I can do things."), false, false);
-        assert!(status.summary().contains("story ✓"));
-        assert!(status.summary().contains("acceptance criteria ✗"));
+    fn summary_with_details_shows_word_count() {
+        let status = analyze_spec(
+            Some("Handle user login with email and password"),
+            false,
+            false,
+        );
+        let summary = status.summary();
+        assert!(summary.starts_with("Spec: has details"));
+        assert!(summary.contains("words"));
     }
 
     #[test]
@@ -238,13 +203,11 @@ As a developer, I can index code so that I can navigate quickly.
     }
 
     #[test]
-    fn case_insensitive_headers() {
-        let spec =
-            "## STORY\nAs A developer\n## ACCEPTANCE CRITERIA\n- test\n## CONSTRAINTS\n- none";
-        let status = analyze_spec(Some(spec), false, false);
-        assert!(status.has_story);
-        assert!(status.has_acceptance_criteria);
-        assert!(status.has_constraints);
+    fn no_details_guidance_mentions_goal_and_constraints() {
+        let status = analyze_spec(None, false, false);
+        let guidance = status.guidance().unwrap();
+        assert!(guidance.contains("Goal"));
+        assert!(guidance.contains("Constraints"));
     }
 
     // --- Feature set tests ---
@@ -341,7 +304,6 @@ As a developer, I can index code so that I can navigate quickly.
 
     #[test]
     fn root_without_children_still_project() {
-        // Edge case: root feature with no children yet
         let status = analyze_spec(None, false, true);
         assert_eq!(status.tier, FeatureTier::Project);
     }

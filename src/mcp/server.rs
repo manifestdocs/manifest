@@ -124,7 +124,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have user stories and acceptance criteria. REQUIRES target_version_id - call list_versions first or create_version if none exist. With confirm=false, returns a proposal. With confirm=true, creates the features."
+        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have concise specifications. REQUIRES target_version_id - call list_versions first or create_version if none exist. With confirm=false, returns a proposal. With confirm=true, creates the features."
     )]
     async fn plan(
         &self,
@@ -134,7 +134,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Create a single feature. Name by capability (e.g., 'Router') not task. Use parent_id for grouping. For leaf features, add a user story in details. For parent features, add shared context that applies to all children. Use `plan` for bulk creation."
+        description = "SETUP: Create a single feature. Name by capability (e.g., 'Router') not task. Use parent_id for grouping. For leaf features, add a concise specification in details. For parent features, add shared context that applies to all children. Use `plan` for bulk creation."
     )]
     async fn create_feature(
         &self,
@@ -316,28 +316,24 @@ Shared context for a group of related capabilities. Write content that applies t
 - Design decisions specific to this scope ("We chose OAuth over SAML because...")
 
 LEAF FEATURE LEVEL (no children — the implementable unit):
-The specification an agent implements against. Use this structure:
+Concise specification that an agent implements against:
+- Goal statement: what the feature does and why (~1-2 sentences)
+- Key constraints: performance, security, compatibility requirements
+- For interface-heavy features: function signatures with types
+- For complex logic: structural hints (main sequence, branching, loops)
+- 1-3 concrete examples of expected behavior when helpful
 
-## Story
-As a [user], I can [capability] so that [benefit].
-
-## Acceptance Criteria
-- Given [precondition], when [action], then [expected outcome]
-
-## Constraints
-- [Technical constraints, performance requirements, security considerations]
-
-## Notes
-- [Implementation hints, related features, edge cases]
+Keep specifications under 150 words. Concise specs outperform elaborate ones.
+Avoid Gherkin syntax (Given/When/Then) — plain language works as well or better.
 
 start_feature will block if a leaf feature has no details at all — write a spec first using update_feature.
-If details exist but lack acceptance criteria, you will receive a warning.
+If details are very sparse (<20 words), you will receive a warning.
 
 To write a spec:
 - Use update_feature with `details` to set the spec directly
 - Use update_feature with `desired_details` to propose a spec for human review (they see a diff in the web UI)
 
-Specs are living documentation. During implementation, update details to reflect what was actually built. After implementation, the spec describes what EXISTS, not what was planned. This is why Manifest features are better than Jira tickets — the spec survives as system documentation.
+Specifications should be concise (~50-150 words). After implementation, update details to reflect what was built.
 
 WORKFLOW:
 
@@ -351,7 +347,7 @@ WORKFLOW:
    - ALWAYS call start_feature when asked to implement, work on, or build a feature
    - start_feature checks specification completeness and transitions proposed → in_progress
    - If the feature has no details, start_feature will refuse — write a spec first using update_feature
-   - If details lack acceptance criteria, you will see a warning — add AC before or during implementation
+   - If details are very sparse, you will see a warning — flesh out the spec before implementing
    - IMPORTANT: The feature's target version is locked during implementation. Do not call set_feature_version while working on a feature.
 
 3. BUILD — implement against the spec:

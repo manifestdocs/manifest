@@ -92,7 +92,7 @@ pub struct UpdateFeatureRequest {
     pub title: Option<String>,
 
     #[schemars(
-        description = "New details for the feature. Content depends on the feature's role in the hierarchy: project-level features hold decisions and conventions; feature sets hold shared architectural context; leaf features hold user stories and acceptance criteria. Use this to update living documentation as you learn more during implementation."
+        description = "New details for the feature. Content depends on the feature's role in the hierarchy: project-level features hold decisions and conventions; feature sets hold shared architectural context; leaf features hold concise specifications — goal, constraints, key interfaces. Use this to update living documentation as you learn more during implementation."
     )]
     #[serde(default)]
     pub details: Option<String>,
@@ -179,7 +179,7 @@ pub struct CreateFeatureRequest {
     #[schemars(description = "Short title for the feature (e.g., 'User Authentication')")]
     pub title: String,
     #[schemars(
-        description = "Feature details. For leaf features: user story and acceptance criteria. For parent features: shared context (architecture, patterns, constraints) that flows to children."
+        description = "Feature details. For leaf features: concise specification — goal, constraints, key interfaces. For parent features: shared context (architecture, patterns, constraints) that flows to children."
     )]
     #[serde(default)]
     pub details: Option<String>,
@@ -209,7 +209,7 @@ pub struct PlanFeaturesRequest {
     #[serde(default)]
     pub target_version_id: Option<Uuid>,
     #[schemars(
-        description = "The proposed feature tree. Parent features should have shared context in details (architecture, patterns, constraints for children). Leaf features should have specifications (story, acceptance criteria). Apply the user story test to leaves: 'As a [user], I can [feature]...'"
+        description = "The proposed feature tree. Parent features should have shared context in details (architecture, patterns, constraints for children). Leaf features should have concise specifications (~50-150 words) — goal, constraints, key interfaces."
     )]
     pub features: Vec<ProposedFeature>,
     #[schemars(
@@ -409,8 +409,8 @@ pub struct ProposedFeature {
     /// Feature details — content depends on position in hierarchy.
     /// For parent features (those with children): shared architectural context, patterns,
     /// constraints that apply to all children.
-    /// For leaf features (no children): user story, acceptance criteria (Given/When/Then),
-    /// and constraints. Parents provide context; leaves provide specifications.
+    /// For leaf features (no children): concise specification (~50-150 words) — goal,
+    /// constraints, key interfaces. Parents provide context; leaves provide specifications.
     #[serde(default)]
     pub details: Option<String>,
     /// Priority for ordering. Lower values = implement first.
