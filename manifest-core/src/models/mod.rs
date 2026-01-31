@@ -24,6 +24,11 @@ mod task;
 mod user;
 mod version;
 
+/// Error returned when parsing a string into a domain enum fails.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("invalid value: '{0}'")]
+pub struct ParseEnumError(pub String);
+
 pub use feature::*;
 pub use history::*;
 pub use project::*;

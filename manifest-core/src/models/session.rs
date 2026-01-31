@@ -51,14 +51,14 @@ impl SessionStatus {
 }
 
 impl FromStr for SessionStatus {
-    type Err = ();
+    type Err = super::ParseEnumError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "active" => Ok(Self::Active),
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
-            _ => Err(()),
+            _ => Err(super::ParseEnumError(s.to_string())),
         }
     }
 }

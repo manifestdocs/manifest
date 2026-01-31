@@ -172,7 +172,7 @@ impl FeatureState {
 }
 
 impl FromStr for FeatureState {
-    type Err = ();
+    type Err = super::ParseEnumError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -180,7 +180,7 @@ impl FromStr for FeatureState {
             "in_progress" => Ok(Self::InProgress),
             "implemented" => Ok(Self::Implemented),
             "archived" => Ok(Self::Archived),
-            _ => Err(()),
+            _ => Err(super::ParseEnumError(s.to_string())),
         }
     }
 }

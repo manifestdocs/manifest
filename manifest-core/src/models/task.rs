@@ -57,7 +57,7 @@ impl TaskStatus {
 }
 
 impl FromStr for TaskStatus {
-    type Err = ();
+    type Err = super::ParseEnumError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -65,7 +65,7 @@ impl FromStr for TaskStatus {
             "running" => Ok(Self::Running),
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
-            _ => Err(()),
+            _ => Err(super::ParseEnumError(s.to_string())),
         }
     }
 }
@@ -93,14 +93,14 @@ impl AgentType {
 }
 
 impl FromStr for AgentType {
-    type Err = ();
+    type Err = super::ParseEnumError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "claude" => Ok(Self::Claude),
             "gemini" => Ok(Self::Gemini),
             "codex" => Ok(Self::Codex),
-            _ => Err(()),
+            _ => Err(super::ParseEnumError(s.to_string())),
         }
     }
 }

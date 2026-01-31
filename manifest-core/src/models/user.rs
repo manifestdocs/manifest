@@ -1,5 +1,7 @@
 //! User and OAuth identity models for authentication.
 
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -71,18 +73,21 @@ pub enum MembershipRole {
     Owner,
 }
 
-impl MembershipRole {
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for MembershipRole {
+    type Err = super::ParseEnumError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "viewer" => Some(Self::Viewer),
-            "member" => Some(Self::Member),
-            "admin" => Some(Self::Admin),
-            "owner" => Some(Self::Owner),
-            _ => None,
+            "viewer" => Ok(Self::Viewer),
+            "member" => Ok(Self::Member),
+            "admin" => Ok(Self::Admin),
+            "owner" => Ok(Self::Owner),
+            _ => Err(super::ParseEnumError(s.to_string())),
         }
     }
+}
 
+impl MembershipRole {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Viewer => "viewer",

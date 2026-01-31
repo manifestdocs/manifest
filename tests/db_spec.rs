@@ -2321,3 +2321,55 @@ mod version_guard_rails {
         assert_eq!(updated.target_version_id, Some(version.id));
     }
 }
+
+// ============================================================
+// Data Resilience
+// ============================================================
+
+mod data_resilience {
+    use super::*;
+
+    #[tokio::test]
+    async fn returns_error_for_corrupted_uuid_in_feature() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+
+        // Insert a feature with a corrupt UUID via raw SQL
+        sqlx::query(
+            "INSERT INTO features (id, project_id, title, state, priority, created_at, updated_at)
+             VALUES ('not-a-uuid', ?1, 'Corrupt Feature', 'proposed', 0, datetime('now'), datetime('now'))",
+        )
+        .bind(project.id.to_string())
+        .execute(db.pool())
+        .await
+        .expect("Raw insert should succeed");
+
+        // Reading all features should return an error, not panic
+        let result = db.get_features_by_project(project.id).await;
+        assert!(result.is_err(), "Expected error for corrupted UUID, got Ok");
+    }
+
+    #[tokio::test]
+    async fn returns_error_for_corrupted_datetime_in_feature() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+
+        // Insert a feature with a corrupt datetime via raw SQL
+        sqlx::query(
+            "INSERT INTO features (id, project_id, title, state, priority, created_at, updated_at)
+             VALUES (?1, ?2, 'Corrupt Dates', 'proposed', 0, 'not-a-date', 'also-not-a-date')",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(project.id.to_string())
+        .execute(db.pool())
+        .await
+        .expect("Raw insert should succeed");
+
+        // Reading should return an error, not panic
+        let result = db.get_features_by_project(project.id).await;
+        assert!(
+            result.is_err(),
+            "Expected error for corrupted datetime, got Ok"
+        );
+    }
+}
