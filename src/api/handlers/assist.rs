@@ -65,6 +65,10 @@ pub struct ChatContext {
     pub project_id: Option<String>,
     /// Whether the feature is a leaf node (can have sessions).
     pub is_leaf: Option<bool>,
+    /// Pre-formatted version summary for plan view context.
+    pub version_summary: Option<String>,
+    /// Whether the chat is in the version/plan view.
+    pub is_version_view: Option<bool>,
 }
 
 // ============================================================
@@ -141,6 +145,15 @@ pub async fn chat_completions(
                 system_prompt.push_str("\n\n");
             }
             system_prompt.push_str(&context_block);
+        }
+
+        // Inject version context for plan view
+        let version_block = build_version_context(ctx);
+        if !version_block.is_empty() {
+            if !system_prompt.is_empty() {
+                system_prompt.push_str("\n\n");
+            }
+            system_prompt.push_str(&version_block);
         }
     }
 
@@ -480,6 +493,38 @@ fn build_feature_anchor(ctx: &ChatContext) -> String {
     parts.push(
         "Stay focused on this feature. Use the IDs above for any Manifest tool calls. \
          Only switch context if the user explicitly asks about a different feature or project."
+            .to_string(),
+    );
+
+    parts.join("\n")
+}
+
+/// Build a system prompt fragment from version context in plan view.
+///
+/// Gives the AI awareness of the release planning context so it can provide
+/// version-aware analysis and recommendations.
+fn build_version_context(ctx: &ChatContext) -> String {
+    if ctx.is_version_view != Some(true) {
+        return String::new();
+    }
+
+    let mut parts = Vec::new();
+    parts.push("## Release Planning Context\n".to_string());
+    parts.push("The user is in the Plan view, managing versions and release planning.".to_string());
+
+    if let Some(ref summary) = ctx.version_summary {
+        if !summary.is_empty() {
+            parts.push(format!("\nVersion status:\n{}", summary));
+        }
+    }
+
+    if let Some(ref pid) = ctx.project_id {
+        parts.push(format!("\nProject ID: `{}`", pid));
+    }
+
+    parts.push(
+        "\nUse Manifest MCP tools (list_versions, find_features, set_feature_version) \
+         to gather data and make changes. Present analysis before acting."
             .to_string(),
     );
 

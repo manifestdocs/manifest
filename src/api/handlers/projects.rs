@@ -72,10 +72,12 @@ pub async fn create_project(
     State(db): State<Database>,
     ValidatedJson(input): ValidatedJson<CreateProjectInput>,
 ) -> Result<(StatusCode, Json<Project>), ApiError> {
-    db.create_project(input)
-        .await
-        .map(|p| (StatusCode::CREATED, Json(p)))
-        .map_err(internal_error)
+    let project = db.create_project(input).await.map_err(internal_error)?;
+
+    // Bootstrap initial versions so agents and the web UI have versions to target
+    let _ = db.ensure_minimum_versions(project.id, 4).await;
+
+    Ok((StatusCode::CREATED, Json(project)))
 }
 
 /// Update an existing project.
