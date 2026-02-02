@@ -14,10 +14,14 @@ pub async fn get_settings() -> impl IntoResponse {
     // Resolve the effective database path for display
     let resolved = resolve_effective_db_path(&config);
 
+    // Resolve default_agent: None → "claude"
+    let default_agent = config.default_agent.as_deref().unwrap_or("claude");
+
     Json(serde_json::json!({
         "database_path": config.database_path,
         "database_path_resolved": resolved,
         "config_file": config_file,
+        "default_agent": default_agent,
     }))
 }
 
@@ -36,6 +40,33 @@ pub async fn update_settings(
             }
         })
         .unwrap_or(None);
+
+    // Validate default_agent if provided
+    const ALLOWED_AGENTS: &[&str] = &["claude", "gemini", "copilot"];
+    let new_agent = if let Some(agent_val) = body.get("default_agent") {
+        if agent_val.is_null() {
+            Some(None) // Reset to default
+        } else if let Some(agent) = agent_val.as_str() {
+            if !ALLOWED_AGENTS.contains(&agent) {
+                return Err(ApiError::from((
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "Invalid default_agent '{}'. Allowed values: {}",
+                        agent,
+                        ALLOWED_AGENTS.join(", ")
+                    ),
+                )));
+            }
+            Some(Some(agent.to_string()))
+        } else {
+            return Err(ApiError::from((
+                StatusCode::BAD_REQUEST,
+                "default_agent must be a string".to_string(),
+            )));
+        }
+    } else {
+        None // Not provided in request, leave unchanged
+    };
 
     // Validate database path is not in a restricted directory
     if let Some(ref path) = new_db_path {
@@ -73,6 +104,11 @@ pub async fn update_settings(
         false
     };
 
+    // Update default_agent if provided in the request
+    if let Some(agent) = new_agent {
+        config.default_agent = agent;
+    }
+
     config.save().map_err(|e| {
         tracing::error!("Failed to save config: {:?}", e);
         ApiError::from((
@@ -87,10 +123,13 @@ pub async fn update_settings(
 
     let resolved = resolve_effective_db_path(&config);
 
+    let default_agent = config.default_agent.as_deref().unwrap_or("claude");
+
     let response = serde_json::json!({
         "database_path": config.database_path,
         "database_path_resolved": resolved,
         "config_file": config_file,
+        "default_agent": default_agent,
         "restart_required": path_changed,
     });
 

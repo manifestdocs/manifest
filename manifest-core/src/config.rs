@@ -13,6 +13,10 @@ pub struct ServerConfig {
     /// Override path for the SQLite database file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub database_path: Option<String>,
+
+    /// CLI agent to use for chat (claude, gemini, copilot). Defaults to "claude".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_agent: Option<String>,
 }
 
 impl ServerConfig {
@@ -54,21 +58,40 @@ mod tests {
     fn default_config_has_no_database_path() {
         let config = ServerConfig::default();
         assert!(config.database_path.is_none());
+        assert!(config.default_agent.is_none());
     }
 
     #[test]
     fn roundtrip_serialization() {
         let config = ServerConfig {
             database_path: Some("/tmp/test.db".into()),
+            default_agent: Some("claude".into()),
         };
         let json = serde_json::to_string(&config).unwrap();
         let parsed: ServerConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.database_path, Some("/tmp/test.db".into()));
+        assert_eq!(parsed.default_agent, Some("claude".into()));
+    }
+
+    #[test]
+    fn roundtrip_with_default_agent() {
+        let config = ServerConfig {
+            database_path: None,
+            default_agent: Some("gemini".into()),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        // database_path should be omitted, default_agent present
+        assert!(!json.contains("database_path"));
+        assert!(json.contains("gemini"));
+        let parsed: ServerConfig = serde_json::from_str(&json).unwrap();
+        assert!(parsed.database_path.is_none());
+        assert_eq!(parsed.default_agent, Some("gemini".into()));
     }
 
     #[test]
     fn empty_json_deserializes_to_defaults() {
         let config: ServerConfig = serde_json::from_str("{}").unwrap();
         assert!(config.database_path.is_none());
+        assert!(config.default_agent.is_none());
     }
 }
