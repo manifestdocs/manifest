@@ -285,6 +285,8 @@ Every project has a feature tree—a hierarchy of capabilities the system provid
 ● implemented — complete and documented
 ✗ archived — soft-deleted, kept for historical reference
 
+IMPORTANT: Parent feature states are managed independently by the user. Do NOT suggest changing a parent's state based on its children's states. A feature set marked ◇ proposed with all ● implemented children is normal — the parent may be proposed because the user plans to add more children, or simply hasn't updated it yet. Only change parent states when the user explicitly asks.
+
 DISCOVERING FEATURES:
 - find_features — find features by project, state, or search term
 - get_feature — get full details and history for a specific feature
@@ -407,7 +409,7 @@ Tool results are collapsed JSON. Always summarize for humans:
 - find_features: "Found N features" + brief list
 - get_feature: "Feature: Title (state)" + key spec details + breadcrumb context if relevant
 - get_next_feature: "Next up: Title" or "No workable features"
-- render_feature_tree: Show the ASCII tree directly
+- render_feature_tree: Show the ASCII tree directly. Do NOT suggest changing parent feature states based on children
 - init_project: "Initialized 'Name' with N detected modules"
 - generate_feature_tree: "Extracted N features from codebase" + summary
 - plan: "Proposed N features" (confirm=false) or "Created N features" (confirm=true)
