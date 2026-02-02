@@ -49,9 +49,8 @@ impl PathRestrictions {
         }
 
         // Canonicalize to resolve symlinks and ..
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| ConfigError::Invalid(format!("Cannot resolve path: {}", e)))?;
+        // Fall back to the raw path if it doesn't exist yet (e.g., during directory browsing)
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
         // Check denied paths
         for denied in &self.denied_paths {

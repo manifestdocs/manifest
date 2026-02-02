@@ -1,6 +1,6 @@
 use axum::{extract::Query, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Component, Path};
 
 use super::ApiError;
 
@@ -154,6 +154,68 @@ pub async fn browse_filesystem(
         parent,
         entries,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MkdirRequest {
+    /// Absolute path of the directory to create.
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MkdirResponse {
+    /// The absolute path that was created.
+    pub path: String,
+}
+
+/// Create a directory, including intermediate directories.
+///
+/// Safety guarantees:
+/// - Path must be absolute
+/// - Path must pass security restrictions (no /etc, /var, etc.)
+/// - Path must not contain `..` components
+/// - Idempotent: succeeds if the directory already exists
+pub async fn create_directory(
+    Json(body): Json<MkdirRequest>,
+) -> Result<Json<MkdirResponse>, ApiError> {
+    let target = Path::new(&body.path);
+
+    // Must be absolute
+    if !target.is_absolute() {
+        return Err(ApiError::from((
+            StatusCode::BAD_REQUEST,
+            "Path must be absolute".to_string(),
+        )));
+    }
+
+    // Reject path traversal components
+    for component in target.components() {
+        if matches!(component, Component::ParentDir) {
+            return Err(ApiError::from((
+                StatusCode::BAD_REQUEST,
+                "Path must not contain '..' components".to_string(),
+            )));
+        }
+    }
+
+    // Validate the target path against security restrictions
+    let restrictions = crate::api::config::PathRestrictions::from_env();
+    if let Err(e) = restrictions.validate(target) {
+        return Err(ApiError::from((
+            StatusCode::FORBIDDEN,
+            format!("Access denied: {}", e),
+        )));
+    }
+
+    // Create directory and all intermediate parents (idempotent)
+    std::fs::create_dir_all(target).map_err(|e| {
+        ApiError::from((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create directory: {}", e),
+        ))
+    })?;
+
+    Ok(Json(MkdirResponse { path: body.path }))
 }
 
 /// Check if a directory contains any visible subdirectories.
