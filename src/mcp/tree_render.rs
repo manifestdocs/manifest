@@ -7,6 +7,7 @@ const IN_PROGRESS: char = '○';
 const IMPLEMENTED: char = '●';
 const ARCHIVED: char = '✗';
 const PROJECT_ROOT: char = '▣'; // Square for project root feature
+const FEATURE_SET: char = '▪'; // Small square for feature sets (has children)
 
 /// Get the status symbol for a feature state.
 fn state_symbol(state: FeatureState) -> char {
@@ -56,6 +57,8 @@ fn render_node_with_depth(
 ) {
     let symbol = if node.is_root {
         PROJECT_ROOT // Project root feature gets special symbol
+    } else if !node.children.is_empty() {
+        FEATURE_SET // Feature sets show group symbol, not state
     } else {
         state_symbol(node.feature.state)
     };
@@ -160,7 +163,7 @@ mod tests {
         let output = render_tree_with_depth(&tree, 0);
         assert_eq!(
             output,
-            "◇ Authentication\n├── ● Password Login\n└── ○ OAuth\n"
+            "▪ Authentication\n├── ● Password Login\n└── ○ OAuth\n"
         );
     }
 
@@ -183,7 +186,7 @@ mod tests {
             ],
         )];
         let output = render_tree_with_depth(&tree, 0);
-        let expected = "◇ Authentication\n├── ● Password Login\n├── ○ OAuth Integration\n│   ├── ◇ Google Provider\n│   └── ◇ GitHub Provider\n└── ✗ Legacy Basic Auth\n";
+        let expected = "▪ Authentication\n├── ● Password Login\n├── ▪ OAuth Integration\n│   ├── ◇ Google Provider\n│   └── ◇ GitHub Provider\n└── ✗ Legacy Basic Auth\n";
         assert_eq!(output, expected);
     }
 
@@ -207,7 +210,7 @@ mod tests {
         // max_depth=1 should show root + first level, but truncate second level
         let output = render_tree_with_depth(&tree, 1);
         let expected =
-            "◇ Authentication\n├── ● Password Login\n└── ○ OAuth Integration\n    └── (...)\n";
+            "▪ Authentication\n├── ● Password Login\n└── ▪ OAuth Integration\n    └── (...)\n";
         assert_eq!(output, expected);
     }
 
@@ -224,7 +227,7 @@ mod tests {
         )];
         // max_depth=0 should show all levels
         let output = render_tree_with_depth(&tree, 0);
-        let expected = "◇ Root\n└── ● Child\n    └── ◇ Grandchild\n";
+        let expected = "▪ Root\n└── ▪ Child\n    └── ◇ Grandchild\n";
         assert_eq!(output, expected);
     }
 }

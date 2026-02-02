@@ -90,7 +90,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (◇ proposed, ○ in_progress, ● implemented, ✗ archived)."
+        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (▣ project root, ▪ feature set, ◇ proposed, ○ in_progress, ● implemented, ✗ archived)."
     )]
     async fn render_feature_tree(
         &self,
@@ -280,6 +280,7 @@ Manifest provides context: what the system does, what has been built, what needs
 THE FEATURE TREE:
 Every project has a feature tree—a hierarchy of capabilities the system provides. The tree structure groups related features (e.g., Auth > Login > OAuth). Parent features (feature sets) can have details too—use them for shared context like architectural decisions, conventions, or constraints that apply to all children. Each feature has a state:
 
+▪ feature set — parent with children (state not shown; managed by user)
 ◇ proposed — in the backlog, not yet started
 ○ in_progress — actively being worked on
 ● implemented — complete and documented
