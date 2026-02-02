@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use manifest_core::config::ServerConfig;
 
@@ -143,6 +145,200 @@ pub async fn update_settings(
     }
 
     Ok(Json(response))
+}
+
+/// GET /api/v1/settings/mcp-status — check if the default agent has MCP configured.
+pub async fn check_mcp_status() -> impl IntoResponse {
+    let config = ServerConfig::load().unwrap_or_default();
+    let agent = config.default_agent.as_deref().unwrap_or("claude");
+
+    let (configured, config_file, setup_hint) = match agent {
+        "claude" => check_claude_mcp_config(),
+        _ => (
+            false,
+            String::new(),
+            format!("MCP config check not supported for agent '{agent}'"),
+        ),
+    };
+
+    Json(serde_json::json!({
+        "agent": agent,
+        "configured": configured,
+        "config_file": config_file,
+        "setup_hint": setup_hint,
+    }))
+}
+
+/// POST /api/v1/settings/configure-mcp — auto-configure MCP for the default agent.
+pub async fn configure_mcp() -> Result<impl IntoResponse, ApiError> {
+    let config = ServerConfig::load().unwrap_or_default();
+    let agent = config.default_agent.as_deref().unwrap_or("claude");
+
+    match agent {
+        "claude" => configure_claude_mcp(),
+        _ => Err(ApiError::from((
+            StatusCode::BAD_REQUEST,
+            format!("Auto-configure not supported for agent '{agent}'"),
+        ))),
+    }
+}
+
+/// Check if Claude Code has a manifest MCP server configured.
+///
+/// Looks in two locations:
+/// 1. `~/.claude/config.json` (global MCP config)
+/// 2. `~/.claude/plugins/marketplace/*/plugins/manifest/.claude-plugin/plugin.json`
+fn check_claude_mcp_config() -> (bool, String, String) {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => {
+            return (
+                false,
+                String::new(),
+                "Could not determine home directory".into(),
+            )
+        }
+    };
+
+    let config_path = home.join(".claude").join("config.json");
+    let config_path_str = config_path.display().to_string();
+
+    // Check global config
+    if has_manifest_mcp_entry(&config_path) {
+        return (true, config_path_str, String::new());
+    }
+
+    // Check marketplace plugin directories
+    let plugins_dir = home.join(".claude").join("plugins").join("marketplace");
+    if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
+        for entry in entries.flatten() {
+            let plugin_json = entry
+                .path()
+                .join("plugins")
+                .join("manifest")
+                .join(".claude-plugin")
+                .join("plugin.json");
+            if has_manifest_mcp_entry(&plugin_json) {
+                return (true, plugin_json.display().to_string(), String::new());
+            }
+        }
+    }
+
+    let hint = format!(
+        "Add manifest MCP server to {}. Click Configure to set this up automatically.",
+        config_path_str
+    );
+    (false, config_path_str, hint)
+}
+
+/// Check if a JSON config file contains a manifest MCP server entry.
+fn has_manifest_mcp_entry(path: &PathBuf) -> bool {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(j) => j,
+        Err(_) => return false,
+    };
+
+    let servers = match json.get("mcpServers").and_then(|s| s.as_object()) {
+        Some(s) => s,
+        None => return false,
+    };
+
+    for (_name, server) in servers {
+        // HTTP transport: url contains localhost:17010/mcp
+        if let Some(url) = server.get("url").and_then(|u| u.as_str()) {
+            if url.contains("localhost:17010/mcp") {
+                return true;
+            }
+        }
+
+        // Stdio transport (legacy): command is "manifest" and args contains "mcp"
+        if let Some(cmd) = server.get("command").and_then(|c| c.as_str()) {
+            if cmd == "manifest" || cmd.ends_with("/manifest") {
+                if let Some(args) = server.get("args").and_then(|a| a.as_array()) {
+                    if args.iter().any(|a| a.as_str() == Some("mcp")) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Write the manifest MCP entry into Claude Code's global config.
+fn configure_claude_mcp() -> Result<impl IntoResponse, ApiError> {
+    let home = dirs::home_dir().ok_or_else(|| {
+        ApiError::from((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Could not determine home directory".into(),
+        ))
+    })?;
+
+    let config_path = home.join(".claude").join("config.json");
+
+    // Read existing config or start with empty object
+    let mut json: serde_json::Value = if config_path.exists() {
+        let contents = std::fs::read_to_string(&config_path).map_err(|e| {
+            ApiError::from((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to read {}: {e}", config_path.display()),
+            ))
+        })?;
+        serde_json::from_str(&contents).map_err(|e| {
+            ApiError::from((
+                StatusCode::BAD_REQUEST,
+                format!("Invalid JSON in {}: {e}", config_path.display()),
+            ))
+        })?
+    } else {
+        serde_json::json!({})
+    };
+
+    // Ensure mcpServers object exists
+    if json.get("mcpServers").is_none() {
+        json["mcpServers"] = serde_json::json!({});
+    }
+
+    // Add/update the manifest entry
+    json["mcpServers"]["manifest"] = serde_json::json!({
+        "type": "http",
+        "url": "http://localhost:17010/mcp"
+    });
+
+    // Ensure parent directory exists
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            ApiError::from((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create directory: {e}"),
+            ))
+        })?;
+    }
+
+    // Write back
+    let contents = serde_json::to_string_pretty(&json).map_err(|e| {
+        ApiError::from((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize config: {e}"),
+        ))
+    })?;
+    std::fs::write(&config_path, contents).map_err(|e| {
+        ApiError::from((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to write {}: {e}", config_path.display()),
+        ))
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "config_file": config_path.display().to_string(),
+    })))
 }
 
 /// Resolve the effective database path given the current config and environment.

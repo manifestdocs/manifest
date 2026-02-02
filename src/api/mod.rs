@@ -17,6 +17,7 @@ use tokio::sync::watch;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, set_header::SetResponseHeaderLayer, trace::TraceLayer};
 
+#[cfg(feature = "embed-web")]
 use crate::assets::static_handler;
 use crate::db::Database;
 use crate::mcp;
@@ -118,9 +119,13 @@ fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
         // Default: allow localhost origins only
         let localhost_origins = [
             "http://localhost:5173",  // Vite dev
+            "http://localhost:1420",  // Tauri dev
             "http://localhost:17010", // Self
             "http://127.0.0.1:5173",
+            "http://127.0.0.1:1420",
             "http://127.0.0.1:17010",
+            "tauri://localhost",       // Tauri webview (macOS)
+            "https://tauri.localhost", // Tauri webview (Windows/Linux)
         ];
         let origins: Vec<_> = localhost_origins
             .iter()
@@ -152,10 +157,13 @@ pub fn create_router_with_shutdown(db: Database, _shutdown_rx: watch::Receiver<b
 /// Create the API router with custom security configuration.
 pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router {
     // Public endpoints (unauthenticated)
-    let public_router = Router::new().route("/health", get(handlers::health)).route(
-        "/projects/{id}/subscribe",
-        get(handlers::subscribe_project_features),
-    );
+    let public_router = Router::new()
+        .route("/health", get(handlers::health))
+        .route("/version", get(handlers::version))
+        .route(
+            "/projects/{id}/subscribe",
+            get(handlers::subscribe_project_features),
+        );
 
     // Protected API routes
     let protected_api = Router::new()
@@ -187,6 +195,10 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
             post(handlers::add_project_directory),
         )
         .route("/projects/{id}/history", get(handlers::get_project_history))
+        .route(
+            "/projects/{id}/focus",
+            get(handlers::get_project_focus).put(handlers::set_project_focus),
+        )
         // Versions
         .route(
             "/projects/{id}/versions",
@@ -244,7 +256,9 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         .route(
             "/settings",
             get(handlers::get_settings).put(handlers::update_settings),
-        );
+        )
+        .route("/settings/mcp-status", get(handlers::check_mcp_status))
+        .route("/settings/configure-mcp", post(handlers::configure_mcp));
 
     // Apply auth middleware to protected routes if API key is configured
     let protected_api = if config.api_key.is_some() {
@@ -275,11 +289,15 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
     // MCP router is stateless (uses its own HTTP client internally)
     let mcp_router = mcp::streamable_http_router();
 
-    Router::new()
+    let router = Router::new()
         .nest("/api/v1", api)
         .with_state(db)
-        .nest("/mcp", mcp_router)
-        .fallback(static_handler)
+        .nest("/mcp", mcp_router);
+
+    #[cfg(feature = "embed-web")]
+    let router = router.fallback(static_handler);
+
+    router
         .layer(DefaultBodyLimit::max(2_000_000)) // 2MB
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
