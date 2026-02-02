@@ -208,6 +208,7 @@ pub async fn create_feature_history(
                 title: None,
                 details: None,
                 desired_details: None,
+                details_summary: None,
                 state: Some(FeatureState::Implemented),
                 priority: None,
                 target_version_id: None,

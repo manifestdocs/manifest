@@ -16,7 +16,7 @@ impl Database {
         let rows = match (limit, offset) {
             (Some(lim), Some(off)) => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features ORDER BY priority, title LIMIT $1 OFFSET $2",
                 )
                 .bind(lim as i64)
@@ -26,7 +26,7 @@ impl Database {
             }
             (Some(lim), None) => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features ORDER BY priority, title LIMIT $1",
                 )
                 .bind(lim as i64)
@@ -35,7 +35,7 @@ impl Database {
             }
             (None, Some(off)) => {
                 let sql = format!(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features ORDER BY priority, title {} OFFSET $1",
                     self.dialect.unlimited_offset_sql()
                 );
@@ -46,7 +46,7 @@ impl Database {
             }
             (None, None) => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features ORDER BY priority, title",
                 )
                 .fetch_all(&self.pool)
@@ -72,7 +72,7 @@ impl Database {
         let rows = match (limit, offset) {
             (Some(lim), Some(off)) => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2 OFFSET $3",
                 )
                 .bind(project_id.to_string())
@@ -83,7 +83,7 @@ impl Database {
             }
             (Some(lim), None) => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2",
                 )
                 .bind(project_id.to_string())
@@ -93,7 +93,7 @@ impl Database {
             }
             (None, Some(off)) => {
                 let sql = format!(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features WHERE project_id = $1 ORDER BY priority, title {} OFFSET $2",
                     self.dialect.unlimited_offset_sql()
                 );
@@ -105,7 +105,7 @@ impl Database {
             }
             (None, None) => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features WHERE project_id = $1 ORDER BY priority, title",
                 )
                 .bind(project_id.to_string())
@@ -126,7 +126,7 @@ impl Database {
     /// Get a single feature by ID.
     pub async fn get_feature(&self, id: FeatureId) -> Result<Option<Feature>> {
         let row = sqlx::query(
-            "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+            "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
              FROM features WHERE id = $1",
         )
         .bind(id.to_string())
@@ -227,6 +227,7 @@ impl Database {
             title: input.title,
             details: input.details,
             desired_details: None,
+            details_summary: None,
             state,
             priority,
             target_version_id,
@@ -312,6 +313,7 @@ impl Database {
                 title: input.title,
                 details: input.details,
                 desired_details: None,
+                details_summary: None,
                 state,
                 priority,
                 target_version_id,
@@ -347,6 +349,7 @@ impl Database {
         // AI agents may accidentally set state alongside desired_details.
         let had_desired_details = existing.desired_details.is_some();
         let desired_details = input.desired_details.unwrap_or(existing.desired_details);
+        let details_summary = input.details_summary.unwrap_or(existing.details_summary);
         let is_proposing_changes = desired_details.is_some() && !had_desired_details;
         let state = if is_proposing_changes {
             existing.state
@@ -380,12 +383,13 @@ impl Database {
         }
 
         sqlx::query(
-            "UPDATE features SET parent_id = $1, title = $2, details = $3, desired_details = $4, state = $5, priority = $6, target_version_id = $7, updated_at = $8 WHERE id = $9",
+            "UPDATE features SET parent_id = $1, title = $2, details = $3, desired_details = $4, details_summary = $5, state = $6, priority = $7, target_version_id = $8, updated_at = $9 WHERE id = $10",
         )
         .bind(parent_id.map(|u| u.to_string()))
         .bind(&title)
         .bind(&details)
         .bind(&desired_details)
+        .bind(&details_summary)
         .bind(state.as_str())
         .bind(priority)
         .bind(target_version_id.map(|u| u.to_string()))
@@ -405,6 +409,7 @@ impl Database {
             title,
             details,
             desired_details,
+            details_summary,
             state,
             priority,
             target_version_id,
@@ -474,7 +479,7 @@ impl Database {
         let rows = match project.and_then(|p| p.root_feature_id) {
             Some(root_id) => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features WHERE project_id = $1 AND parent_id = $2 ORDER BY priority, title",
                 )
                 .bind(project_id.to_string())
@@ -484,7 +489,7 @@ impl Database {
             }
             None => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                      FROM features WHERE project_id = $1 AND parent_id IS NULL ORDER BY priority, title",
                 )
                 .bind(project_id.to_string())
@@ -499,7 +504,7 @@ impl Database {
     /// Get the direct children of a feature.
     pub async fn get_children(&self, parent_id: FeatureId) -> Result<Vec<Feature>> {
         let rows = sqlx::query(
-            "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+            "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
              FROM features WHERE parent_id = $1 ORDER BY priority, title",
         )
         .bind(parent_id.to_string())
@@ -687,15 +692,22 @@ impl Database {
             .collect::<Result<Vec<_>>>()?;
 
         // Get breadcrumb using recursive CTE (includes details for ancestor context)
+        // For root features (parent_id IS NULL), return details_summary if available to avoid
+        // sending full project instructions on every breadcrumb response.
         let breadcrumb_rows = sqlx::query(
             "WITH RECURSIVE ancestors AS (
-                SELECT id, parent_id, title, details, 0 as depth FROM features WHERE id = $1
+                SELECT id, parent_id, title, details, details_summary, 0 as depth FROM features WHERE id = $1
                 UNION ALL
-                SELECT f.id, f.parent_id, f.title, f.details, a.depth + 1
+                SELECT f.id, f.parent_id, f.title, f.details, f.details_summary, a.depth + 1
                 FROM features f
                 INNER JOIN ancestors a ON f.id = a.parent_id
             )
-            SELECT id, title, details FROM ancestors ORDER BY depth DESC",
+            SELECT id, title,
+                CASE WHEN parent_id IS NULL AND details_summary IS NOT NULL
+                     THEN details_summary
+                     ELSE details
+                END as details
+            FROM ancestors ORDER BY depth DESC",
         )
         .bind(id.to_string())
         .fetch_all(&self.pool)
@@ -729,7 +741,7 @@ impl Database {
     ) -> Result<Option<Feature>> {
         let row = if let Some(vid) = version_id {
             sqlx::query(
-                "SELECT id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at
+                "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
                  FROM features
                  WHERE project_id = $1
                    AND target_version_id = $2
@@ -748,7 +760,7 @@ impl Database {
                     WHERE project_id = $1 AND released_at IS NULL
                     ORDER BY created_at ASC LIMIT 1
                 )
-                SELECT f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.state, f.priority, f.target_version_id, f.created_at, f.updated_at
+                SELECT f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.target_version_id, f.created_at, f.updated_at
                 FROM features f
                 LEFT JOIN next_version nv ON f.target_version_id = nv.id
                 WHERE f.project_id = $1

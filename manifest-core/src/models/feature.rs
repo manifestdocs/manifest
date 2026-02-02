@@ -27,6 +27,7 @@ mod double_option {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn test_update_feature_input_deserialize_with_version() {
@@ -59,6 +60,7 @@ mod tests {
             title: Some("Test".to_string()),
             details: None,
             desired_details: None,
+            details_summary: None,
             state: Some(FeatureState::InProgress),
             priority: None,
             target_version_id: None,
@@ -79,6 +81,7 @@ mod tests {
             title: None,
             details: None,
             desired_details: None,
+            details_summary: None,
             state: None,
             priority: None,
             target_version_id: Some(None),
@@ -100,6 +103,7 @@ mod tests {
             title: None,
             details: None,
             desired_details: None,
+            details_summary: None,
             state: None,
             priority: None,
             target_version_id: Some(Some(VersionId::from(uuid))),
@@ -136,6 +140,9 @@ pub struct Feature {
     /// Desired details for pending changes. When non-null, indicates edits awaiting implementation.
     /// Session completion promotes `desired_details` → `details` when `mark_implemented=true`.
     pub desired_details: Option<String>,
+    /// Short summary of details (~200 words) for root features.
+    /// Used in breadcrumbs and project listings to avoid sending full instructions on every request.
+    pub details_summary: Option<String>,
     pub state: FeatureState,
     /// Priority for ordering features within a parent. Lower values appear first.
     /// Use this to indicate implementation order without polluting feature titles.
@@ -226,6 +233,14 @@ pub struct UpdateFeatureInput {
         skip_serializing_if = "Option::is_none"
     )]
     pub desired_details: Option<Option<String>>,
+    /// Short summary of details for root features (~200 words).
+    /// Uses double Option to distinguish "field absent" (None) from "set to null" (Some(None)).
+    #[serde(
+        default,
+        deserialize_with = "double_option::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub details_summary: Option<Option<String>>,
     pub state: Option<FeatureState>,
     /// Update priority for ordering within parent.
     pub priority: Option<i32>,
