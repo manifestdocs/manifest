@@ -19,6 +19,8 @@ use crate::models::{
     CommitRef, CreateFeatureInput, FeatureId, FeatureState, UpdateFeatureInput, VersionId,
 };
 
+use super::spec::SpecConfig;
+
 use super::client_err;
 
 /// Find features by project, state, or search query.
@@ -222,6 +224,7 @@ pub async fn update_feature(
         title: req.title,
         details: req.details,
         desired_details: req.desired_details.map(Some),
+        details_summary: req.details_summary.map(Some),
         state,
         priority: req.priority,
         target_version_id,
@@ -276,6 +279,15 @@ pub async fn start_feature(
         .await
         .map_err(client_err)?;
 
+    // Fetch project settings for configurable guidance levels
+    let project_id: uuid::Uuid = feature_with_context.feature.project_id.into();
+    let project_with_dirs = client.get_project(project_id).await.map_err(client_err)?;
+    let config = SpecConfig {
+        detail_level: project_with_dirs.project.detail_level,
+        ac_level: project_with_dirs.project.ac_level,
+        ac_format: project_with_dirs.project.ac_format,
+    };
+
     // Spec gate: analyze specification completeness
     let is_root = feature_with_context.feature.parent_id.is_none();
     let spec_status = super::spec::analyze_spec(
@@ -285,7 +297,7 @@ pub async fn start_feature(
     );
 
     if spec_status.should_block() {
-        let guidance = spec_status.guidance().unwrap_or_default();
+        let guidance = spec_status.guidance(&config).unwrap_or_default();
         return Ok(CallToolResult::error(vec![Content::text(format!(
             "Cannot start '{}' — specification required.\n\n{}",
             feature_with_context.feature.title, guidance
@@ -302,6 +314,7 @@ pub async fn start_feature(
                     title: None,
                     details: None,
                     desired_details: None,
+                    details_summary: None,
                     state: Some(FeatureState::InProgress),
                     priority: None,
                     target_version_id: None,
@@ -327,13 +340,19 @@ pub async fn start_feature(
         serde_json::to_value(&result).map_err(|e| McpError::internal_error(e.to_string(), None))?;
     result_json["spec_status"] = serde_json::json!(spec_status.summary());
     result_json["feature_tier"] = serde_json::json!(spec_status.tier.as_str());
+    result_json["ac_level"] = serde_json::json!(config.ac_level.as_str());
+    result_json["ac_format"] = serde_json::json!(config.ac_format.as_str());
+    result_json["detail_level"] = serde_json::json!(config.detail_level.as_str());
+    result_json["workflow_reminder"] = serde_json::json!(
+        "IMPORTANT: When you finish this work, you MUST call complete_feature with a summary of what you did and any commit SHAs. This records history for future agents."
+    );
 
     let json = serde_json::to_string_pretty(&result_json)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     // If spec has warnings, prepend a warning text block
-    if spec_status.has_warnings() {
-        let warning = spec_status.guidance().unwrap_or_default();
+    if spec_status.has_warnings(&config) {
+        let warning = spec_status.guidance(&config).unwrap_or_default();
         return Ok(CallToolResult::success(vec![
             Content::text(format!("⚠ {}", warning)),
             Content::text(json),
@@ -364,6 +383,7 @@ async fn start_children_recursive(
                         title: None,
                         details: None,
                         desired_details: None,
+                        details_summary: None,
                         state: Some(FeatureState::InProgress),
                         priority: None,
                         target_version_id: None,
@@ -444,6 +464,15 @@ pub async fn get_next_feature(
 
     let json = match result {
         Some(feature_ctx) => {
+            // Fetch project settings for configurable guidance levels
+            let project_id: uuid::Uuid = feature_ctx.feature.project_id.into();
+            let project_with_dirs = client.get_project(project_id).await.map_err(client_err)?;
+            let config = SpecConfig {
+                detail_level: project_with_dirs.project.detail_level,
+                ac_level: project_with_dirs.project.ac_level,
+                ac_format: project_with_dirs.project.ac_format,
+            };
+
             let is_root = feature_ctx.feature.parent_id.is_none();
             let spec_status = super::spec::analyze_spec(
                 feature_ctx.feature.details.as_deref(),
@@ -456,7 +485,10 @@ pub async fn get_next_feature(
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             result_json["spec_status"] = serde_json::json!(spec_status.summary());
             result_json["feature_tier"] = serde_json::json!(spec_status.tier.as_str());
-            if let Some(guidance) = spec_status.guidance() {
+            result_json["ac_level"] = serde_json::json!(config.ac_level.as_str());
+            result_json["ac_format"] = serde_json::json!(config.ac_format.as_str());
+            result_json["detail_level"] = serde_json::json!(config.detail_level.as_str());
+            if let Some(guidance) = spec_status.guidance(&config) {
                 result_json["spec_guidance"] = serde_json::json!(guidance);
             }
             serde_json::to_string_pretty(&result_json)

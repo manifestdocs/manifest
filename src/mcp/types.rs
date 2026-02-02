@@ -104,6 +104,12 @@ pub struct UpdateFeatureRequest {
     pub desired_details: Option<String>,
 
     #[schemars(
+        description = "Short summary (~200 words) of root feature instructions. When provided for a root feature, breadcrumbs and project listings show this summary instead of the full details. Agents call get_project_instructions for full text when needed."
+    )]
+    #[serde(default)]
+    pub details_summary: Option<String>,
+
+    #[schemars(
         description = "New state. Valid values: 'proposed', 'in_progress', 'implemented', 'archived'. Use your judgment: working on it? 'in_progress'. Done? 'implemented'. Found a bug in 'implemented'? Set back to 'in_progress'. Want to hide but preserve history? 'archived'."
     )]
     #[serde(default)]
@@ -209,7 +215,7 @@ pub struct PlanFeaturesRequest {
     #[serde(default)]
     pub target_version_id: Option<Uuid>,
     #[schemars(
-        description = "The proposed feature tree. Parent features should have shared context in details (architecture, patterns, constraints for children). Leaf features should have concise specifications (~50-150 words) — goal, constraints, key interfaces."
+        description = "The proposed feature tree. Parent features should have shared context in details (architecture, patterns, constraints for children). Leaf features should have specifications (length guided by the project's ac_level setting) — goal, constraints, key interfaces."
     )]
     pub features: Vec<ProposedFeature>,
     #[schemars(
@@ -409,8 +415,8 @@ pub struct ProposedFeature {
     /// Feature details — content depends on position in hierarchy.
     /// For parent features (those with children): shared architectural context, patterns,
     /// constraints that apply to all children.
-    /// For leaf features (no children): concise specification (~50-150 words) — goal,
-    /// constraints, key interfaces. Parents provide context; leaves provide specifications.
+    /// For leaf features (no children): specification (length guided by project's ac_level
+    /// setting) — goal, constraints, key interfaces. Parents provide context; leaves provide specifications.
     #[serde(default)]
     pub details: Option<String>,
     /// Priority for ordering. Lower values = implement first.
@@ -483,6 +489,12 @@ pub struct SetFeatureVersionRequest {
 pub struct ReleaseVersionRequest {
     #[schemars(description = "The UUID of the version to release")]
     pub version_id: Uuid,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetProjectInstructionsRequest {
+    #[schemars(description = "The UUID of the project to get full instructions for")]
+    pub project_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

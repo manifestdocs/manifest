@@ -117,6 +117,18 @@ pub(crate) fn row_to_project(row: &AnyRow) -> Result<Project> {
         default_feature_destination: row
             .get::<Option<String>, _>("default_feature_destination")
             .unwrap_or_else(|| "backlog".to_string()),
+        detail_level: row
+            .get::<Option<String>, _>("detail_level")
+            .and_then(|s| GuidanceLevel::from_str(&s).ok())
+            .unwrap_or(GuidanceLevel::Standard),
+        ac_level: row
+            .get::<Option<String>, _>("ac_level")
+            .and_then(|s| GuidanceLevel::from_str(&s).ok())
+            .unwrap_or(GuidanceLevel::Standard),
+        ac_format: row
+            .get::<Option<String>, _>("ac_format")
+            .and_then(|s| AcFormat::from_str(&s).ok())
+            .unwrap_or(AcFormat::Checkbox),
         created_at: parse_datetime(row.get("created_at"))?,
         updated_at: parse_datetime(row.get("updated_at"))?,
     })
@@ -163,6 +175,7 @@ pub(crate) fn row_to_feature(row: &AnyRow) -> Result<Feature> {
         title: row.get("title"),
         details: row.get("details"),
         desired_details: row.get("desired_details"),
+        details_summary: row.get("details_summary"),
         state: FeatureState::from_str(&row.get::<String, _>("state"))
             .unwrap_or(FeatureState::Proposed),
         priority: row.get("priority"),

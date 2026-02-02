@@ -29,6 +29,9 @@ CREATE TABLE projects (
     owner_id TEXT,
     visibility TEXT NOT NULL DEFAULT 'private',
     default_feature_destination TEXT NOT NULL DEFAULT 'backlog',
+    detail_level TEXT NOT NULL DEFAULT 'standard',
+    ac_level TEXT NOT NULL DEFAULT 'standard',
+    ac_format TEXT NOT NULL DEFAULT 'checkbox',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CONSTRAINT chk_projects_visibility CHECK (visibility IN ('private', 'public'))
@@ -71,6 +74,7 @@ CREATE TABLE features (
     title TEXT NOT NULL,
     details TEXT,
     desired_details TEXT,
+    details_summary TEXT,
     state TEXT NOT NULL DEFAULT 'proposed',
     priority INTEGER NOT NULL DEFAULT 0,
     target_version_id TEXT,

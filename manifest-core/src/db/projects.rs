@@ -10,7 +10,7 @@ impl Database {
     /// Get all projects ordered by name.
     pub async fn get_all_projects(&self) -> Result<Vec<Project>> {
         let rows = sqlx::query(
-            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, created_at, updated_at
+            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, created_at, updated_at
              FROM projects ORDER BY name",
         )
         .fetch_all(&self.pool)
@@ -22,7 +22,7 @@ impl Database {
     /// Get a project by its ID.
     pub async fn get_project(&self, id: ProjectId) -> Result<Option<Project>> {
         let row = sqlx::query(
-            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, created_at, updated_at
+            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, created_at, updated_at
              FROM projects WHERE id = $1",
         )
         .bind(id.to_string())
@@ -35,7 +35,7 @@ impl Database {
     /// Get a project by its URL-friendly slug.
     pub async fn get_project_by_slug(&self, slug: &str) -> Result<Option<Project>> {
         let row = sqlx::query(
-            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, created_at, updated_at
+            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, created_at, updated_at
              FROM projects WHERE slug = $1",
         )
         .bind(slug)
@@ -97,6 +97,9 @@ impl Database {
             current_version_id: None,
             root_feature_id: Some(root_feature_id),
             default_feature_destination: "backlog".to_string(),
+            detail_level: GuidanceLevel::Standard,
+            ac_level: GuidanceLevel::Standard,
+            ac_format: AcFormat::Checkbox,
             created_at: now,
             updated_at: now,
         })
@@ -124,9 +127,12 @@ impl Database {
         let default_feature_destination = input
             .default_feature_destination
             .unwrap_or(existing.default_feature_destination);
+        let detail_level = input.detail_level.unwrap_or(existing.detail_level);
+        let ac_level = input.ac_level.unwrap_or(existing.ac_level);
+        let ac_format = input.ac_format.unwrap_or(existing.ac_format);
 
         sqlx::query(
-            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, updated_at = $7 WHERE id = $8",
+            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, detail_level = $7, ac_level = $8, ac_format = $9, updated_at = $10 WHERE id = $11",
         )
         .bind(&slug)
         .bind(&name)
@@ -134,6 +140,9 @@ impl Database {
         .bind(&instructions)
         .bind(current_version_id.map(|u| u.to_string()))
         .bind(&default_feature_destination)
+        .bind(detail_level.as_str())
+        .bind(ac_level.as_str())
+        .bind(ac_format.as_str())
         .bind(now.to_rfc3339())
         .bind(id.to_string())
         .execute(&self.pool)
@@ -160,6 +169,9 @@ impl Database {
             current_version_id,
             root_feature_id: existing.root_feature_id,
             default_feature_destination,
+            detail_level,
+            ac_level,
+            ac_format,
             created_at: existing.created_at,
             updated_at: now,
         }))

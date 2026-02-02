@@ -332,6 +332,12 @@ impl Database {
         self.migrate_add_default_feature_destination().await?;
         // Migration: rename default_feature_destination value "now" → "next"
         self.migrate_feature_destination_now_to_next().await?;
+        // Migration: add details_summary column to features
+        self.migrate_add_details_summary().await?;
+        // Migration: add guidance level columns to projects
+        self.migrate_add_guidance_levels().await?;
+        // Migration: rename spec_level → ac_level, add ac_format
+        self.migrate_rename_spec_to_ac().await?;
         Ok(())
     }
 
@@ -633,6 +639,143 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
+        Ok(())
+    }
+
+    /// Add details_summary column to features table if it doesn't exist.
+    async fn migrate_add_details_summary(&self) -> Result<()> {
+        let has_column = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("details_summary"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'features' AND column_name = 'details_summary'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_column {
+            tracing::debug!("details_summary migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Adding details_summary column to features table");
+        sqlx::query("ALTER TABLE features ADD COLUMN details_summary TEXT")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Add detail_level and spec_level columns to projects table if they don't exist.
+    async fn migrate_add_guidance_levels(&self) -> Result<()> {
+        let has_column = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("detail_level"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'projects' AND column_name = 'detail_level'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_column {
+            tracing::debug!("Guidance levels migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Adding detail_level and spec_level columns to projects table");
+        sqlx::query(
+            "ALTER TABLE projects ADD COLUMN detail_level TEXT NOT NULL DEFAULT 'standard'",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "ALTER TABLE projects ADD COLUMN spec_level TEXT NOT NULL DEFAULT 'standard'",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Rename spec_level → ac_level and add ac_format column.
+    /// Leaves spec_level as a dead column (Rust code stops reading it).
+    async fn migrate_rename_spec_to_ac(&self) -> Result<()> {
+        let has_ac_level = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("ac_level"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'projects' AND column_name = 'ac_level'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_ac_level {
+            tracing::debug!("spec_level → ac_level migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Renaming spec_level → ac_level and adding ac_format column");
+
+        // Add ac_level column
+        sqlx::query(
+            "ALTER TABLE projects ADD COLUMN ac_level TEXT NOT NULL DEFAULT 'standard'",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Copy spec_level values into ac_level
+        sqlx::query("UPDATE projects SET ac_level = spec_level")
+            .execute(&self.pool)
+            .await?;
+
+        // Add ac_format column
+        sqlx::query(
+            "ALTER TABLE projects ADD COLUMN ac_format TEXT NOT NULL DEFAULT 'checkbox'",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        tracing::info!("spec_level → ac_level migration complete");
         Ok(())
     }
 

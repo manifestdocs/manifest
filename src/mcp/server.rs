@@ -10,9 +10,9 @@ use super::tools;
 use super::types::{
     AddProjectDirectoryRequest, CompleteFeatureRequest, CreateFeatureRequest, CreateVersionRequest,
     DeleteFeatureRequest, FindFeaturesRequest, GenerateFeatureTreeRequest, GetFeatureRequest,
-    GetNextFeatureRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
-    PlanFeaturesRequest, ReleaseVersionRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest,
-    StartFeatureRequest, UpdateFeatureRequest,
+    GetNextFeatureRequest, GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest,
+    ListVersionsRequest, PlanFeaturesRequest, ReleaseVersionRequest, RenderFeatureTreeRequest,
+    SetFeatureVersionRequest, StartFeatureRequest, UpdateFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -57,6 +57,16 @@ impl McpServer {
         params: Parameters<ListProjectsRequest>,
     ) -> Result<CallToolResult, McpError> {
         tools::projects::list_projects(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "ORIENT: Get full project instructions (coding guidelines, conventions, architectural decisions). Use this when the breadcrumb summary indicates more context is available. Returns the complete root feature details."
+    )]
+    async fn get_project_instructions(
+        &self,
+        params: Parameters<GetProjectInstructionsRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::projects::get_project_instructions(&self.client, params.0).await
     }
 
     #[tool(
@@ -279,6 +289,7 @@ DISCOVERING FEATURES:
 - find_features — find features by project, state, or search term
 - get_feature — get full details and history for a specific feature
 - get_next_feature — get the highest priority proposed or in_progress feature
+- get_project_instructions — get full project instructions when the breadcrumb summary isn't enough
 - render_feature_tree — display the full tree as ASCII art for the user
 
 VERSIONS & BACKLOG:
@@ -308,6 +319,8 @@ This is the project's source of truth for all agents. Write content that applies
 - Testing expectations ("TDD with property-based tests for core logic")
 - Domain terminology ("User means authenticated account, not session")
 
+When updating project instructions (root feature details), also provide a details_summary (~200 words) via update_feature. The summary appears in breadcrumbs and project listings; agents call get_project_instructions for full text when they need it.
+
 FEATURE SET LEVEL (parent feature — has children):
 Shared context for a group of related capabilities. Write content that applies to all children:
 - Architectural context for this area ("Auth uses JWT with refresh tokens")
@@ -323,17 +336,16 @@ Concise specification that an agent implements against:
 - For complex logic: structural hints (main sequence, branching, loops)
 - 1-3 concrete examples of expected behavior when helpful
 
-Keep specifications under 150 words. Concise specs outperform elaborate ones.
-Avoid Gherkin syntax (Given/When/Then) — plain language works as well or better.
+Specification length and guidance adapt to the project's configured `ac_level` and `detail_level` settings (concise, standard, or thorough). The project also has an `ac_format` setting (checkbox or gherkin) that controls how acceptance criteria are formatted. The `start_feature` and `get_next_feature` tools return the active levels and tailored guidance text.
 
 start_feature will block if a leaf feature has no details at all — write a spec first using update_feature.
-If details are very sparse (<20 words), you will receive a warning.
+If details are very sparse, you will receive a warning (threshold adapts to ac_level).
 
 To write a spec:
 - Use update_feature with `details` to set the spec directly
 - Use update_feature with `desired_details` to propose a spec for human review (they see a diff in the web UI)
 
-Specifications should be concise (~50-150 words). After implementation, update details to reflect what was built.
+Specification length is guided by the project's ac_level setting. After implementation, update details to reflect what was built.
 
 WORKFLOW:
 
@@ -356,9 +368,11 @@ WORKFLOW:
    - Write tests first, then implement, then verify
    - Use update_feature to evolve the spec as you learn more
 
-4. DOCUMENT — record what you did:
-   - complete_feature — provide summary + commit SHAs
+4. DOCUMENT — MANDATORY after implementing:
+   - You MUST call complete_feature when work is done. This is not optional.
+   - Provide a summary of what you did + commit SHAs
    - This creates a history entry so future agents (or future you) know what happened
+   - If you skip this step, there is no record of the work and the feature stays in_progress forever
    - If you learned something that applies to sibling features, update the parent's details with shared context
 
 UPDATING FEATURES:
@@ -403,4 +417,5 @@ Tool results are collapsed JSON. Always summarize for humans:
 - list_versions: "0.1.0 (released), 0.2.0 (next, 3 features), 0.3.0 (planned)"
 - create_version: "Created version 'Name'"
 - set_feature_version: "Assigned 'Feature' to version 'Name'" or "Unassigned from version"
+- get_project_instructions: Show key sections or confirm instructions were retrieved
 - release_version: "Released 'Name'""#;
