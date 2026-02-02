@@ -23,7 +23,7 @@ pub struct CompleteFeatureRequest {
     #[schemars(description = "The UUID of the feature to complete")]
     pub feature_id: Uuid,
     #[schemars(
-        description = "Summary of work done. First line is a concise headline shown in list views. After a blank line, include:\n- What was implemented\n- Key decisions made during implementation and why\n- Any deviations from the original spec and reasoning\n- Context for the next person working in this area\n\nExample:\n\nImplemented OAuth login flow\n\n- Added Google OAuth provider using passport.js\n- Chose session-based auth over JWT (simpler for SSR app)\n- Deviated from spec: skipped GitHub OAuth (rate limits too restrictive)\n- Note: refresh token rotation not yet implemented"
+        description = "Summary of work done (git-style format). First line is a concise headline shown in list views. Add details after a blank line if needed (bullet points, technical notes). Example:\n\nImplemented OAuth login flow\n\n- Added Google OAuth provider using passport.js\n- Chose session-based auth over JWT (simpler for SSR app)\n- Deviated from spec: skipped GitHub OAuth (rate limits too restrictive)\n- Note: refresh token rotation not yet implemented\n\nIMPORTANT: Describe WHAT was built, not that something was committed. Commits are tracked separately and displayed alongside the summary in the UI. Never write summaries like 'Committed as abc1234' or 'Committed X implementation' — the commit SHAs are already shown."
     )]
     pub summary: String,
     #[schemars(description = "Git commits created during this work")]

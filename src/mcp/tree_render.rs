@@ -128,6 +128,7 @@ mod tests {
                 title: title.to_string(),
                 details: None,
                 desired_details: None,
+                details_summary: None,
                 state,
                 priority: 0,
                 target_version_id: None,

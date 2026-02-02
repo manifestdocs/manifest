@@ -462,18 +462,33 @@ impl ManifestClient {
 // ============================================================
 
 impl ManifestClient {
-    /// Get the instructions for a project.
+    /// Get the full instructions for a project.
     ///
     /// If the project has a root feature, returns its details (the source of truth).
     /// Otherwise falls back to project.instructions (legacy).
-    pub async fn get_project_instructions(&self, project: &Project) -> Option<String> {
+    pub async fn get_project_instructions_full(&self, project: &Project) -> Option<String> {
         if let Some(root_id) = project.root_feature_id {
-            // Fetch root feature and use its details
             if let Ok(feature) = self.get_feature(root_id.into()).await {
                 return feature.details;
             }
         }
-        // Fallback to legacy project.instructions
+        project.instructions.clone()
+    }
+
+    /// Get a summary of the project instructions.
+    ///
+    /// Returns `details_summary` from the root feature if available, otherwise
+    /// falls back to `project.instructions`. Never returns the full `feature.details`
+    /// — that can be 10KB+ and blows up token budgets in listing responses.
+    /// Use `get_project_instructions_full()` when the full text is needed.
+    pub async fn get_project_instructions_summary(&self, project: &Project) -> Option<String> {
+        if let Some(root_id) = project.root_feature_id {
+            if let Ok(feature) = self.get_feature(root_id.into()).await {
+                if feature.details_summary.is_some() {
+                    return feature.details_summary;
+                }
+            }
+        }
         project.instructions.clone()
     }
 
@@ -493,9 +508,9 @@ impl ManifestClient {
             })
             .ok_or_else(|| ClientError::Server("Directory match logic error".to_string()))?;
 
-        // Get instructions from root feature (source of truth) or fallback to project.instructions
+        // Get instructions summary from root feature (source of truth) or fallback to project.instructions
         let instructions = self
-            .get_project_instructions(&project_with_dirs.project)
+            .get_project_instructions_summary(&project_with_dirs.project)
             .await;
 
         Ok(ProjectContextResponse {

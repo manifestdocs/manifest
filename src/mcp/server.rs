@@ -168,7 +168,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits. Your summary becomes living documentation — include decisions made, deviations from spec, and context for future agents. Sets state to 'implemented'. Set mark_implemented=false to record progress without changing state. Call only after verification."
+        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Set mark_implemented=false to record progress without changing state. Call only after verification.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI."
     )]
     async fn complete_feature(
         &self,

@@ -132,6 +132,7 @@ pub async fn set_feature_version(
                 title: None,
                 details: None,
                 desired_details: None,
+                details_summary: None,
                 state: None,
                 priority: None,
                 target_version_id: version_id,

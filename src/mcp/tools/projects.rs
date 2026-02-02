@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::mcp::{
     types::{
-        AddProjectDirectoryRequest, DirectoryInfo, InitProjectRequest, ListProjectsRequest,
-        ProjectInfo, ProjectListResponse,
+        AddProjectDirectoryRequest, DirectoryInfo, GetProjectInstructionsRequest,
+        InitProjectRequest, ListProjectsRequest, ProjectInfo, ProjectListResponse,
     },
     ManifestClient,
 };
@@ -61,7 +61,7 @@ pub async fn list_projects(
     // Build project info with instructions from root feature (source of truth)
     let mut project_infos = Vec::with_capacity(projects.len());
     for p in projects {
-        let instructions = client.get_project_instructions(&p).await;
+        let instructions = client.get_project_instructions_summary(&p).await;
         project_infos.push(ProjectInfo {
             id: p.id.into(),
             name: p.name,
@@ -160,8 +160,8 @@ pub async fn init_project(
         .await
         .map_err(client_err)?;
 
-    // Get instructions from root feature (source of truth) or fallback
-    let instructions = client.get_project_instructions(&project).await;
+    // Get instructions summary from root feature (source of truth) or fallback
+    let instructions = client.get_project_instructions_summary(&project).await;
 
     // Build response with project info and analysis
     let result = serde_json::json!({
@@ -216,4 +216,24 @@ pub async fn add_project_directory(
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     Ok(CallToolResult::success(vec![Content::text(json)]))
+}
+
+/// Get full project instructions (root feature details).
+pub async fn get_project_instructions(
+    client: &ManifestClient,
+    req: GetProjectInstructionsRequest,
+) -> Result<CallToolResult, McpError> {
+    let project = client
+        .get_project(req.project_id)
+        .await
+        .map_err(client_err)?;
+
+    let instructions = client.get_project_instructions_full(&project.project).await;
+
+    match instructions {
+        Some(text) => Ok(CallToolResult::success(vec![Content::text(text)])),
+        None => Ok(CallToolResult::success(vec![Content::text(
+            "No project instructions found. Use update_feature on the root feature to add instructions.",
+        )])),
+    }
 }
