@@ -16,6 +16,8 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
+use manifest_core::config::ServerConfig;
+
 use super::ApiError;
 use crate::db::Database;
 
@@ -30,7 +32,6 @@ pub struct ChatRequest {
     /// Conversation messages including system, user, and assistant turns.
     pub messages: Vec<ChatMessage>,
     /// Optional feature context to scope the conversation.
-    #[allow(dead_code)]
     pub context: Option<ChatContext>,
     /// Model to use (e.g., "sonnet", "opus"). Defaults to "sonnet".
     pub model: Option<String>,
@@ -53,7 +54,6 @@ pub struct ChatMessage {
 /// Optional context scoping a chat conversation to a specific feature.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct ChatContext {
     /// Feature being discussed, if any.
     pub feature_id: Option<String>,
@@ -68,6 +68,17 @@ pub struct ChatContext {
 }
 
 // ============================================================
+// Constants
+// ============================================================
+
+/// Base system prompt for chat when no slash command provides a role definition.
+const BASE_PREAMBLE: &str = "\
+You are an AI assistant for Manifest, a feature documentation tool. \
+You help users write, refine, and manage feature specifications. \
+Use the Manifest MCP tools to read and update features. Be concise and focused.\
+";
+
+// ============================================================
 // Handler
 // ============================================================
 
@@ -79,6 +90,24 @@ pub async fn chat_completions(
     State(_db): State<Database>,
     Json(input): Json<ChatRequest>,
 ) -> Result<Response, ApiError> {
+    // Check configured agent — only Claude is supported for now
+    let agent = ServerConfig::load()
+        .ok()
+        .and_then(|c| c.default_agent)
+        .unwrap_or_else(|| "claude".to_string());
+
+    if agent != "claude" {
+        let hint = match agent.as_str() {
+            "gemini" => "Gemini CLI support coming soon",
+            "copilot" => "Copilot CLI support coming soon",
+            _ => "Unsupported agent",
+        };
+        return Err(ApiError::from((
+            StatusCode::BAD_REQUEST,
+            format!("{hint}. Switch to Claude in Settings to use chat."),
+        )));
+    }
+
     // Separate system messages from conversation messages
     let mut system_prompt = String::new();
     let mut conversation: Vec<&ChatMessage> = Vec::new();
@@ -91,6 +120,27 @@ pub async fn chat_completions(
             system_prompt.push_str(&msg.content);
         } else {
             conversation.push(msg);
+        }
+    }
+
+    // Inject base preamble when no slash command provides a role definition.
+    if system_prompt.is_empty() {
+        system_prompt.push_str(BASE_PREAMBLE);
+    }
+
+    // Inject feature context: full details on first turn, lightweight anchor on resumed turns.
+    if let Some(ref ctx) = input.context {
+        let context_block = if input.session_id.is_none() {
+            build_feature_context(ctx)
+        } else {
+            build_feature_anchor(ctx)
+        };
+
+        if !context_block.is_empty() {
+            if !system_prompt.is_empty() {
+                system_prompt.push_str("\n\n");
+            }
+            system_prompt.push_str(&context_block);
         }
     }
 
@@ -134,15 +184,28 @@ pub async fn chat_completions(
         "".to_string(), // Disable built-in tools (Read, Edit, Bash, etc.)
     ];
 
-    // Always whitelist MCP tools so Claude can read/update features,
-    // regardless of whether a slash command system prompt is present.
+    // Whitelist all Manifest MCP tools so the chat agent has full access.
     args.extend([
         "--allowed-tools".into(),
         [
-            "mcp__manifest__update_feature",
-            "mcp__manifest__get_feature",
-            "mcp__manifest__find_features",
             "mcp__manifest__list_projects",
+            "mcp__manifest__find_features",
+            "mcp__manifest__get_feature",
+            "mcp__manifest__render_feature_tree",
+            "mcp__manifest__init_project",
+            "mcp__manifest__add_project_directory",
+            "mcp__manifest__generate_feature_tree",
+            "mcp__manifest__plan",
+            "mcp__manifest__create_feature",
+            "mcp__manifest__start_feature",
+            "mcp__manifest__complete_feature",
+            "mcp__manifest__update_feature",
+            "mcp__manifest__delete_feature",
+            "mcp__manifest__get_next_feature",
+            "mcp__manifest__list_versions",
+            "mcp__manifest__create_version",
+            "mcp__manifest__set_feature_version",
+            "mcp__manifest__release_version",
         ]
         .join(","),
     ]);
@@ -340,6 +403,88 @@ pub async fn chat_completions(
 // ============================================================
 // Helpers
 // ============================================================
+
+/// Build a system prompt fragment from feature context.
+///
+/// Gives the AI clear awareness of which feature the user is viewing so it
+/// stays on-topic and uses the correct feature ID for tool calls.
+fn build_feature_context(ctx: &ChatContext) -> String {
+    let title = match ctx.feature_title.as_deref() {
+        Some(t) if !t.is_empty() => t,
+        _ => return String::new(),
+    };
+
+    let mut parts = Vec::new();
+    parts.push(format!("## Active Feature Context\n"));
+    parts.push(format!(
+        "The user is viewing the feature **\"{}\"**.",
+        title
+    ));
+
+    if let Some(ref id) = ctx.feature_id {
+        parts.push(format!("Feature ID: `{}`", id));
+    }
+    if let Some(ref pid) = ctx.project_id {
+        parts.push(format!("Project ID: `{}`", pid));
+    }
+    if let Some(is_leaf) = ctx.is_leaf {
+        parts.push(format!(
+            "Type: {}",
+            if is_leaf {
+                "leaf feature"
+            } else {
+                "feature set (has children)"
+            }
+        ));
+    }
+
+    if let Some(ref details) = ctx.feature_details {
+        if !details.is_empty() {
+            parts.push(format!(
+                "\nCurrent specification:\n<feature-spec>\n{}\n</feature-spec>",
+                details
+            ));
+        }
+    }
+
+    parts.push(
+        "\nWhen using Manifest tools, operate on this feature unless the user \
+         explicitly asks about a different feature or project."
+            .to_string(),
+    );
+
+    parts.join("\n")
+}
+
+/// Build a lightweight anchor for resumed turns.
+///
+/// Provides just the feature title and IDs so the AI stays scoped without
+/// repeating the full specification (which Claude already has from turn 1).
+fn build_feature_anchor(ctx: &ChatContext) -> String {
+    let title = match ctx.feature_title.as_deref() {
+        Some(t) if !t.is_empty() => t,
+        _ => return String::new(),
+    };
+
+    let mut parts = Vec::new();
+    parts.push("## Active Feature".to_string());
+    parts.push(format!("Feature: **\"{}\"**", title));
+
+    if let Some(ref id) = ctx.feature_id {
+        parts.push(format!("Feature ID: `{}`", id));
+    }
+    if let Some(ref pid) = ctx.project_id {
+        parts.push(format!("Project ID: `{}`", pid));
+    }
+
+    parts.push(
+        "Stay focused on this feature. Use the IDs above for any Manifest tool calls. \
+         Only switch context if the user explicitly asks about a different feature or project."
+            .to_string(),
+    );
+
+    parts.join("\n")
+}
 
 /// Format conversation messages into a single prompt string for Claude's `-p` flag.
 ///
