@@ -46,7 +46,7 @@ paths:
       summary: Health check
       operationId: health
       responses:
-        "200":
+        '200':
           description: Server is healthy
           content:
             application/json:
@@ -77,32 +77,70 @@ paths:
           schema:
             type: string
           description: Absolute path to browse. Defaults to user's home directory.
-          example: "/Users/dev/projects"
+          example: '/Users/dev/projects'
       responses:
-        "200":
+        '200':
           description: Directory listing
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BrowseResponse"
-        "400":
+                $ref: '#/components/schemas/BrowseResponse'
+        '400':
           description: Invalid path (not absolute or not a directory)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "403":
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
           description: Access denied (path restricted)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
           description: Directory not found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /filesystem/mkdir:
+    post:
+      tags: [Filesystem]
+      summary: Create a directory
+      description: |
+        Creates a directory at the specified path, including intermediate
+        directories. Idempotent — succeeds if the directory already exists.
+        Safety guarantees:
+        - Path must be absolute
+        - Path must not contain '..' components
+        - Subject to the same path restrictions as browsing
+      operationId: createDirectory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MkdirRequest'
+      responses:
+        '200':
+          description: Directory created (or already existed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MkdirResponse'
+        '400':
+          description: Invalid path (not absolute or contains '..')
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Access denied (path restricted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   # ============================================================
   # Projects
@@ -113,14 +151,14 @@ paths:
       summary: List all projects
       operationId: listProjects
       responses:
-        "200":
+        '200':
           description: List of projects ordered by name
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Project"
+                  $ref: '#/components/schemas/Project'
     post:
       tags: [Projects]
       summary: Create a new project
@@ -130,16 +168,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateProjectInput"
+              $ref: '#/components/schemas/CreateProjectInput'
       responses:
-        "201":
+        '201':
           description: Project created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Project"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Project'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /projects/by-directory:
     get:
@@ -157,21 +195,21 @@ paths:
           schema:
             type: string
           description: Absolute directory path to look up
-          example: "/Users/dev/projects/my-app/src"
+          example: '/Users/dev/projects/my-app/src'
       responses:
-        "200":
+        '200':
           description: Project with directories
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProjectWithDirectories"
-        "404":
+                $ref: '#/components/schemas/ProjectWithDirectories'
+        '404':
           description: No project found for the given directory
           content:
             text/plain:
               schema:
                 type: string
-                example: "No project found for directory: /Users/dev/unknown"
+                example: 'No project found for directory: /Users/dev/unknown'
 
   /projects/by-slug/{slug}:
     parameters:
@@ -181,37 +219,37 @@ paths:
         schema:
           type: string
         description: Project slug (URL-friendly identifier)
-        example: "manifest"
+        example: 'manifest'
     get:
       tags: [Projects]
       summary: Get a project by slug
       operationId: getProjectBySlug
       responses:
-        "200":
+        '200':
           description: Project with directories
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProjectWithDirectories"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/ProjectWithDirectories'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /projects/{id}:
     parameters:
-      - $ref: "#/components/parameters/ProjectId"
+      - $ref: '#/components/parameters/ProjectId'
     get:
       tags: [Projects]
       summary: Get a project with its directories
       operationId: getProject
       responses:
-        "200":
+        '200':
           description: Project with directories
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProjectWithDirectories"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/ProjectWithDirectories'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [Projects]
       summary: Update a project
@@ -221,30 +259,30 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateProjectInput"
+              $ref: '#/components/schemas/UpdateProjectInput'
       responses:
-        "200":
+        '200':
           description: Project updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Project"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Project'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       tags: [Projects]
       summary: Delete a project
       description: Deletes the project and cascades to all features, sessions, and tasks
       operationId: deleteProject
       responses:
-        "204":
+        '204':
           description: Project deleted
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /projects/{id}/history:
     parameters:
-      - $ref: "#/components/parameters/ProjectId"
+      - $ref: '#/components/parameters/ProjectId'
     get:
       tags: [History]
       summary: Get project-wide history
@@ -286,31 +324,31 @@ paths:
             format: date-time
           description: Only return entries created after this ISO datetime.
       responses:
-        "200":
+        '200':
           description: History entries with feature and version context
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/ProjectHistoryEntry"
+                  $ref: '#/components/schemas/ProjectHistoryEntry'
 
   /projects/{id}/directories:
     parameters:
-      - $ref: "#/components/parameters/ProjectId"
+      - $ref: '#/components/parameters/ProjectId'
     get:
       tags: [Directories]
       summary: List project directories
       operationId: listProjectDirectories
       responses:
-        "200":
+        '200':
           description: List of directories (primary first, then by path)
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/ProjectDirectory"
+                  $ref: '#/components/schemas/ProjectDirectory'
     post:
       tags: [Directories]
       summary: Add a directory to a project
@@ -320,33 +358,33 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AddDirectoryInput"
+              $ref: '#/components/schemas/AddDirectoryInput'
       responses:
-        "201":
+        '201':
           description: Directory added
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProjectDirectory"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/ProjectDirectory'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /projects/{id}/versions:
     parameters:
-      - $ref: "#/components/parameters/ProjectId"
+      - $ref: '#/components/parameters/ProjectId'
     get:
       tags: [Versions]
       summary: List versions for a project
       operationId: listProjectVersions
       responses:
-        "200":
+        '200':
           description: List of versions ordered by creation date
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Version"
+                  $ref: '#/components/schemas/Version'
     post:
       tags: [Versions]
       summary: Create a new version
@@ -356,35 +394,35 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateVersionInput"
+              $ref: '#/components/schemas/CreateVersionInput'
       responses:
-        "201":
+        '201':
           description: Version created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Version"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Version'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /versions/{id}:
     parameters:
-      - $ref: "#/components/parameters/VersionId"
+      - $ref: '#/components/parameters/VersionId'
     get:
       tags: [Versions]
       summary: Get a version by ID
       operationId: getVersion
       responses:
-        "200":
+        '200':
           description: The version
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Version"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Version'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [Versions]
       summary: Update a version
@@ -394,29 +432,29 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateVersionInput"
+              $ref: '#/components/schemas/UpdateVersionInput'
       responses:
-        "200":
+        '200':
           description: Version updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Version"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Version'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       tags: [Versions]
       summary: Delete a version
       operationId: deleteVersion
       responses:
-        "204":
+        '204':
           description: Version deleted
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /projects/{id}/features:
     parameters:
-      - $ref: "#/components/parameters/ProjectId"
+      - $ref: '#/components/parameters/ProjectId'
     get:
       tags: [Features]
       summary: List all features in a project
@@ -425,17 +463,17 @@ paths:
         Always returns summaries only - use GET /features/{id} for full details.
       operationId: listProjectFeatures
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
-        "200":
+        '200':
           description: Feature summaries in the project
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/FeatureSummary"
+                  $ref: '#/components/schemas/FeatureSummary'
     post:
       tags: [Features]
       summary: Create a feature in a project
@@ -445,20 +483,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateFeatureInput"
+              $ref: '#/components/schemas/CreateFeatureInput'
       responses:
-        "201":
+        '201':
           description: Feature created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Feature"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/Feature'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /projects/{id}/features/bulk:
     parameters:
-      - $ref: "#/components/parameters/ProjectId"
+      - $ref: '#/components/parameters/ProjectId'
     post:
       tags: [Features]
       summary: Bulk create features with hierarchical structure
@@ -477,39 +515,39 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/BulkCreateFeaturesInput"
+              $ref: '#/components/schemas/BulkCreateFeaturesInput'
       responses:
-        "200":
+        '200':
           description: Proposed or created features
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PlanFeaturesResponse"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/PlanFeaturesResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /projects/{id}/features/roots:
     parameters:
-      - $ref: "#/components/parameters/ProjectId"
+      - $ref: '#/components/parameters/ProjectId'
     get:
       tags: [Features]
       summary: List root features (no parent) in a project
       operationId: listRootFeatures
       responses:
-        "200":
+        '200':
           description: Root features ordered by title
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Feature"
+                  $ref: '#/components/schemas/Feature'
 
   /projects/{id}/features/tree:
     parameters:
-      - $ref: "#/components/parameters/ProjectId"
+      - $ref: '#/components/parameters/ProjectId'
     get:
       tags: [Features]
       summary: Get complete feature tree
@@ -518,30 +556,30 @@ paths:
         recursively nested. Useful for visualizing the full project structure.
       operationId: getFeatureTree
       responses:
-        "200":
+        '200':
           description: Feature tree with nested children
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/FeatureTreeNode"
+                  $ref: '#/components/schemas/FeatureTreeNode'
 
   # ============================================================
   # Directories (standalone)
   # ============================================================
   /directories/{id}:
     parameters:
-      - $ref: "#/components/parameters/DirectoryId"
+      - $ref: '#/components/parameters/DirectoryId'
     delete:
       tags: [Directories]
       summary: Remove a directory
       operationId: removeProjectDirectory
       responses:
-        "204":
+        '204':
           description: Directory removed
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ============================================================
   # Features (standalone)
@@ -555,17 +593,17 @@ paths:
         Always returns summaries only - use GET /features/{id} for full details.
       operationId: listFeatures
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
-        "200":
+        '200':
           description: Feature summaries
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/FeatureSummary"
+                  $ref: '#/components/schemas/FeatureSummary'
 
   /features/search:
     get:
@@ -599,31 +637,31 @@ paths:
             default: 10
           description: Maximum number of results to return. Defaults to 10.
       responses:
-        "200":
+        '200':
           description: Feature summaries matching the search query, ranked by relevance
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/FeatureSummary"
+                  $ref: '#/components/schemas/FeatureSummary'
 
   /features/{id}:
     parameters:
-      - $ref: "#/components/parameters/FeatureId"
+      - $ref: '#/components/parameters/FeatureId'
     get:
       tags: [Features]
       summary: Get a feature by ID
       operationId: getFeature
       responses:
-        "200":
+        '200':
           description: The feature
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Feature"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Feature'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [Features]
       summary: Update a feature
@@ -633,63 +671,63 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateFeatureInput"
+              $ref: '#/components/schemas/UpdateFeatureInput'
       responses:
-        "200":
+        '200':
           description: Feature updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Feature"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/Feature'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       tags: [Features]
       summary: Delete a feature
       description: Deletes the feature and cascades to all children
       operationId: deleteFeature
       responses:
-        "204":
+        '204':
           description: Feature deleted
-        "404":
-          $ref: "#/components/responses/NotFound"
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /features/{id}/children:
     parameters:
-      - $ref: "#/components/parameters/FeatureId"
+      - $ref: '#/components/parameters/FeatureId'
     get:
       tags: [Features]
       summary: List direct children of a feature
       operationId: listChildren
       responses:
-        "200":
+        '200':
           description: Direct children ordered by title
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Feature"
+                  $ref: '#/components/schemas/Feature'
 
   /features/{id}/history:
     parameters:
-      - $ref: "#/components/parameters/FeatureId"
+      - $ref: '#/components/parameters/FeatureId'
     get:
       tags: [History]
       summary: Get feature history
       description: Returns the implementation history log (like git log)
       operationId: getFeatureHistory
       responses:
-        "200":
+        '200':
           description: History entries in reverse chronological order
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/FeatureHistory"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                  $ref: '#/components/schemas/FeatureHistory'
+        '404':
+          $ref: '#/components/responses/NotFound'
     post:
       tags: [History]
       summary: Add a history entry to a feature
@@ -702,22 +740,22 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AddHistoryInput"
+              $ref: '#/components/schemas/AddHistoryInput'
       responses:
-        "201":
+        '201':
           description: History entry created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FeatureHistory"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: '#/components/schemas/FeatureHistory'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /features/{id}/diff:
     parameters:
-      - $ref: "#/components/parameters/FeatureId"
+      - $ref: '#/components/parameters/FeatureId'
     get:
       tags: [Features]
       summary: Get feature diff
@@ -726,14 +764,14 @@ paths:
         Use this to see what changes are pending before implementation.
       operationId: getFeatureDiff
       responses:
-        "200":
+        '200':
           description: Diff between current and desired state
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FeatureDiff"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/FeatureDiff'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
 components:
   parameters:
@@ -799,7 +837,7 @@ components:
         text/plain:
           schema:
             type: string
-            example: "Project not found"
+            example: 'Project not found'
 
     InternalError:
       description: Internal server error
@@ -822,19 +860,19 @@ components:
         slug:
           type: string
           description: URL-friendly identifier (lowercase, hyphenated). Unique across all projects.
-          example: "manifest"
+          example: 'manifest'
         name:
           type: string
-          example: "Manifest"
+          example: 'Manifest'
         description:
           type: string
           nullable: true
-          example: "Living feature documentation server"
+          example: 'Living feature documentation server'
         instructions:
           type: string
           nullable: true
           description: Project-wide instructions for AI agents (coding guidelines, conventions, etc.)
-          example: "Use Result<T,E> for errors. Follow coding-guidelines.md."
+          example: 'Use Result<T,E> for errors. Follow coding-guidelines.md.'
         current_version_id:
           type: string
           format: uuid
@@ -845,6 +883,21 @@ components:
           enum: [backlog, now]
           default: backlog
           description: Where new features go by default. "backlog" leaves them unassigned, "now" assigns to the current version.
+        detail_level:
+          type: string
+          enum: [concise, standard, thorough]
+          default: standard
+          description: How detailed guidance should be for feature sets and project context.
+        ac_level:
+          type: string
+          enum: [concise, standard, thorough]
+          default: standard
+          description: How detailed guidance should be for leaf feature specifications.
+        ac_format:
+          type: string
+          enum: [checkbox, gherkin]
+          default: checkbox
+          description: Output format for acceptance criteria.
         created_at:
           type: string
           format: date-time
@@ -858,12 +911,12 @@ components:
       properties:
         name:
           type: string
-          example: "My Project"
+          example: 'My Project'
         slug:
           type: string
           nullable: true
           description: URL-friendly identifier. If not provided, auto-generated from name.
-          example: "my-project"
+          example: 'my-project'
         description:
           type: string
           nullable: true
@@ -880,7 +933,7 @@ components:
         slug:
           type: string
           description: URL-friendly identifier. Must be unique.
-          example: "my-project"
+          example: 'my-project'
         description:
           type: string
           nullable: true
@@ -897,6 +950,18 @@ components:
           type: string
           enum: [backlog, now]
           description: Where new features go by default. "backlog" leaves them unassigned, "now" assigns to the current version.
+        detail_level:
+          type: string
+          enum: [concise, standard, thorough]
+          description: How detailed guidance should be for feature sets and project context.
+        ac_level:
+          type: string
+          enum: [concise, standard, thorough]
+          description: How detailed guidance should be for leaf feature specifications.
+        ac_format:
+          type: string
+          enum: [checkbox, gherkin]
+          description: Output format for acceptance criteria.
 
     ProjectDirectory:
       type: object
@@ -910,11 +975,11 @@ components:
           format: uuid
         path:
           type: string
-          example: "/Users/dev/projects/my-project"
+          example: '/Users/dev/projects/my-project'
         git_remote:
           type: string
           nullable: true
-          example: "git@github.com:org/repo.git"
+          example: 'git@github.com:org/repo.git'
         is_primary:
           type: boolean
           default: false
@@ -922,7 +987,7 @@ components:
           type: string
           nullable: true
           description: Directory-specific instructions for AI agents (build commands, test commands, etc.)
-          example: "Run tests with: cargo test. Build with: cargo build --release"
+          example: 'Run tests with: cargo test. Build with: cargo build --release'
         created_at:
           type: string
           format: date-time
@@ -933,7 +998,7 @@ components:
       properties:
         path:
           type: string
-          example: "/Users/dev/projects/my-project"
+          example: '/Users/dev/projects/my-project'
         git_remote:
           type: string
           nullable: true
@@ -969,6 +1034,26 @@ components:
           format: uuid
           nullable: true
           description: ID of the current/active version for this project
+        default_feature_destination:
+          type: string
+          enum: [backlog, now]
+          default: backlog
+          description: Where new features go by default. "backlog" leaves them unassigned, "now" assigns to the current version.
+        detail_level:
+          type: string
+          enum: [concise, standard, thorough]
+          default: standard
+          description: How detailed guidance should be for feature sets and project context.
+        ac_level:
+          type: string
+          enum: [concise, standard, thorough]
+          default: standard
+          description: How detailed guidance should be for leaf feature specifications.
+        ac_format:
+          type: string
+          enum: [checkbox, gherkin]
+          default: checkbox
+          description: Output format for acceptance criteria.
         created_at:
           type: string
           format: date-time
@@ -978,7 +1063,7 @@ components:
         directories:
           type: array
           items:
-            $ref: "#/components/schemas/ProjectDirectory"
+            $ref: '#/components/schemas/ProjectDirectory'
 
     # ============================================================
     # Feature schemas
@@ -1000,7 +1085,7 @@ components:
           description: Parent feature ID (null for root features)
         title:
           type: string
-          example: "User Authentication"
+          example: 'User Authentication'
         details:
           type: string
           nullable: true
@@ -1010,7 +1095,7 @@ components:
           nullable: true
           description: Desired feature specification (what the feature SHOULD be). Non-null indicates pending changes.
         state:
-          $ref: "#/components/schemas/FeatureState"
+          $ref: '#/components/schemas/FeatureState'
         priority:
           type: integer
           default: 0
@@ -1054,9 +1139,9 @@ components:
           description: Parent feature ID (null for root features)
         title:
           type: string
-          example: "User Authentication"
+          example: 'User Authentication'
         state:
-          $ref: "#/components/schemas/FeatureState"
+          $ref: '#/components/schemas/FeatureState'
         priority:
           type: integer
           default: 0
@@ -1082,7 +1167,7 @@ components:
           nullable: true
           description: Feature specification including user stories, implementation notes, and technical context
         state:
-          $ref: "#/components/schemas/FeatureState"
+          $ref: '#/components/schemas/FeatureState'
         target_version_id:
           type: string
           format: uuid
@@ -1103,7 +1188,7 @@ components:
           nullable: true
           description: Desired feature specification (what the feature SHOULD be). Set to plan pending changes.
         state:
-          $ref: "#/components/schemas/FeatureState"
+          $ref: '#/components/schemas/FeatureState'
         priority:
           type: integer
           description: Priority for ordering within parent
@@ -1127,7 +1212,7 @@ components:
           type: array
           description: The proposed feature tree to create
           items:
-            $ref: "#/components/schemas/ProposedFeature"
+            $ref: '#/components/schemas/ProposedFeature'
         confirm:
           type: boolean
           default: false
@@ -1143,7 +1228,7 @@ components:
         title:
           type: string
           description: Short capability name (2-5 words). What users can DO.
-          example: "User Authentication"
+          example: 'User Authentication'
         details:
           type: string
           nullable: true
@@ -1159,7 +1244,7 @@ components:
           default: []
           description: Child features (for hierarchical structure)
           items:
-            $ref: "#/components/schemas/ProposedFeature"
+            $ref: '#/components/schemas/ProposedFeature'
 
     PlanFeaturesResponse:
       type: object
@@ -1170,7 +1255,7 @@ components:
           type: array
           description: The proposed feature tree (same as input, for review)
           items:
-            $ref: "#/components/schemas/ProposedFeature"
+            $ref: '#/components/schemas/ProposedFeature'
         created:
           type: boolean
           description: Whether the features were created (true if confirm=true was passed)
@@ -1186,14 +1271,14 @@ components:
       type: object
       description: A feature with its children recursively nested
       allOf:
-        - $ref: "#/components/schemas/Feature"
+        - $ref: '#/components/schemas/Feature'
         - type: object
           required: [children]
           properties:
             children:
               type: array
               items:
-                $ref: "#/components/schemas/FeatureTreeNode"
+                $ref: '#/components/schemas/FeatureTreeNode'
             is_root:
               type: boolean
               default: false
@@ -1224,14 +1309,15 @@ components:
           type: array
           description: Git commits created during this work
           items:
-            $ref: "#/components/schemas/CommitRef"
+            $ref: '#/components/schemas/CommitRef'
         created_at:
           type: string
           format: date-time
 
     ProjectHistoryEntry:
       type: object
-      required: [id, feature_id, feature_title, feature_state, summary, created_at]
+      required:
+        [id, feature_id, feature_title, feature_state, summary, created_at]
       description: |
         Project-wide history entry with feature context. Used for the unified
         project history view, where PMs can see recent changes across all features.
@@ -1246,7 +1332,7 @@ components:
           type: string
           description: Feature title, denormalized for display
         feature_state:
-          $ref: "#/components/schemas/FeatureState"
+          $ref: '#/components/schemas/FeatureState'
           description: Feature state at time of query
         version_id:
           type: string
@@ -1264,7 +1350,7 @@ components:
           type: array
           description: Git commits created during this work
           items:
-            $ref: "#/components/schemas/CommitRef"
+            $ref: '#/components/schemas/CommitRef'
         created_at:
           type: string
           format: date-time
@@ -1303,7 +1389,7 @@ components:
           type: array
           description: Git commits created during this work
           items:
-            $ref: "#/components/schemas/CommitRef"
+            $ref: '#/components/schemas/CommitRef'
         version_id:
           type: string
           format: uuid
@@ -1322,11 +1408,11 @@ components:
         sha:
           type: string
           description: Commit SHA (short or full)
-          example: "abc123f"
+          example: 'abc123f'
         message:
           type: string
           description: Commit message (first line)
-          example: "Add OAuth login flow"
+          example: 'Add OAuth login flow'
         author:
           type: string
           nullable: true
@@ -1349,7 +1435,7 @@ components:
         name:
           type: string
           description: Version name (e.g., "1.0.0", "2.0.0-beta")
-          example: "1.0.0"
+          example: '1.0.0'
         description:
           type: string
           nullable: true
@@ -1405,17 +1491,17 @@ components:
         path:
           type: string
           description: The absolute path being browsed
-          example: "/Users/dev/projects"
+          example: '/Users/dev/projects'
         parent:
           type: string
           nullable: true
           description: Parent directory path, or null if at filesystem root
-          example: "/Users/dev"
+          example: '/Users/dev'
         entries:
           type: array
           description: Subdirectories at this path
           items:
-            $ref: "#/components/schemas/DirectoryEntry"
+            $ref: '#/components/schemas/DirectoryEntry'
 
     DirectoryEntry:
       type: object
@@ -1425,14 +1511,34 @@ components:
         name:
           type: string
           description: Directory name
-          example: "my-project"
+          example: 'my-project'
         path:
           type: string
           description: Full absolute path
-          example: "/Users/dev/projects/my-project"
+          example: '/Users/dev/projects/my-project'
         has_children:
           type: boolean
           description: Whether this directory contains visible subdirectories
+
+    MkdirRequest:
+      type: object
+      required: [path]
+      description: Request to create a directory
+      properties:
+        path:
+          type: string
+          description: Absolute path of the directory to create
+          example: '/Users/dev/projects/my-new-app'
+
+    MkdirResponse:
+      type: object
+      required: [path]
+      description: Result of creating a directory
+      properties:
+        path:
+          type: string
+          description: The absolute path that was created
+          example: '/Users/dev/projects/my-new-app'
 
     ErrorResponse:
       type: object
@@ -1441,4 +1547,4 @@ components:
         error:
           type: string
           description: Error message
-          example: "Path must be absolute"
+          example: 'Path must be absolute'
