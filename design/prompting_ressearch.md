@@ -67,16 +67,16 @@ Across all these teams, common patterns emerge: **be specific about how to accom
 
 Benchmark studies provide quantified evidence for which prompting elements actually move performance metrics. The hierarchy of impact is clear:
 
-| Technique | Measured Impact | Source |
-|-----------|-----------------|--------|
-| Three-part system prompt (persistence, tools, planning) | +20% on SWE-bench Verified | OpenAI GPT-4.1 Guide |
-| Specification-based prompting (µFiX) | +35-80% Pass@1 | Academic study |
-| Self-planning vs direct generation | +25.4% Pass@1 | Jiang et al. 2024 |
-| Structured CoT vs standard CoT | +13.79% Pass@1 | Li et al. 2024 |
-| Function signature inclusion | +10-12 percentage points | CoderEval study |
-| Chain-of-thought prompting | +3-4% on SWE-bench | OpenAI experiments |
-| API-parsed tools vs manual injection | +2% on SWE-bench | OpenAI experiments |
-| Simple persona prompts | ~0% improvement, sometimes degradation | Multiple studies |
+| Technique                                               | Measured Impact                        | Source               |
+| ------------------------------------------------------- | -------------------------------------- | -------------------- |
+| Three-part system prompt (persistence, tools, planning) | +20% on SWE-bench Verified             | OpenAI GPT-4.1 Guide |
+| Specification-based prompting (µFiX)                    | +35-80% Pass@1                         | Academic study       |
+| Self-planning vs direct generation                      | +25.4% Pass@1                          | Jiang et al. 2024    |
+| Structured CoT vs standard CoT                          | +13.79% Pass@1                         | Li et al. 2024       |
+| Function signature inclusion                            | +10-12 percentage points               | CoderEval study      |
+| Chain-of-thought prompting                              | +3-4% on SWE-bench                     | OpenAI experiments   |
+| API-parsed tools vs manual injection                    | +2% on SWE-bench                       | OpenAI experiments   |
+| Simple persona prompts                                  | ~0% improvement, sometimes degradation | Multiple studies     |
 
 **Function signatures** emerged as one of the most important elements for code generation correctness—the difference between highest and lowest performing prompts on CoderEval was **10-12 percentage points**, primarily driven by signature clarity rather than prompting sophistication.
 

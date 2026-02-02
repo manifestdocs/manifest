@@ -12,17 +12,18 @@ Manifest (formerly "RocketManifest", "Legion") is an MCP server for living featu
 
 Unlike JIRA/Linear which track **work items** that accumulate as closed history, Manifest tracks **features** that describe the current state of the system:
 
-| Traditional Tools | Manifest |
-|-------------------|----------|
-| Issue (work item) | Feature (system capability) |
-| Open → Closed → Forgotten | Proposed → Implemented → **Living** |
-| Changelog of what happened | Description of what IS |
+| Traditional Tools          | Manifest                            |
+| -------------------------- | ----------------------------------- |
+| Issue (work item)          | Feature (system capability)         |
+| Open → Closed → Forgotten  | Proposed → Implemented → **Living** |
+| Changelog of what happened | Description of what IS              |
 
 Features are not work items to be closed. They are living descriptions that evolve with the codebase.
 
 ### MCP Server Purpose
 
 AI agents access features through deterministic MCP tools (not grep):
+
 - `get_task_context` - Get assigned task with feature context
 - `start_task` - Signal work is beginning
 - `complete_task` - Mark task as complete
@@ -64,6 +65,7 @@ Test files: `tests/db_spec.rs`, `tests/api_spec.rs` (58 tests total)
 ## Development Practices
 
 **Contract-First Development**: When adding or modifying API endpoints:
+
 1. Update `openapi.yaml` first (or immediately after implementation)
 2. Add tests for the new behavior
 3. Implement the feature
@@ -110,10 +112,12 @@ Authentication/                 <- feature node with context
 ```
 
 **Permanent entities:**
+
 - **Feature**: Self-referential tree via `parent_id`. Any node can have content (story + details). Only **leaf nodes** can have sessions.
 - **FeatureHistory**: Append-only log of implementation sessions (like `git log` for a feature). Records what was done during each session and links to git commits. This is NOT feature versioning—the feature content itself is mutable. History answers "what work was done on this feature and when?"
 
 **Ephemeral entities (exist only during active work):**
+
 - **Session**: One active session per feature at a time. When completed, tasks are squashed into a `feature_history` entry and deleted.
 - **Task**: Work unit within Session, assigned to an agent (claude/gemini/codex). Self-referential via `parent_id` for optional sub-tasks. Deleted when session completes.
 
@@ -132,6 +136,7 @@ Key methods: `get_root_features()`, `get_children(id)`, `is_leaf(id)`
 ### API Routes
 
 All routes prefixed with `/api/v1`:
+
 - Projects: CRUD at `/projects`, `/projects/{id}`
   - `/projects/{id}/directories` - GET/POST project directories
   - `/projects/{id}/features` - GET/POST features for project

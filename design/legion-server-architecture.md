@@ -3,6 +3,7 @@
 ## Overview
 
 Legion Server is a Rust daemon that provides:
+
 1. **HTTP API** - For VSCode extension, CLI, and future web UI
 2. **MCP Server** - For AI agents to access task context and report progress
 
@@ -223,55 +224,55 @@ Base URL: `http://localhost:17010/api/v1`
 
 ### Projects
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/projects` | List all projects |
-| GET | `/projects/:id` | Get project by ID |
-| POST | `/projects` | Create project |
-| PUT | `/projects/:id` | Update project |
-| DELETE | `/projects/:id` | Delete project |
-| GET | `/projects/:id/directories` | List project directories |
-| POST | `/projects/:id/directories` | Add project directory |
-| GET | `/projects/:id/features` | List features for project |
-| POST | `/projects/:id/features` | Create feature in project |
-| GET | `/projects/:id/features/roots` | Get root features |
+| Method | Path                           | Description               |
+| ------ | ------------------------------ | ------------------------- |
+| GET    | `/projects`                    | List all projects         |
+| GET    | `/projects/:id`                | Get project by ID         |
+| POST   | `/projects`                    | Create project            |
+| PUT    | `/projects/:id`                | Update project            |
+| DELETE | `/projects/:id`                | Delete project            |
+| GET    | `/projects/:id/directories`    | List project directories  |
+| POST   | `/projects/:id/directories`    | Add project directory     |
+| GET    | `/projects/:id/features`       | List features for project |
+| POST   | `/projects/:id/features`       | Create feature in project |
+| GET    | `/projects/:id/features/roots` | Get root features         |
 
 ### Features
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/features` | List all features |
-| GET | `/features/:id` | Get feature by ID |
-| PUT | `/features/:id` | Update feature |
-| DELETE | `/features/:id` | Delete feature |
-| GET | `/features/:id/children` | Get direct children |
-| GET | `/features/:id/history` | Get feature history |
-| GET | `/features/:id/notes` | Get implementation notes |
+| Method | Path                     | Description              |
+| ------ | ------------------------ | ------------------------ |
+| GET    | `/features`              | List all features        |
+| GET    | `/features/:id`          | Get feature by ID        |
+| PUT    | `/features/:id`          | Update feature           |
+| DELETE | `/features/:id`          | Delete feature           |
+| GET    | `/features/:id/children` | Get direct children      |
+| GET    | `/features/:id/history`  | Get feature history      |
+| GET    | `/features/:id/notes`    | Get implementation notes |
 
 ### Sessions
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/sessions` | List all sessions |
-| GET | `/sessions/:id` | Get session by ID |
-| POST | `/sessions` | Create session for feature |
-| GET | `/sessions/:id/status` | Get session status with task progress |
-| POST | `/sessions/:id/complete` | Complete session |
+| Method | Path                     | Description                           |
+| ------ | ------------------------ | ------------------------------------- |
+| GET    | `/sessions`              | List all sessions                     |
+| GET    | `/sessions/:id`          | Get session by ID                     |
+| POST   | `/sessions`              | Create session for feature            |
+| GET    | `/sessions/:id/status`   | Get session status with task progress |
+| POST   | `/sessions/:id/complete` | Complete session                      |
 
 ### Tasks
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/tasks/:id` | Get task by ID |
-| PUT | `/tasks/:id` | Update task status |
-| GET | `/tasks/:id/notes` | Get task notes |
-| POST | `/tasks/:id/notes` | Add implementation note |
+| Method | Path               | Description             |
+| ------ | ------------------ | ----------------------- |
+| GET    | `/tasks/:id`       | Get task by ID          |
+| PUT    | `/tasks/:id`       | Update task status      |
+| GET    | `/tasks/:id/notes` | Get task notes          |
+| POST   | `/tasks/:id/notes` | Add implementation note |
 
 ### Health
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check |
+| Method | Path      | Description  |
+| ------ | --------- | ------------ |
+| GET    | `/health` | Health check |
 
 ---
 
@@ -302,6 +303,7 @@ Content-Type: application/json
 ```
 
 Response:
+
 ```json
 {
   "session": {
@@ -333,6 +335,7 @@ GET /api/v1/sessions/:id/status
 ```
 
 Response:
+
 ```json
 {
   "session": {
@@ -370,6 +373,7 @@ The MCP server runs on a Unix socket or TCP port, providing tools for AI agents.
 ### Connection
 
 Agents connect via:
+
 - **Unix socket**: `~/.legion/mcp.sock` (preferred for local)
 - **TCP**: `localhost:3001` (fallback)
 
@@ -397,6 +401,7 @@ Get full context for assigned task.
 ```
 
 Response:
+
 ```json
 {
   "task": {
@@ -533,11 +538,15 @@ export class LegionClient {
     return res.json();
   }
 
-  async createSession(featureId: string, goal: string, tasks: TaskInput[]): Promise<SessionResponse> {
+  async createSession(
+    featureId: string,
+    goal: string,
+    tasks: TaskInput[],
+  ): Promise<SessionResponse> {
     const res = await fetch(`${this.baseUrl}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feature_id: featureId, goal, tasks })
+      body: JSON.stringify({ feature_id: featureId, goal, tasks }),
     });
     return res.json();
   }
@@ -550,11 +559,13 @@ export class LegionClient {
 ```
 
 The extension no longer needs:
+
 - `better-sqlite3` (no native modules!)
 - Database code
 - MCP server code
 
 It only needs:
+
 - HTTP client
 - Tree view UI
 - Webview panels
@@ -576,6 +587,7 @@ claude --mcp-server http://localhost:3001 "Work on task <task-id>"
 ```
 
 The agent then:
+
 1. Calls `get_task_context` with task ID
 2. Works on the implementation
 3. Reports progress via `add_implementation_note`

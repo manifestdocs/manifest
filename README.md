@@ -139,17 +139,20 @@ If Manifest is running on a non-default port or host, pass the URL:
 ### Troubleshooting
 
 **Server not connecting?**
+
 - Ensure Manifest is running (`brew services info manifest` or `manifest serve`)
 - Check that the `manifest` binary is in your PATH
 - Restart your coding agent after config changes
 
 **Permission issues on macOS?**
+
 ```bash
 which manifest
 # Should return /opt/homebrew/bin/manifest or /usr/local/bin/manifest
 ```
 
 **Check MCP server logs:**
+
 ```bash
 manifest mcp --verbose
 ```
@@ -166,12 +169,12 @@ Run this inside Claude Code for slash commands:
 
 ## Core Concepts
 
-| Concept | Description |
-|---------|-------------|
+| Concept     | Description                                                                                                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Feature** | A capability of the system, organized in a hierarchical tree. Features progress through states: `proposed` → `specified` → `implemented` → `deprecated` |
-| **Session** | A work session on a leaf feature. Only one active session per feature at a time. When completed, creates a history entry. |
-| **Task** | A unit of work within a session, assigned to an AI agent. Small enough for one agent (1-3 story points). |
-| **History** | Append-only log of implementation sessions—like `git log` for a feature |
+| **Session** | A work session on a leaf feature. Only one active session per feature at a time. When completed, creates a history entry.                               |
+| **Task**    | A unit of work within a session, assigned to an AI agent. Small enough for one agent (1-3 story points).                                                |
+| **History** | Append-only log of implementation sessions—like `git log` for a feature                                                                                 |
 
 ### Feature Lifecycle
 
@@ -235,40 +238,40 @@ operator mcp add manifest -- manifest mcp
 
 **Setup Tools** (one-time project initialization):
 
-| Tool | Description |
-|------|-------------|
-| `create_project` | Create a project container for features. |
-| `add_project_directory` | Link a filesystem path to a project. |
-| `create_feature` | Define a single system capability. |
-| `plan_features` | Define an entire feature tree in one call. |
+| Tool                    | Description                                |
+| ----------------------- | ------------------------------------------ |
+| `create_project`        | Create a project container for features.   |
+| `add_project_directory` | Link a filesystem path to a project.       |
+| `create_feature`        | Define a single system capability.         |
+| `plan_features`         | Define an entire feature tree in one call. |
 
 **Discovery Tools** (find what to work on):
 
-| Tool | Description |
-|------|-------------|
-| `get_project_context` | Get project info from a directory path. |
-| `find_features` | Find features by project, state, or search query. Returns summaries only. |
-| `get_feature` | Get full details of a specific feature. |
-| `get_feature_history` | View past implementation sessions. |
-| `update_feature_state` | Transition feature through lifecycle. |
+| Tool                   | Description                                                               |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `get_project_context`  | Get project info from a directory path.                                   |
+| `find_features`        | Find features by project, state, or search query. Returns summaries only. |
+| `get_feature`          | Get full details of a specific feature.                                   |
+| `get_feature_history`  | View past implementation sessions.                                        |
+| `update_feature_state` | Transition feature through lifecycle.                                     |
 
 **Orchestrator Tools** (manage sessions and tasks):
 
-| Tool | Description |
-|------|-------------|
-| `create_session` | Start work session on a leaf feature. |
-| `create_task` | Create a task within a session. |
-| `breakdown_feature` | Create session + tasks in one call. |
-| `list_session_tasks` | Monitor progress of all tasks. |
-| `complete_session` | Finalize session, create history entry. |
+| Tool                 | Description                             |
+| -------------------- | --------------------------------------- |
+| `create_session`     | Start work session on a leaf feature.   |
+| `create_task`        | Create a task within a session.         |
+| `breakdown_feature`  | Create session + tasks in one call.     |
+| `list_session_tasks` | Monitor progress of all tasks.          |
+| `complete_session`   | Finalize session, create history entry. |
 
 **Agent Tools** (execute assigned work):
 
-| Tool | Description |
-|------|-------------|
+| Tool               | Description                                              |
+| ------------------ | -------------------------------------------------------- |
 | `get_task_context` | Get assigned task with full feature context. Call FIRST. |
-| `start_task` | Signal work is beginning. Sets status to `running`. |
-| `complete_task` | Signal task is finished. Only call when verified. |
+| `start_task`       | Signal work is beginning. Sets status to `running`.      |
+| `complete_task`    | Signal task is finished. Only call when verified.        |
 
 ### Complete Workflow
 
@@ -389,11 +392,11 @@ curl -X POST http://localhost:17010/api/v1/sessions \
 
 ## Data Storage
 
-| Platform | Location |
-|----------|----------|
-| macOS | `~/.local/share/manifest/manifest.db` |
-| Linux | `~/.local/share/manifest/manifest.db` |
-| Windows | `%APPDATA%\manifest\manifest.db` |
+| Platform | Location                              |
+| -------- | ------------------------------------- |
+| macOS    | `~/.local/share/manifest/manifest.db` |
+| Linux    | `~/.local/share/manifest/manifest.db` |
+| Windows  | `%APPDATA%\manifest\manifest.db`      |
 
 The database auto-migrates on startup.
 
@@ -512,26 +515,26 @@ Features are living documentation. Unlike issues that are "closed and forgotten,
 
 ### Feature States
 
-| State | Description |
-|-------|-------------|
-| `proposed` | Initial idea, not yet fully specified |
-| `specified` | Requirements defined, ready for implementation |
-| `implemented` | Built and deployed (enters "living" phase) |
-| `deprecated` | No longer active, kept for historical reference |
+| State         | Description                                     |
+| ------------- | ----------------------------------------------- |
+| `proposed`    | Initial idea, not yet fully specified           |
+| `specified`   | Requirements defined, ready for implementation  |
+| `implemented` | Built and deployed (enters "living" phase)      |
+| `deprecated`  | No longer active, kept for historical reference |
 
 ### Task States
 
-| State | Description |
-|-------|-------------|
-| `pending` | Not yet started |
-| `running` | Agent is working on it |
-| `completed` | Work finished successfully |
-| `failed` | Work could not be completed |
+| State       | Description                 |
+| ----------- | --------------------------- |
+| `pending`   | Not yet started             |
+| `running`   | Agent is working on it      |
+| `completed` | Work finished successfully  |
+| `failed`    | Work could not be completed |
 
 ### Agent Types
 
-| Type | Description |
-|------|-------------|
+| Type     | Description      |
+| -------- | ---------------- |
 | `claude` | Anthropic Claude |
-| `gemini` | Google Gemini |
-| `codex` | OpenAI Codex |
+| `gemini` | Google Gemini    |
+| `codex`  | OpenAI Codex     |

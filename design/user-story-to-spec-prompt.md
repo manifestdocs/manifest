@@ -6,7 +6,7 @@ Based on 2024-2025 research showing persona prompts ("you are an expert") provid
 
 ## The Prompt
 
-```markdown
+````markdown
 You are preparing a user story for handoff to an AI coding agent. You have access to the codebase context provided below.
 
 ## Your Task
@@ -34,13 +34,17 @@ Transform the user story outline into a complete implementation specification th
 ## Output Specification Format
 
 ### Summary
+
 One sentence describing what this implementation accomplishes.
 
 ### Acceptance Criteria
+
 Concrete, testable conditions that define "done". Format as:
+
 - GIVEN [precondition] WHEN [action] THEN [observable result]
 
 ### Technical Approach
+
 Brief description of the implementation strategy and rationale for key decisions.
 
 ### Function Signatures
@@ -56,38 +60,46 @@ function_name(param1: Type, param2: Type) -> ReturnType
 \```
 
 ### Implementation Breakdown
+
 Ordered list of discrete implementation steps. Each step should be:
+
 - Small enough to verify independently
 - Named with intent (what it accomplishes, not how)
 - Include expected file location
 
 ### Edge Cases & Error Handling
+
 For each edge case identified:
+
 - Condition that triggers it
 - Expected behavior
 - How to verify correct handling
 
 ### Test Cases
+
 Concrete test scenarios:
 \```
 TEST: [descriptive name]
-  SETUP: [preconditions]
-  ACTION: [what is invoked]
-  ASSERT: [expected outcome]
+SETUP: [preconditions]
+ACTION: [what is invoked]
+ASSERT: [expected outcome]
 \```
 
 ### Dependencies & Prerequisites
+
 - External packages needed
 - Environment configuration
 - Database migrations or schema changes
 - Other stories that must be completed first
 
 ### Files to Modify/Create
-| File Path | Action | Purpose |
-|-----------|--------|---------|
+
+| File Path    | Action        | Purpose           |
+| ------------ | ------------- | ----------------- |
 | path/to/file | CREATE/MODIFY | Brief description |
 
 ### Out of Scope
+
 Explicitly list related functionality that is NOT part of this story to prevent scope creep.
 
 ---
@@ -95,27 +107,28 @@ Explicitly list related functionality that is NOT part of this story to prevent 
 ## Quality Checks Before Finalizing
 
 Verify your specification:
+
 - [ ] Every acceptance criterion is testable by a machine
 - [ ] Function signatures include all type information
 - [ ] Edge cases cover: empty/null inputs, invalid types, boundary values, failure modes
 - [ ] Implementation steps are ordered by dependency (earlier steps don't depend on later ones)
 - [ ] A coding agent reading only this spec has everything needed to implement and verify
-```
+````
 
 ---
 
 ## Design Rationale
 
-| Decision | Research Basis |
-|----------|----------------|
-| No "you are an expert" framing | Persona prompts show ~0% improvement, sometimes degradation |
-| Explicit analysis phase before output | Self-planning showed +25.4% improvement over direct generation |
-| Function signatures with full types | +10-12 percentage points in CoderEval studies |
-| Structured output sections | SCoT's structural approach showed +13.79% on HumanEval |
-| Test cases with SETUP/ACTION/ASSERT | Feedback loop integration (Reflexion achieved 91% vs 80% baseline) |
-| Checklist verification at end | Aligns with "persistence" instruction pattern (+20% on SWE-bench) |
-| "Out of Scope" section | Devin's "defensive prompting"—anticipate confusion points |
-| Markdown tables for files | Familiar format (Aider research on format alignment) |
+| Decision                              | Research Basis                                                     |
+| ------------------------------------- | ------------------------------------------------------------------ |
+| No "you are an expert" framing        | Persona prompts show ~0% improvement, sometimes degradation        |
+| Explicit analysis phase before output | Self-planning showed +25.4% improvement over direct generation     |
+| Function signatures with full types   | +10-12 percentage points in CoderEval studies                      |
+| Structured output sections            | SCoT's structural approach showed +13.79% on HumanEval             |
+| Test cases with SETUP/ACTION/ASSERT   | Feedback loop integration (Reflexion achieved 91% vs 80% baseline) |
+| Checklist verification at end         | Aligns with "persistence" instruction pattern (+20% on SWE-bench)  |
+| "Out of Scope" section                | Devin's "defensive prompting"—anticipate confusion points          |
+| Markdown tables for files             | Familiar format (Aider research on format alignment)               |
 
 ---
 
@@ -125,6 +138,7 @@ For systems like Legion that assign work to multiple agents:
 
 ```markdown
 ### Agent Assignment Hints
+
 - Complexity estimate: [LOW/MEDIUM/HIGH]
 - Parallelizable steps: [list steps that have no interdependencies]
 - Human review gates: [steps requiring human approval before proceeding]
