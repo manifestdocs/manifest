@@ -1,138 +1,147 @@
 <script lang="ts">
-    import { page } from '$app/stores';
-    import { base } from '$app/paths';
+  import { page } from '$app/stores';
+  import { base } from '$app/paths';
 
-    const navigation = $derived([
-        {
-            title: 'Getting Started',
-            items: [
-                { title: 'Install', href: `${base}/docs/getting-started` },
-                { title: 'Concepts', href: `${base}/docs/getting-started/concepts` }
-            ]
-        },
-        {
-            title: 'CLI Workflow',
-            items: [
-                { title: 'Initialize', href: `${base}/docs/cli/initialize` },
-                { title: 'Planning', href: `${base}/docs/cli/planning` },
-                { title: 'Implementing', href: `${base}/docs/cli/implementing` },
-                { title: 'Versions', href: `${base}/docs/cli/versions` }
-            ]
-        },
-        {
-            title: 'Web Interface',
-            items: [
-                { title: 'Overview', href: `${base}/docs/web` },
-                { title: 'Edit View', href: `${base}/docs/web/edit` },
-                { title: 'Plan View', href: `${base}/docs/web/plan` },
-                { title: 'History View', href: `${base}/docs/web/history` }
-            ]
-        }
-    ]);
+  const navigation = $derived([
+    {
+      title: 'Getting Started',
+      items: [
+        { title: 'Install', href: `${base}/docs/getting-started` },
+        { title: 'Concepts', href: `${base}/docs/getting-started/concepts` },
+      ],
+    },
+    {
+      title: 'CLI Workflow',
+      items: [
+        { title: 'Initialize', href: `${base}/docs/cli/initialize` },
+        { title: 'Planning', href: `${base}/docs/cli/planning` },
+        { title: 'Implementing', href: `${base}/docs/cli/implementing` },
+        { title: 'Versions', href: `${base}/docs/cli/versions` },
+      ],
+    },
+    {
+      title: 'Web Interface',
+      items: [
+        { title: 'Overview', href: `${base}/docs/web` },
+        { title: 'Edit View', href: `${base}/docs/web/edit` },
+        { title: 'Plan View', href: `${base}/docs/web/plan` },
+        { title: 'History View', href: `${base}/docs/web/history` },
+      ],
+    },
+  ]);
 
-    let { onNavigate, cameFromApp = false }: { onNavigate?: () => void; cameFromApp?: boolean } = $props();
+  let {
+    onNavigate,
+    cameFromApp = false,
+  }: { onNavigate?: () => void; cameFromApp?: boolean } = $props();
 
-    const backLink = $derived(cameFromApp ? { href: `${base}/projects`, label: 'Back to App' } : { href: `${base}/`, label: 'Back to Home' });
+  const backLink = $derived(
+    cameFromApp
+      ? { href: `${base}/projects`, label: 'Back to App' }
+      : { href: `${base}/`, label: 'Back to Home' },
+  );
 
-    function isActive(href: string): boolean {
-        return $page.url.pathname === href;
-    }
+  function isActive(href: string): boolean {
+    return $page.url.pathname === href;
+  }
 
-    function handleClick() {
-        onNavigate?.();
-    }
+  function handleClick() {
+    onNavigate?.();
+  }
 </script>
 
 <nav class="docs-sidebar">
-    <a href={backLink.href} class="back-link">&larr; {backLink.label}</a>
+  <a href={backLink.href} class="back-link">&larr; {backLink.label}</a>
 
-    {#each navigation as section}
-        <div class="nav-section">
-            <h3 class="nav-section-title">{section.title}</h3>
-            <ul class="nav-list">
-                {#each section.items as item}
-                    <li>
-                        <a
-                            href={item.href}
-                            class="nav-link"
-                            class:active={isActive(item.href)}
-                            onclick={handleClick}
-                        >
-                            {item.title}
-                        </a>
-                    </li>
-                {/each}
-            </ul>
-        </div>
-    {/each}
+  {#each navigation as section}
+    <div class="nav-section">
+      <h3 class="nav-section-title">{section.title}</h3>
+      <ul class="nav-list">
+        {#each section.items as item}
+          <li>
+            <a
+              href={item.href}
+              class="nav-link"
+              class:active={isActive(item.href)}
+              onclick={handleClick}
+            >
+              {item.title}
+            </a>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/each}
 </nav>
 
 <style>
-    .docs-sidebar {
-        display: flex;
-        flex-direction: column;
-        gap: 1.5rem;
-        padding: 1.5rem;
-        width: 16rem;
-        height: 100%;
-        overflow-y: auto;
-        border-right: 1px solid var(--border-muted);
-        background: var(--background);
-    }
+  .docs-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    padding: 1.5rem;
+    width: 16rem;
+    height: 100%;
+    overflow-y: auto;
+    border-right: 1px solid var(--border-muted);
+    background: var(--background);
+  }
 
-    .back-link {
-        color: var(--foreground-muted);
-        text-decoration: none;
-        font-size: 1.04rem;
-        margin-bottom: 0.5rem;
-    }
+  .back-link {
+    color: var(--foreground-muted);
+    text-decoration: none;
+    font-size: 1.04rem;
+    margin-bottom: 0.5rem;
+  }
 
-    .back-link:hover {
-        color: var(--foreground);
-    }
+  .back-link:hover {
+    color: var(--foreground);
+  }
 
-    .nav-section {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-    }
+  .nav-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
 
-    .nav-section-title {
-        font-size: 0.89rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--foreground);
-        margin: 0;
-    }
+  .nav-section-title {
+    font-size: 0.89rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--foreground);
+    margin: 0;
+  }
 
-    .nav-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 0.125rem;
-    }
+  .nav-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
 
-    .nav-link {
-        display: block;
-        padding: 0.375rem 0.75rem;
-        font-size: 1.04rem;
-        color: var(--foreground-muted);
-        text-decoration: none;
-        border-radius: 0.25rem;
-        transition: background-color 0.15s ease, color 0.15s ease;
-    }
+  .nav-link {
+    display: block;
+    padding: 0.375rem 0.75rem;
+    font-size: 1.04rem;
+    color: var(--foreground-muted);
+    text-decoration: none;
+    border-radius: 0.25rem;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
 
-    .nav-link:hover {
-        background: var(--background-muted);
-        color: var(--foreground);
-    }
+  .nav-link:hover {
+    background: var(--background-muted);
+    color: var(--foreground);
+  }
 
-    .nav-link.active {
-        background: var(--background-muted);
-        color: var(--accent-green);
-        font-weight: 500;
-    }
+  .nav-link.active {
+    background: var(--background-muted);
+    color: var(--accent-green);
+    font-weight: 500;
+  }
 </style>

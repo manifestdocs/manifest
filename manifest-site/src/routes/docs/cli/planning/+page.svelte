@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { base } from '$app/paths';
-    import { Admonition, CodeBlock } from '$lib/components/docs';
+  import { base } from '$app/paths';
+  import { Admonition, CodeBlock } from '$lib/components/docs';
 </script>
 
 <h1>Planning Features</h1>
@@ -21,15 +21,17 @@
 
 <p>Describe what you're building:</p>
 
-<CodeBlock code={`This is an e-commerce app. Users can browse products,
-add items to a cart, and checkout with Stripe.`} />
+<CodeBlock
+  code={`This is an e-commerce app. Users can browse products,
+add items to a cart, and checkout with Stripe.`}
+/>
 
 <p>The agent will identify features like:</p>
 
 <ul>
-    <li>Product Catalog</li>
-    <li>Shopping Cart</li>
-    <li>Stripe Checkout</li>
+  <li>Product Catalog</li>
+  <li>Shopping Cart</li>
+  <li>Stripe Checkout</li>
 </ul>
 
 <h2>Add individual features</h2>
@@ -40,12 +42,17 @@ add items to a cart, and checkout with Stripe.`} />
 
 <p>For related features:</p>
 
-<CodeBlock code="Plan features for user authentication: password login, OAuth, and password reset" />
+<CodeBlock
+  code="Plan features for user authentication: password login, OAuth, and password reset"
+/>
 
 <Admonition type="skill" title="Claude Code slash command /manifest:plan">
-    {#snippet children()}
-        <p>Use <code>/manifest:plan</code> for an interactive planning session. The agent will guide you through feature decomposition and confirm before creating.</p>
-    {/snippet}
+  {#snippet children()}
+    <p>
+      Use <code>/manifest:plan</code> for an interactive planning session. The agent
+      will guide you through feature decomposition and confirm before creating.
+    </p>
+  {/snippet}
 </Admonition>
 
 <h2>Review the tree</h2>
@@ -56,7 +63,9 @@ add items to a cart, and checkout with Stripe.`} />
 
 <p>The agent will display:</p>
 
-<CodeBlock copyable={false} code={`MyProject
+<CodeBlock
+  copyable={false}
+  code={`MyProject
 ├── ◇ Authentication
 │   ├── ◇ Password Login
 │   ├── ◇ OAuth
@@ -65,12 +74,16 @@ add items to a cart, and checkout with Stripe.`} />
 ├── ◇ Shopping Cart
 └── ◇ Stripe Checkout
 
-Legend: ◇ proposed  ○ in_progress  ● implemented  ✗ deprecated`} />
+Legend: ◇ proposed  ○ in_progress  ● implemented  ✗ deprecated`}
+/>
 
 <Admonition type="skill" title="Claude Code slash command /manifest:tree">
-    {#snippet children()}
-        <p>Use <code>/manifest:tree</code> to quickly display the feature hierarchy with status symbols.</p>
-    {/snippet}
+  {#snippet children()}
+    <p>
+      Use <code>/manifest:tree</code> to quickly display the feature hierarchy with
+      status symbols.
+    </p>
+  {/snippet}
 </Admonition>
 
 <h2>Organize with hierarchy</h2>
@@ -81,13 +94,18 @@ Legend: ◇ proposed  ○ in_progress  ● implemented  ✗ deprecated`} />
 
 <p>Or create a parent for existing features:</p>
 
-<CodeBlock code="Group Product Catalog, Shopping Cart, and Checkout under a Storefront parent" />
+<CodeBlock
+  code="Group Product Catalog, Shopping Cart, and Checkout under a Storefront parent"
+/>
 
 <p>
-    Parent features can include context that flows to children: architectural decisions, shared conventions,
-    or technical constraints that apply to all features in that group.
+  Parent features can include context that flows to children: architectural
+  decisions, shared conventions, or technical constraints that apply to all
+  features in that group.
 </p>
 
 <h2>Next step</h2>
 
-<p>Continue to <a href="{base}/docs/cli/implementing">Implementing features</a>.</p>
+<p>
+  Continue to <a href="{base}/docs/cli/implementing">Implementing features</a>.
+</p>
