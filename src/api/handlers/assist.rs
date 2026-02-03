@@ -468,7 +468,7 @@ fn build_feature_context(ctx: &ChatContext) -> String {
     };
 
     let mut parts = Vec::new();
-    parts.push(format!("## Active Feature Context\n"));
+    parts.push("## Active Feature Context\n".to_string());
     parts.push(format!(
         "The user is viewing the feature **\"{}\"**.",
         title
