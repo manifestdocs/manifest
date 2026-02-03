@@ -16,6 +16,7 @@ use crate::mcp::{
 use crate::models::{AddDirectoryInput, CreateProjectInput, ProjectId};
 
 use super::client_err;
+use super::format;
 
 /// List projects, optionally filtered by directory path.
 pub async fn list_projects(
@@ -58,27 +59,43 @@ pub async fn list_projects(
     // No filter - return all projects
     let projects = client.list_projects().await.map_err(client_err)?;
 
-    // Build project info with instructions from root feature (source of truth)
-    let mut project_infos = Vec::with_capacity(projects.len());
-    for p in projects {
-        let instructions = client.get_project_instructions_summary(&p).await;
-        project_infos.push(ProjectInfo {
-            id: p.id.into(),
-            name: p.name,
-            description: p.description,
-            instructions,
-        });
+    if projects.len() <= 1 {
+        // Single project or empty: return as JSON (same as directory-filtered path)
+        let mut project_infos = Vec::with_capacity(projects.len());
+        for p in projects {
+            let instructions = client.get_project_instructions_summary(&p).await;
+            project_infos.push(ProjectInfo {
+                id: p.id.into(),
+                name: p.name,
+                description: p.description,
+                instructions,
+            });
+        }
+        let result = ProjectListResponse {
+            projects: project_infos,
+            hint: None,
+        };
+        let json = serde_json::to_string_pretty(&result)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        return Ok(CallToolResult::success(vec![Content::text(json)]));
     }
 
-    let result = ProjectListResponse {
-        projects: project_infos,
-        hint: None,
-    };
+    // Multiple projects: render as markdown table
+    let headers = &["ID", "Name", "Description"];
+    let rows: Vec<Vec<String>> = projects
+        .iter()
+        .map(|p| {
+            let id: uuid::Uuid = p.id.into();
+            vec![
+                format::short_id(&id),
+                p.name.clone(),
+                p.description.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
 
-    let json = serde_json::to_string_pretty(&result)
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    let output = format::markdown_table(headers, &rows);
+    Ok(CallToolResult::success(vec![Content::text(output)]))
 }
 
 /// Initialize a new project or link a directory to an existing one.

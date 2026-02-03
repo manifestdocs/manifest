@@ -9,12 +9,14 @@ use crate::mcp::{
     tree_render,
     types::{
         CommitInfo, CompleteFeatureRequest, CreateFeatureRequest, DeleteFeatureRequest,
-        FeatureInfo, FeatureInfoWithContext, FeatureListSummaryResponse, FeatureSummaryInfo,
-        FindFeaturesRequest, GetFeatureRequest, GetNextFeatureRequest, HistoryEntryInfo,
-        PlanFeaturesRequest, RenderFeatureTreeRequest, StartFeatureRequest, UpdateFeatureRequest,
+        FeatureInfo, FeatureInfoWithContext, FindFeaturesRequest, GetFeatureRequest,
+        GetNextFeatureRequest, HistoryEntryInfo, PlanFeaturesRequest, RenderFeatureTreeRequest,
+        StartFeatureRequest, UpdateFeatureRequest,
     },
     ManifestClient,
 };
+
+use super::format;
 use crate::models::{
     CommitRef, CreateFeatureInput, FeatureId, FeatureState, UpdateFeatureInput, VersionId,
 };
@@ -28,36 +30,62 @@ pub async fn find_features(
     client: &ManifestClient,
     req: FindFeaturesRequest,
 ) -> Result<CallToolResult, McpError> {
+    // Default limit of 50 when none specified
+    let default_limit = 50u32;
+    let effective_limit = req.limit.or(Some(default_limit));
+
     // If query is provided, use search; otherwise use list
     let features = if let Some(ref query) = req.query {
         client
-            .search_features(query, req.project_id, req.limit)
+            .search_features(query, req.project_id, effective_limit)
             .await
             .map_err(client_err)?
     } else {
         client
-            .list_features(req.project_id, req.state.as_deref(), req.limit, req.offset)
+            .list_features(
+                req.project_id,
+                req.state.as_deref(),
+                effective_limit,
+                req.offset,
+            )
             .await
             .map_err(client_err)?
     };
 
-    let result = FeatureListSummaryResponse {
-        features: features
-            .into_iter()
-            .map(|f| FeatureSummaryInfo {
-                id: f.id.into(),
-                title: f.title,
-                state: f.state.as_str().to_string(),
-                priority: f.priority,
-                parent_id: f.parent_id.map(Into::into),
-            })
-            .collect(),
-    };
+    let total = features.len();
+    let was_capped = req.limit.is_none() && total as u32 == default_limit;
 
-    let json = serde_json::to_string_pretty(&result)
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+    // Render as markdown table
+    let headers = &["ID", "State", "P", "Parent", "Title"];
+    let rows: Vec<Vec<String>> = features
+        .iter()
+        .map(|f| {
+            let id: uuid::Uuid = f.id.into();
+            vec![
+                format::short_id(&id),
+                format::state_symbol(&f.state.as_str()).to_string(),
+                f.priority.to_string(),
+                f.parent_id
+                    .map(|pid| {
+                        let pid_uuid: uuid::Uuid = pid.into();
+                        format::short_id(&pid_uuid)
+                    })
+                    .unwrap_or_default(),
+                f.title.clone(),
+            ]
+        })
+        .collect();
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    let mut output = format::markdown_table(headers, &rows);
+
+    if was_capped {
+        output.push_str(&format!(
+            "\nShowing first {} features. Use `limit` and `offset` to paginate.",
+            default_limit
+        ));
+    }
+
+    Ok(CallToolResult::success(vec![Content::text(output)]))
 }
 
 /// Get detailed information about a specific feature.
@@ -65,53 +93,62 @@ pub async fn get_feature(
     client: &ManifestClient,
     req: GetFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
-    let feature_with_context = client
-        .get_feature_with_context(req.feature_id)
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
         .await
         .map_err(client_err)?;
 
-    let feature_info: FeatureInfoWithContext = (&feature_with_context).into();
+    let feature_with_context = client
+        .get_feature_with_context(feature_id)
+        .await
+        .map_err(client_err)?;
 
-    // Convert to JSON Value so we can optionally add history
-    let mut result = serde_json::to_value(&feature_info)
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+    let mut feature_info: FeatureInfoWithContext = (&feature_with_context).into();
+
+    // Apply LOD to breadcrumb: direct parent gets full details, more distant ancestors truncated
+    feature_info.breadcrumb = format::lod_breadcrumb(&feature_info.breadcrumb, 1);
 
     // Optionally include history
-    if req.include_history {
+    let history = if req.include_history {
         let history = client
-            .get_feature_history(req.feature_id)
+            .get_feature_history(feature_id)
             .await
             .map_err(client_err)?;
 
-        let history_entries: Vec<HistoryEntryInfo> = history
-            .into_iter()
-            .map(|h| HistoryEntryInfo {
-                id: h.id.into(),
-                version_id: h.version_id.map(Into::into),
-                version_name: None,
-                summary: h.details.summary,
-                commits: h
-                    .details
-                    .commits
-                    .into_iter()
-                    .map(|c| CommitInfo {
-                        sha: c.sha,
-                        message: c.message,
-                        author: c.author,
-                    })
-                    .collect(),
-                created_at: h.created_at.to_rfc3339(),
-            })
-            .collect();
+        Some(
+            history
+                .into_iter()
+                .map(|h| HistoryEntryInfo {
+                    id: h.id.into(),
+                    version_id: h.version_id.map(Into::into),
+                    version_name: None,
+                    summary: h.details.summary,
+                    commits: h
+                        .details
+                        .commits
+                        .into_iter()
+                        .map(|c| CommitInfo {
+                            sha: c.sha,
+                            message: c.message,
+                            author: c.author,
+                        })
+                        .collect(),
+                    created_at: h.created_at.to_rfc3339(),
+                })
+                .collect(),
+        )
+    } else {
+        None
+    };
 
-        result["history"] = serde_json::to_value(history_entries)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-    }
+    let response = crate::mcp::types::GetFeatureResponse {
+        feature: feature_info,
+        history,
+    };
 
-    let json = serde_json::to_string_pretty(&result)
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+    let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![Content::text(yaml)]))
 }
 
 /// Render a project's feature tree as ASCII art.
@@ -248,14 +285,16 @@ pub async fn delete_feature(
     client: &ManifestClient,
     req: DeleteFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
-    // Fetch the feature first so we can confirm what was deleted
-    let feature = client
-        .get_feature(req.feature_id)
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
         .await
         .map_err(client_err)?;
 
+    // Fetch the feature first so we can confirm what was deleted
+    let feature = client.get_feature(feature_id).await.map_err(client_err)?;
+
     client
-        .delete_feature(req.feature_id)
+        .delete_feature(feature_id)
         .await
         .map_err(client_err)?;
 
@@ -273,9 +312,14 @@ pub async fn start_feature(
     client: &ManifestClient,
     req: StartFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
+        .await
+        .map_err(client_err)?;
+
     // Get current feature with context (includes children)
     let feature_with_context = client
-        .get_feature_with_context(req.feature_id)
+        .get_feature_with_context(feature_id)
         .await
         .map_err(client_err)?;
 
@@ -308,7 +352,7 @@ pub async fn start_feature(
     if feature_with_context.feature.state == FeatureState::Proposed {
         client
             .update_feature(
-                req.feature_id,
+                feature_id,
                 &UpdateFeatureInput {
                     parent_id: None,
                     title: None,
@@ -329,37 +373,37 @@ pub async fn start_feature(
 
     // Re-fetch context to get updated states
     let feature_with_context = client
-        .get_feature_with_context(req.feature_id)
+        .get_feature_with_context(feature_id)
         .await
         .map_err(client_err)?;
 
-    let result: FeatureInfoWithContext = (&feature_with_context).into();
+    let mut feature_info: FeatureInfoWithContext = (&feature_with_context).into();
 
-    // Build response JSON with spec_status injected
-    let mut result_json =
-        serde_json::to_value(&result).map_err(|e| McpError::internal_error(e.to_string(), None))?;
-    result_json["spec_status"] = serde_json::json!(spec_status.summary());
-    result_json["feature_tier"] = serde_json::json!(spec_status.tier.as_str());
-    result_json["ac_level"] = serde_json::json!(config.ac_level.as_str());
-    result_json["ac_format"] = serde_json::json!(config.ac_format.as_str());
-    result_json["detail_level"] = serde_json::json!(config.detail_level.as_str());
-    result_json["workflow_reminder"] = serde_json::json!(
-        "IMPORTANT: When you finish this work, you MUST call complete_feature with a summary of what you did and any commit SHAs. This records history for future agents."
-    );
+    // Apply LOD to breadcrumb
+    feature_info.breadcrumb = format::lod_breadcrumb(&feature_info.breadcrumb, 1);
 
-    let json = serde_json::to_string_pretty(&result_json)
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+    let response = crate::mcp::types::StartFeatureResponse {
+        feature: feature_info,
+        spec_status: spec_status.summary().to_string(),
+        feature_tier: spec_status.tier.as_str().to_string(),
+        ac_level: config.ac_level.as_str().to_string(),
+        ac_format: config.ac_format.as_str().to_string(),
+        detail_level: config.detail_level.as_str().to_string(),
+        workflow_reminder: "IMPORTANT: When you finish this work, you MUST call complete_feature with a summary of what you did and any commit SHAs. This records history for future agents.".to_string(),
+    };
+
+    let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
 
     // If spec has warnings, prepend a warning text block
     if spec_status.has_warnings(&config) {
         let warning = spec_status.guidance(&config).unwrap_or_default();
         return Ok(CallToolResult::success(vec![
-            Content::text(format!("⚠ {}", warning)),
-            Content::text(json),
+            Content::text(format!("\u{26a0} {}", warning)),
+            Content::text(yaml),
         ]));
     }
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![Content::text(yaml)]))
 }
 
 /// Recursively transition proposed children to in_progress.
@@ -462,7 +506,7 @@ pub async fn get_next_feature(
         .await
         .map_err(client_err)?;
 
-    let json = match result {
+    let output = match result {
         Some(feature_ctx) => {
             // Fetch project settings for configurable guidance levels
             let project_id: uuid::Uuid = feature_ctx.feature.project_id.into();
@@ -480,22 +524,25 @@ pub async fn get_next_feature(
                 is_root,
             );
 
-            let info: FeatureInfoWithContext = (&feature_ctx).into();
-            let mut result_json = serde_json::to_value(&info)
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-            result_json["spec_status"] = serde_json::json!(spec_status.summary());
-            result_json["feature_tier"] = serde_json::json!(spec_status.tier.as_str());
-            result_json["ac_level"] = serde_json::json!(config.ac_level.as_str());
-            result_json["ac_format"] = serde_json::json!(config.ac_format.as_str());
-            result_json["detail_level"] = serde_json::json!(config.detail_level.as_str());
-            if let Some(guidance) = spec_status.guidance(&config) {
-                result_json["spec_guidance"] = serde_json::json!(guidance);
-            }
-            serde_json::to_string_pretty(&result_json)
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            let mut info: FeatureInfoWithContext = (&feature_ctx).into();
+
+            // Apply LOD to breadcrumb
+            info.breadcrumb = format::lod_breadcrumb(&info.breadcrumb, 1);
+
+            let response = crate::mcp::types::NextFeatureResponse {
+                feature: info,
+                spec_status: spec_status.summary().to_string(),
+                feature_tier: spec_status.tier.as_str().to_string(),
+                ac_level: config.ac_level.as_str().to_string(),
+                ac_format: config.ac_format.as_str().to_string(),
+                detail_level: config.detail_level.as_str().to_string(),
+                spec_guidance: spec_status.guidance(&config),
+            };
+
+            format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?
         }
         None => "null".to_string(),
     };
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![Content::text(output)]))
 }

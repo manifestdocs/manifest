@@ -136,6 +136,50 @@ impl Database {
         row.as_ref().map(row_to_feature).transpose()
     }
 
+    /// Resolve a feature by UUID prefix (e.g., first 8 chars from short IDs).
+    ///
+    /// If `project_id` is provided, scopes the search to that project.
+    /// Returns `Ok(Some(feature))` if exactly one feature matches the prefix.
+    /// Returns `Ok(None)` if no features match.
+    /// Returns `Err` if multiple features match (ambiguous prefix).
+    pub async fn resolve_feature_by_prefix(
+        &self,
+        prefix: &str,
+        project_id: Option<ProjectId>,
+    ) -> Result<Option<Feature>> {
+        let pattern = format!("{}%", prefix);
+        let rows = match project_id {
+            Some(pid) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
+                     FROM features WHERE id LIKE $1 AND project_id = $2 LIMIT 2",
+                )
+                .bind(&pattern)
+                .bind(pid.to_string())
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
+                     FROM features WHERE id LIKE $1 LIMIT 2",
+                )
+                .bind(&pattern)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+
+        match rows.len() {
+            0 => Ok(None),
+            1 => Ok(Some(row_to_feature(&rows[0])?)),
+            _ => Err(anyhow::anyhow!(
+                "Ambiguous prefix '{}': matches multiple features",
+                prefix
+            )),
+        }
+    }
+
     /// Get the diff between a feature's current and desired details.
     pub async fn get_feature_diff(&self, id: FeatureId) -> Result<Option<FeatureDiff>> {
         let feature = match self.get_feature(id).await? {

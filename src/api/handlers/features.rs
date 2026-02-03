@@ -336,6 +336,34 @@ pub async fn search_features(
 }
 
 // ============================================================
+// Feature Resolution (short ID prefix matching)
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct ResolveFeatureQuery {
+    /// UUID prefix to resolve (e.g., first 8 characters).
+    pub prefix: String,
+    /// Optional project UUID to scope the search to.
+    pub project_id: Option<Uuid>,
+}
+
+/// Resolve a feature by UUID prefix.
+/// Returns the matching feature if exactly one match is found.
+pub async fn resolve_feature(
+    State(db): State<Database>,
+    Query(query): Query<ResolveFeatureQuery>,
+) -> Result<Json<Feature>, ApiError> {
+    db.resolve_feature_by_prefix(&query.prefix, query.project_id.map(ProjectId::from))
+        .await
+        .map_err(internal_error)?
+        .map(Json)
+        .ok_or(ApiError::from((
+            StatusCode::NOT_FOUND,
+            format!("No feature found matching prefix '{}'", query.prefix),
+        )))
+}
+
+// ============================================================
 // Bulk Feature Creation (for MCP plan_features)
 // ============================================================
 

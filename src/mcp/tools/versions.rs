@@ -6,13 +6,14 @@ use rmcp::{
 use crate::mcp::{
     types::{
         CreateVersionRequest, FeatureInfo, ListVersionsRequest, ReleaseVersionRequest,
-        SetFeatureVersionRequest, VersionInfo, VersionListResponse,
+        SetFeatureVersionRequest, VersionInfo,
     },
     ManifestClient,
 };
 use crate::models::{CreateVersionInput, UpdateFeatureInput, UpdateVersionInput, VersionId};
 
 use super::client_err;
+use super::format;
 
 /// List versions for a project, including 'next' indicator.
 pub async fn list_versions(
@@ -51,36 +52,44 @@ pub async fn list_versions(
 
     let next_version_id = unreleased.first().map(|v| v.id);
 
-    // Build response
-    let result = VersionListResponse {
-        versions: versions
-            .into_iter()
-            .map(|v| {
-                let status = if v.released_at.is_some() {
-                    "released"
-                } else if Some(v.id) == next_version_id {
-                    "next"
-                } else {
-                    "planned"
-                };
-                VersionInfo {
-                    id: v.id.into(),
-                    name: v.name,
-                    description: v.description,
-                    released_at: v.released_at.map(|dt| dt.to_rfc3339()),
-                    feature_count: version_feature_counts.get(&v.id).copied().unwrap_or(0),
-                    status: status.to_string(),
-                }
-            })
-            .collect(),
-        next: next_version_id.map(Into::into),
-        backlog_count,
-    };
+    // Render as markdown table
+    let headers = &["ID", "Name", "Status", "Features", "Description"];
+    let rows: Vec<Vec<String>> = versions
+        .iter()
+        .map(|v| {
+            let status = if v.released_at.is_some() {
+                "released"
+            } else if Some(v.id) == next_version_id {
+                "next"
+            } else {
+                "planned"
+            };
+            let id: uuid::Uuid = v.id.into();
+            let feat_count = version_feature_counts.get(&v.id).copied().unwrap_or(0);
+            vec![
+                format::short_id(&id),
+                v.name.clone(),
+                status.to_string(),
+                feat_count.to_string(),
+                v.description.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
 
-    let json = serde_json::to_string_pretty(&result)
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+    let mut output = format::markdown_table(headers, &rows);
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    // Append metadata line
+    let next_name = versions
+        .iter()
+        .find(|v| Some(v.id) == next_version_id)
+        .map(|v| v.name.as_str())
+        .unwrap_or("none");
+    output.push_str(&format!(
+        "\nNext: {} | Backlog: {} features",
+        next_name, backlog_count
+    ));
+
+    Ok(CallToolResult::success(vec![Content::text(output)]))
 }
 
 /// Create a new version.

@@ -250,6 +250,36 @@ impl ManifestClient {
         self.handle_response(response).await
     }
 
+    /// Resolve a feature ID from either a full UUID or a short prefix.
+    ///
+    /// Tries to parse as UUID first. If that fails, falls back to prefix
+    /// resolution via the API (optionally scoped to a project).
+    pub async fn resolve_feature_id(
+        &self,
+        id_or_prefix: &str,
+        project_id: Option<Uuid>,
+    ) -> Result<Uuid, ClientError> {
+        // Try full UUID parse first
+        if let Ok(uuid) = Uuid::parse_str(id_or_prefix) {
+            return Ok(uuid);
+        }
+
+        // Try prefix resolution
+        let mut params: Vec<(&str, String)> = vec![("prefix".into(), id_or_prefix.to_string())];
+        if let Some(pid) = project_id {
+            params.push(("project_id".into(), pid.to_string()));
+        }
+
+        let response = self
+            .request(reqwest::Method::GET, "/features/resolve")
+            .query(&params)
+            .send()
+            .await?;
+
+        let feature: crate::models::Feature = self.handle_response(response).await?;
+        Ok(feature.id.into())
+    }
+
     /// Delete a feature and its descendants.
     pub async fn delete_feature(&self, id: Uuid) -> Result<(), ClientError> {
         let response = self

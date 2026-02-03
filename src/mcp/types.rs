@@ -15,7 +15,7 @@ use crate::serde_helpers::default_true;
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct StartFeatureRequest {
     #[schemars(description = "The UUID of the feature to start working on")]
-    pub feature_id: Uuid,
+    pub feature_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -66,7 +66,7 @@ pub struct FindFeaturesRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetFeatureRequest {
     #[schemars(description = "The UUID of the feature to retrieve")]
-    pub feature_id: Uuid,
+    pub feature_id: String,
     #[schemars(
         description = "Include implementation history (past work summaries and commits). Defaults to false."
     )]
@@ -77,7 +77,7 @@ pub struct GetFeatureRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeleteFeatureRequest {
     #[schemars(description = "The UUID of the feature to permanently delete")]
-    pub feature_id: Uuid,
+    pub feature_id: String,
 }
 
 /// General-purpose tool for updating any feature field.
@@ -303,7 +303,7 @@ pub struct FeatureSummaryContextInfo {
 
 /// Breadcrumb item for navigation path (root → feature).
 /// Includes details for ancestor context that flows down to children.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BreadcrumbItemInfo {
     pub id: Uuid,
     pub title: String,
@@ -340,6 +340,58 @@ pub struct FeatureInfoWithContext {
     pub children: Vec<FeatureSummaryContextInfo>,
     /// Breadcrumb trail from root to this feature.
     pub breadcrumb: Vec<BreadcrumbItemInfo>,
+}
+
+/// Response for start_feature MCP tool (serialized as YAML).
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct StartFeatureResponse {
+    /// The feature with hierarchical context.
+    #[serde(flatten)]
+    pub feature: FeatureInfoWithContext,
+    /// Spec completeness status.
+    pub spec_status: String,
+    /// Feature tier (root, feature_set, leaf).
+    pub feature_tier: String,
+    /// Acceptance criteria detail level.
+    pub ac_level: String,
+    /// Acceptance criteria format (checkbox, gherkin).
+    pub ac_format: String,
+    /// Specification detail level.
+    pub detail_level: String,
+    /// Reminder to call complete_feature.
+    pub workflow_reminder: String,
+}
+
+/// Response for get_next_feature MCP tool (serialized as YAML).
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct NextFeatureResponse {
+    /// The feature with hierarchical context.
+    #[serde(flatten)]
+    pub feature: FeatureInfoWithContext,
+    /// Spec completeness status.
+    pub spec_status: String,
+    /// Feature tier (root, feature_set, leaf).
+    pub feature_tier: String,
+    /// Acceptance criteria detail level.
+    pub ac_level: String,
+    /// Acceptance criteria format (checkbox, gherkin).
+    pub ac_format: String,
+    /// Specification detail level.
+    pub detail_level: String,
+    /// Guidance for improving spec (if needed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spec_guidance: Option<String>,
+}
+
+/// Get feature response with optional history (serialized as YAML).
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetFeatureResponse {
+    /// The feature with hierarchical context.
+    #[serde(flatten)]
+    pub feature: FeatureInfoWithContext,
+    /// Implementation history (past work summaries and commits).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<Vec<HistoryEntryInfo>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
