@@ -815,14 +815,7 @@ impl Database {
 
     /// Add project_focus table if it doesn't exist.
     async fn migrate_add_project_focus(&self) -> Result<()> {
-        let has_table = if self.dialect.is_sqlite() {
-            let count: i64 =
-                sqlx::query_scalar(&self.dialect.table_exists_sql("project_focus"))
-                    .fetch_one(&self.pool)
-                    .await
-                    .unwrap_or(0);
-            count > 0
-        } else {
+        let has_table = {
             let count: i64 =
                 sqlx::query_scalar(&self.dialect.table_exists_sql("project_focus"))
                     .fetch_one(&self.pool)
