@@ -94,9 +94,120 @@ jobs:
           name: manifest-${{ matrix.target }}
           path: manifest-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
 
+  build-desktop:
+    name: Build Desktop App (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout manifest-server
+        uses: actions/checkout@v4
+        with:
+          path: manifest-server
+
+      - name: Checkout manifest-workspace
+        uses: actions/checkout@v4
+        with:
+          repository: manifestdocs/manifest-workspace
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: workspace
+
+      - name: Checkout manifest-svelte
+        uses: actions/checkout@v4
+        with:
+          repository: manifestdocs/manifest-svelte
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: workspace/manifest-svelte
+
+      - name: Checkout manifest-app
+        uses: actions/checkout@v4
+        with:
+          repository: manifestdocs/manifest-workspace
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: workspace-full
+          sparse-checkout: manifest-app
+
+      - name: Set up workspace layout
+        run: |
+          # Link server into workspace so path dependency resolves
+          ln -s ${{ github.workspace }}/manifest-server workspace/manifest-server
+          # Copy manifest-app from workspace-full
+          cp -r workspace-full/manifest-app workspace/manifest-app
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install frontend dependencies
+        working-directory: workspace
+        run: |
+          cd manifest-svelte && pnpm install && pnpm build && cd ..
+          cd manifest-app && pnpm install
+
+      - name: Import Apple certificate
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $CERTIFICATE_PATH
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Build Tauri app (aarch64)
+        working-directory: workspace/manifest-app
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm tauri build --target aarch64-apple-darwin
+
+      - name: Build Tauri app (x86_64)
+        working-directory: workspace/manifest-app
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm tauri build --target x86_64-apple-darwin
+
+      - name: Collect DMG artifacts
+        run: |
+          mkdir -p dist-desktop
+          VERSION="${{ github.ref_name }}"
+          cp workspace/manifest-app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg \
+            dist-desktop/Manifest-${VERSION}-aarch64.dmg 2>/dev/null || true
+          cp workspace/manifest-app/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg \
+            dist-desktop/Manifest-${VERSION}-x86_64.dmg 2>/dev/null || true
+          ls -la dist-desktop/
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-desktop
+          path: dist-desktop/*.dmg
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, build-desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -195,12 +306,57 @@ jobs:
           end
           FORMULA
 
+      - name: Update Cask formula
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION_NUM="${VERSION#v}"
+
+          # Calculate SHA256 for desktop DMGs (if present)
+          DMG_ARM="artifacts/manifest-desktop/Manifest-${VERSION}-aarch64.dmg"
+          DMG_INTEL="artifacts/manifest-desktop/Manifest-${VERSION}-x86_64.dmg"
+
+          if [ -f "$DMG_ARM" ] && [ -f "$DMG_INTEL" ]; then
+            SHA_DMG_ARM=$(sha256sum "$DMG_ARM" | cut -d' ' -f1)
+            SHA_DMG_INTEL=$(sha256sum "$DMG_INTEL" | cut -d' ' -f1)
+
+            mkdir -p homebrew-tap/Casks
+            cat > homebrew-tap/Casks/manifest.rb << CASK
+          cask "manifest" do
+            arch arm: "aarch64", intel: "x86_64"
+
+            version "${VERSION_NUM}"
+            sha256 arm:   "${SHA_DMG_ARM}",
+                   intel: "${SHA_DMG_INTEL}"
+
+            url "https://github.com/manifestdocs/manifest/releases/download/${VERSION}/Manifest-${VERSION}-#{arch}.dmg"
+            name "Manifest"
+            desc "Living documentation for feature-driven product engineering"
+            homepage "https://github.com/manifestdocs/manifest"
+
+            depends_on macos: ">= :catalina"
+
+            app "Manifest.app"
+
+            zap trash: [
+              "~/.local/share/manifest",
+              "~/Library/Application Support/com.manifest.app",
+              "~/Library/Caches/com.manifest.app",
+              "~/Library/Preferences/com.manifest.app.plist",
+            ]
+          end
+          CASK
+            echo "Cask updated with SHA256 (ARM): $SHA_DMG_ARM, (Intel): $SHA_DMG_INTEL"
+          else
+            echo "Desktop DMG artifacts not found, skipping Cask update"
+          fi
+
       - name: Commit and push
         run: |
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/manifest.rb
+          git add Casks/manifest.rb 2>/dev/null || true
           git commit -m "Update manifest to ${{ github.ref_name }}"
           git push
 

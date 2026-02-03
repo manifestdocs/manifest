@@ -434,6 +434,48 @@ impl ManifestClient {
     }
 
     // ============================================================
+    // Project Focus
+    // ============================================================
+
+    /// Get the focused feature for a project.
+    /// Returns `None` if no feature is focused (404 from API).
+    pub async fn get_project_focus(
+        &self,
+        project_id: Uuid,
+    ) -> Result<Option<(Uuid, String, String)>, ClientError> {
+        let response = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/projects/{}/focus", project_id),
+            )
+            .send()
+            .await?;
+
+        let status = response.status();
+        if status == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(ClientError::Server(format!("{}: {}", status, body)));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct FocusResp {
+            feature_id: Uuid,
+            feature_title: String,
+            feature_state: String,
+        }
+
+        let resp: FocusResp = response.json().await?;
+        Ok(Some((
+            resp.feature_id,
+            resp.feature_title,
+            resp.feature_state,
+        )))
+    }
+
+    // ============================================================
     // Project Analysis
     // ============================================================
 

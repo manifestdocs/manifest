@@ -104,6 +104,10 @@ definitions, usage examples) are fine.
 SCOPE: Stay focused on the feature or version the user is viewing. Do not expand a single \
 feature request into a project-wide plan unless asked.
 
+FEATURE SETS: Feature sets (parents with children) do not have mutable state — their state is \
+informational only. Never change a feature set's state. Never delete, reparent, or restructure \
+a feature set's children unless the user explicitly asks you to.
+
 WORKFLOW: If you call start_feature, follow through with complete_feature when done. \
 When proposing spec changes, use update_feature with desired_details so the user sees \
 a reviewable diff in the UI.
@@ -477,14 +481,17 @@ fn build_feature_context(ctx: &ChatContext) -> String {
         parts.push(format!("Project ID: `{}`", pid));
     }
     if let Some(is_leaf) = ctx.is_leaf {
-        parts.push(format!(
-            "Type: {}",
-            if is_leaf {
-                "leaf feature"
-            } else {
-                "feature set (has children)"
-            }
-        ));
+        if is_leaf {
+            parts.push("Type: leaf feature".to_string());
+        } else {
+            parts.push("Type: feature set (has children)".to_string());
+            parts.push(
+                "IMPORTANT: Feature sets do not have mutable state. Do NOT change this feature's \
+                 state. Do NOT delete, reparent, or restructure its children unless the user \
+                 explicitly asks. You may only update its shared context (details/desired_details)."
+                    .to_string(),
+            );
+        }
     }
 
     if let Some(ref details) = ctx.feature_details {

@@ -9,10 +9,10 @@
 use super::tools;
 use super::types::{
     AddProjectDirectoryRequest, CompleteFeatureRequest, CreateFeatureRequest, CreateVersionRequest,
-    DeleteFeatureRequest, FindFeaturesRequest, GenerateFeatureTreeRequest, GetFeatureRequest,
-    GetNextFeatureRequest, GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest,
-    ListVersionsRequest, PlanFeaturesRequest, ReleaseVersionRequest, RenderFeatureTreeRequest,
-    SetFeatureVersionRequest, StartFeatureRequest, UpdateFeatureRequest,
+    DeleteFeatureRequest, FindFeaturesRequest, GenerateFeatureTreeRequest, GetActiveFeatureRequest,
+    GetFeatureRequest, GetNextFeatureRequest, GetProjectInstructionsRequest, InitProjectRequest,
+    ListProjectsRequest, ListVersionsRequest, PlanFeaturesRequest, ReleaseVersionRequest,
+    RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest, UpdateFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -67,6 +67,16 @@ impl McpServer {
         params: Parameters<GetProjectInstructionsRequest>,
     ) -> Result<CallToolResult, McpError> {
         tools::projects::get_project_instructions(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "ORIENT: Get the feature the user is currently looking at in the Manifest app. This is your DEFAULT tool for resolving what the user means—call it first when they say \"this feature\", \"work on this\", \"implement it\", or give instructions without naming a specific feature. Returns null if no feature is selected. After calling, confirm by naming the feature in your response (e.g., \"I see you have 'OAuth Login' selected\")."
+    )]
+    async fn get_active_feature(
+        &self,
+        params: Parameters<GetActiveFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::context::get_active_feature(&self.client, params.0).await
     }
 
     #[tool(
@@ -198,7 +208,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Get the next workable feature, or null if none. Returns the highest-priority 'proposed' or 'in_progress' feature. Prioritizes the 'next' version (or filter by version_id). Use this to find what to work on."
+        description = "ORIENT: Get the highest-priority workable feature. Returns the top 'proposed' or 'in_progress' feature from the next unreleased version. Use ONLY when the user explicitly asks for \"the next feature\", \"what's next\", or \"what should I work on\". Do NOT use this when the user references a specific feature—use get_active_feature instead."
     )]
     async fn get_next_feature(
         &self,
@@ -289,11 +299,16 @@ Every project has a feature tree—a hierarchy of capabilities the system provid
 IMPORTANT: Parent feature states are managed independently by the user. Do NOT suggest changing a parent's state based on its children's states. A feature set marked ◇ proposed with all ● implemented children is normal — the parent may be proposed because the user plans to add more children, or simply hasn't updated it yet. Only change parent states when the user explicitly asks.
 
 DISCOVERING FEATURES:
-- find_features — find features by project, state, or search term
-- get_feature — get full details and history for a specific feature
-- get_next_feature — get the highest priority proposed or in_progress feature
+When the user asks you to work on something, use these tools to find the right feature:
+
+- get_active_feature — returns the feature selected in the Manifest app. Call this FIRST when the user says "this feature", "work on this", "implement it", or gives instructions without specifying which feature. After calling, confirm by naming the feature (e.g., "I'll work on 'OAuth Login'").
+- get_next_feature — returns the highest-priority proposed or in_progress feature from the next unreleased version. Use ONLY when the user explicitly says "next feature", "what's next", or "what should I work on next".
+- find_features — search features by project, state, or keyword when you need to locate a specific feature by name
+- get_feature — get full details and history for a feature you already have an ID for
 - get_project_instructions — get full project instructions when the breadcrumb summary isn't enough
 - render_feature_tree — display the full tree as ASCII art for the user
+
+RULE: The word "next" triggers get_next_feature. Everything else triggers get_active_feature.
 
 VERSIONS & BACKLOG:
 Versions use semantic versioning (e.g., 0.1.0, 0.2.0, 1.0.0) and organize features into releases. Each version has a lifecycle status:
@@ -355,6 +370,7 @@ WORKFLOW:
 1. ORIENT — understand what exists and what's needed:
    - list_projects (filter by directory_path to find project for your CWD)
    - render_feature_tree — see the full picture
+   - get_active_feature — check what the user is looking at
    - get_feature (include_history=true) — read the spec AND what's been done before
    - get_next_feature — find highest-priority work
 
@@ -409,6 +425,7 @@ Tool results are collapsed JSON. Always summarize for humans:
 - list_projects: "Found project 'Name'" or "No project found for this directory"
 - find_features: "Found N features" + brief list
 - get_feature: "Feature: Title (state)" + key spec details + breadcrumb context if relevant
+- get_active_feature: "You have '[Title]' selected ([state])" or "No feature is currently selected in the app"
 - get_next_feature: "Next up: Title" or "No workable features"
 - render_feature_tree: Show the ASCII tree directly. Do NOT suggest changing parent feature states based on children
 - init_project: "Initialized 'Name' with N detected modules"

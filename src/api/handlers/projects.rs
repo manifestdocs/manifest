@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::db::Database;
 use crate::models::{
-    AddDirectoryInput, CreateProjectInput, Project, ProjectDirectory, ProjectHistoryEntry,
-    ProjectWithDirectories, UpdateProjectInput, VersionId,
+    AddDirectoryInput, CreateProjectInput, FeatureId, Project, ProjectDirectory,
+    ProjectHistoryEntry, ProjectId, ProjectWithDirectories, UpdateProjectInput, VersionId,
 };
 
 use super::{internal_error, ApiError};
@@ -200,6 +200,65 @@ pub async fn remove_project_directory(
             StatusCode::NOT_FOUND,
             "Directory not found".to_string(),
         )))
+    }
+}
+
+// ============================================================
+// Project Focus
+// ============================================================
+
+/// Request body for setting project focus.
+#[derive(Debug, Deserialize)]
+pub struct SetFocusRequest {
+    /// Feature ID to focus on, or null to clear focus.
+    pub feature_id: Option<Uuid>,
+}
+
+/// Response for getting project focus.
+#[derive(Debug, serde::Serialize)]
+pub struct FocusResponse {
+    pub feature_id: Uuid,
+    pub feature_title: String,
+    pub feature_state: String,
+}
+
+/// Set or clear the focused feature for a project.
+pub async fn set_project_focus(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SetFocusRequest>,
+) -> Result<StatusCode, ApiError> {
+    let project_id: ProjectId = id.into();
+    let feature_id = body.feature_id.map(FeatureId::from);
+
+    db.set_project_focus(project_id, feature_id)
+        .await
+        .map_err(internal_error)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Get the focused feature for a project.
+pub async fn get_project_focus(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<FocusResponse>, ApiError> {
+    let project_id: ProjectId = id.into();
+
+    match db
+        .get_project_focus(project_id)
+        .await
+        .map_err(internal_error)?
+    {
+        Some((feature_id, title, state)) => Ok(Json(FocusResponse {
+            feature_id: feature_id.into(),
+            feature_title: title,
+            feature_state: state,
+        })),
+        None => Err(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "No feature is currently focused".to_string(),
+        ))),
     }
 }
 

@@ -190,6 +190,7 @@ impl Database {
                 Box::pin(async move {
                     conn.execute("PRAGMA journal_mode = WAL").await?;
                     conn.execute("PRAGMA foreign_keys = ON").await?;
+                    conn.execute("PRAGMA busy_timeout = 5000").await?;
                     Ok(())
                 })
             });
@@ -338,6 +339,8 @@ impl Database {
         self.migrate_add_guidance_levels().await?;
         // Migration: rename spec_level → ac_level, add ac_format
         self.migrate_rename_spec_to_ac().await?;
+        // Migration: add project_focus table
+        self.migrate_add_project_focus().await?;
         Ok(())
     }
 
@@ -810,6 +813,43 @@ impl Database {
         Ok(())
     }
 
+    /// Add project_focus table if it doesn't exist.
+    async fn migrate_add_project_focus(&self) -> Result<()> {
+        let has_table = if self.dialect.is_sqlite() {
+            let count: i64 =
+                sqlx::query_scalar(&self.dialect.table_exists_sql("project_focus"))
+                    .fetch_one(&self.pool)
+                    .await
+                    .unwrap_or(0);
+            count > 0
+        } else {
+            let count: i64 =
+                sqlx::query_scalar(&self.dialect.table_exists_sql("project_focus"))
+                    .fetch_one(&self.pool)
+                    .await
+                    .unwrap_or(0);
+            count > 0
+        };
+
+        if has_table {
+            tracing::debug!("project_focus migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Creating project_focus table");
+        sqlx::query(
+            "CREATE TABLE project_focus (
+                project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+                feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+                updated_at TEXT NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     /// Get the underlying connection pool.
     #[must_use]
     pub fn pool(&self) -> &AnyPool {
@@ -824,5 +864,41 @@ impl Clone for Database {
             dialect: self.dialect,
             events: self.events.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn migrate_is_idempotent() {
+        let db = Database::open_memory().await.expect("open in-memory db");
+
+        // First migration: creates all tables from scratch
+        db.migrate().await.expect("first migration");
+
+        // Second migration: should succeed without errors (IF NOT EXISTS)
+        db.migrate().await.expect("second migration (idempotent)");
+
+        // Verify tables exist by running a simple query
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM features")
+            .fetch_one(db.pool())
+            .await
+            .expect("query features table");
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn migrate_then_incremental_is_idempotent() {
+        let db = Database::open_memory().await.expect("open in-memory db");
+
+        // Run initial schema
+        db.migrate().await.expect("initial migration");
+
+        // Incremental migrations should be safe to re-run on a fresh schema
+        db.run_incremental_migrations()
+            .await
+            .expect("incremental migrations on fresh schema");
     }
 }

@@ -298,6 +298,69 @@ impl Database {
         }))
     }
 
+    // ============================================================
+    // Project Focus operations
+    // ============================================================
+
+    /// Set the focused feature for a project. Pass `None` to clear focus.
+    pub async fn set_project_focus(
+        &self,
+        project_id: ProjectId,
+        feature_id: Option<FeatureId>,
+    ) -> Result<()> {
+        match feature_id {
+            Some(fid) => {
+                let now = Utc::now();
+                // Upsert: SQLite and Postgres both support this via INSERT ... ON CONFLICT
+                sqlx::query(
+                    "INSERT INTO project_focus (project_id, feature_id, updated_at)
+                     VALUES ($1, $2, $3)
+                     ON CONFLICT (project_id) DO UPDATE SET feature_id = $2, updated_at = $3",
+                )
+                .bind(project_id.to_string())
+                .bind(fid.to_string())
+                .bind(now.to_rfc3339())
+                .execute(&self.pool)
+                .await?;
+            }
+            None => {
+                sqlx::query("DELETE FROM project_focus WHERE project_id = $1")
+                    .bind(project_id.to_string())
+                    .execute(&self.pool)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Get the focused feature for a project.
+    /// Returns `(feature_id, feature_title, feature_state)` or `None` if no focus is set.
+    pub async fn get_project_focus(
+        &self,
+        project_id: ProjectId,
+    ) -> Result<Option<(FeatureId, String, String)>> {
+        let row = sqlx::query(
+            "SELECT f.id, f.title, f.state
+             FROM project_focus pf
+             JOIN features f ON f.id = pf.feature_id
+             WHERE pf.project_id = $1",
+        )
+        .bind(project_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match row {
+            Some(row) => {
+                let id_str: String = row.get("id");
+                let title: String = row.get("title");
+                let state: String = row.get("state");
+                let feature_id: FeatureId = parse_id(id_str)?;
+                Ok(Some((feature_id, title, state)))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Find a project by matching a filesystem path against registered directories.
     ///
     /// Matches the longest directory prefix, so nested paths resolve to the correct project.

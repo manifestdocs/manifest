@@ -1,6 +1,7 @@
 use crate::mcp::client::ClientError;
 use rmcp::ErrorData as McpError;
 
+pub mod context;
 pub mod features;
 pub mod generate;
 pub mod projects;

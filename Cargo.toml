@@ -42,9 +42,9 @@ schemars = { version = "1", features = ["uuid1"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Embedded web assets
-rust-embed = "8"
-mime_guess = "2"
+# Embedded web assets (optional — disabled when used as library in Tauri app)
+rust-embed = { version = "8", optional = true }
+mime_guess = { version = "2", optional = true }
 
 # Utils
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -59,6 +59,10 @@ subtle = "2"
 validator = { version = "0.20", features = ["derive"] }
 dotenvy = "0.15.7"
 open = "5.3.3"
+
+[features]
+default = ["embed-web"]
+embed-web = ["rust-embed", "mime_guess"]
 
 [dev-dependencies]
 tokio-test = "0.4"

@@ -351,7 +351,10 @@ impl Database {
         let desired_details = input.desired_details.unwrap_or(existing.desired_details);
         let details_summary = input.details_summary.unwrap_or(existing.details_summary);
         let is_proposing_changes = desired_details.is_some() && !had_desired_details;
-        let state = if is_proposing_changes {
+        // Guard rail: feature sets (parents with children) do not have mutable state.
+        // Their state is informational only — ignore state changes on non-leaf features.
+        let is_feature_set = !self.is_leaf(id).await?;
+        let state = if is_proposing_changes || is_feature_set {
             existing.state
         } else {
             input.state.unwrap_or(existing.state)

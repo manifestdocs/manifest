@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod api;
+#[cfg(feature = "embed-web")]
 pub mod assets;
 pub mod mcp;
 pub mod serde_helpers;

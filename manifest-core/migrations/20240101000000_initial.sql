@@ -6,7 +6,7 @@
 -- Core Entities
 -- ============================================================
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
     email_verified_at TEXT,
@@ -16,9 +16,9 @@ CREATE TABLE users (
     updated_at TEXT NOT NULL
 );
 
-CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
-CREATE TABLE projects (
+CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     slug TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
@@ -37,10 +37,10 @@ CREATE TABLE projects (
     CONSTRAINT chk_projects_visibility CHECK (visibility IN ('private', 'public'))
 );
 
-CREATE INDEX idx_projects_root_feature ON projects(root_feature_id);
-CREATE INDEX idx_projects_slug ON projects(slug);
+CREATE INDEX IF NOT EXISTS idx_projects_root_feature ON projects(root_feature_id);
+CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
 
-CREATE TABLE project_directories (
+CREATE TABLE IF NOT EXISTS project_directories (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     path TEXT NOT NULL,
@@ -51,9 +51,9 @@ CREATE TABLE project_directories (
     CONSTRAINT fk_project_directories_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_project_directories_project ON project_directories(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_directories_project ON project_directories(project_id);
 
-CREATE TABLE versions (
+CREATE TABLE IF NOT EXISTS versions (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -65,9 +65,9 @@ CREATE TABLE versions (
     UNIQUE(project_id, name)
 );
 
-CREATE INDEX idx_versions_project ON versions(project_id);
+CREATE INDEX IF NOT EXISTS idx_versions_project ON versions(project_id);
 
-CREATE TABLE features (
+CREATE TABLE IF NOT EXISTS features (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     parent_id TEXT,
@@ -86,10 +86,10 @@ CREATE TABLE features (
     CONSTRAINT chk_features_state CHECK (state IN ('proposed', 'in_progress', 'implemented', 'archived'))
 );
 
-CREATE INDEX idx_features_project ON features(project_id);
-CREATE INDEX idx_features_parent ON features(parent_id);
+CREATE INDEX IF NOT EXISTS idx_features_project ON features(project_id);
+CREATE INDEX IF NOT EXISTS idx_features_parent ON features(parent_id);
 
-CREATE TABLE feature_history (
+CREATE TABLE IF NOT EXISTS feature_history (
     id TEXT PRIMARY KEY,
     feature_id TEXT,
     version_id TEXT,
@@ -100,14 +100,26 @@ CREATE TABLE feature_history (
     CONSTRAINT fk_history_version FOREIGN KEY (version_id) REFERENCES versions(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_history_feature ON feature_history(feature_id);
-CREATE INDEX idx_history_created ON feature_history(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_history_feature ON feature_history(feature_id);
+CREATE INDEX IF NOT EXISTS idx_history_created ON feature_history(created_at DESC);
+
+-- ============================================================
+-- App Focus (tracks which feature is focused in the desktop app)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS project_focus (
+    project_id TEXT PRIMARY KEY,
+    feature_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CONSTRAINT fk_focus_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_focus_feature FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE
+);
 
 -- ============================================================
 -- Authentication & Authorization
 -- ============================================================
 
-CREATE TABLE oauth_identities (
+CREATE TABLE IF NOT EXISTS oauth_identities (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -121,10 +133,10 @@ CREATE TABLE oauth_identities (
     UNIQUE(provider, provider_user_id)
 );
 
-CREATE INDEX idx_oauth_user ON oauth_identities(user_id);
-CREATE INDEX idx_oauth_provider ON oauth_identities(provider, provider_user_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_user ON oauth_identities(user_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_provider ON oauth_identities(provider, provider_user_id);
 
-CREATE TABLE user_sessions (
+CREATE TABLE IF NOT EXISTS user_sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     user_agent TEXT,
@@ -135,10 +147,10 @@ CREATE TABLE user_sessions (
     CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_sessions_user ON user_sessions(user_id);
-CREATE INDEX idx_sessions_expires ON user_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON user_sessions(expires_at);
 
-CREATE TABLE api_keys (
+CREATE TABLE IF NOT EXISTS api_keys (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -152,10 +164,10 @@ CREATE TABLE api_keys (
     CONSTRAINT fk_api_keys_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_api_keys_user ON api_keys(user_id);
-CREATE INDEX idx_api_keys_prefix ON api_keys(key_prefix);
+CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix);
 
-CREATE TABLE revoked_tokens (
+CREATE TABLE IF NOT EXISTS revoked_tokens (
     jti TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     expires_at TEXT NOT NULL,
@@ -164,10 +176,10 @@ CREATE TABLE revoked_tokens (
     CONSTRAINT fk_revoked_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_revoked_user ON revoked_tokens(user_id);
-CREATE INDEX idx_revoked_expires ON revoked_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_revoked_user ON revoked_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_revoked_expires ON revoked_tokens(expires_at);
 
-CREATE TABLE project_memberships (
+CREATE TABLE IF NOT EXISTS project_memberships (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
@@ -181,10 +193,10 @@ CREATE TABLE project_memberships (
     UNIQUE(project_id, user_id)
 );
 
-CREATE INDEX idx_memberships_project ON project_memberships(project_id);
-CREATE INDEX idx_memberships_user ON project_memberships(user_id);
+CREATE INDEX IF NOT EXISTS idx_memberships_project ON project_memberships(project_id);
+CREATE INDEX IF NOT EXISTS idx_memberships_user ON project_memberships(user_id);
 
-CREATE TABLE project_invitations (
+CREATE TABLE IF NOT EXISTS project_invitations (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     email TEXT NOT NULL,
@@ -199,15 +211,15 @@ CREATE TABLE project_invitations (
     CONSTRAINT chk_invitations_role CHECK (role IN ('admin', 'member', 'viewer'))
 );
 
-CREATE INDEX idx_invitations_project ON project_invitations(project_id);
-CREATE INDEX idx_invitations_email ON project_invitations(email);
-CREATE INDEX idx_invitations_token ON project_invitations(token);
+CREATE INDEX IF NOT EXISTS idx_invitations_project ON project_invitations(project_id);
+CREATE INDEX IF NOT EXISTS idx_invitations_email ON project_invitations(email);
+CREATE INDEX IF NOT EXISTS idx_invitations_token ON project_invitations(token);
 
 -- ============================================================
 -- Audit Logging
 -- ============================================================
 
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     project_id TEXT,
@@ -224,13 +236,13 @@ CREATE TABLE audit_log (
     CONSTRAINT fk_audit_project FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
-CREATE INDEX idx_audit_user ON audit_log(user_id);
-CREATE INDEX idx_audit_project ON audit_log(project_id);
-CREATE INDEX idx_audit_action ON audit_log(action);
-CREATE INDEX idx_audit_resource ON audit_log(resource_type, resource_id);
-CREATE INDEX idx_audit_time ON audit_log(created_at);
-CREATE INDEX idx_audit_user_time ON audit_log(user_id, created_at);
-CREATE INDEX idx_audit_project_time ON audit_log(project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_project ON audit_log(project_id);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_log(resource_type, resource_id);
+CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_user_time ON audit_log(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_project_time ON audit_log(project_id, created_at);
 
 -- ============================================================
 -- Schema Migrations Tracking (for compatibility with existing DBs)

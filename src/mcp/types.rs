@@ -492,6 +492,25 @@ pub struct ReleaseVersionRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetActiveFeatureRequest {
+    #[schemars(description = "The UUID of the project to check focus for")]
+    pub project_id: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ActiveFeatureResponse {
+    /// The focused feature ID, or null if no feature is focused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_id: Option<Uuid>,
+    /// The focused feature title.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_title: Option<String>,
+    /// The focused feature state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_state: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetProjectInstructionsRequest {
     #[schemars(description = "The UUID of the project to get full instructions for")]
     pub project_id: Uuid,
