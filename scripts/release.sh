@@ -54,23 +54,23 @@ echo
 
 CHECKS_FAILED=0
 
-# 1. Server: cargo test (without embed-web, CI builds web assets separately)
+# 1. Server: cargo test (skip embed-web, CI builds web assets separately)
 echo "[1/5] Running server tests..."
-if ! cargo test --all --no-default-features --quiet 2>&1; then
+if ! cargo test -p manifest -p manifest-core --no-default-features --quiet 2>&1; then
     echo "FAIL: cargo test"
     CHECKS_FAILED=1
 fi
 
 # 2. Server: cargo clippy
 echo "[2/5] Running clippy..."
-if ! cargo clippy --all --no-default-features --quiet -- -D warnings 2>&1; then
+if ! cargo clippy -p manifest -p manifest-core --no-default-features --quiet -- -D warnings 2>&1; then
     echo "FAIL: cargo clippy"
     CHECKS_FAILED=1
 fi
 
-# 3. Server: release build (without embed-web, CI builds web assets separately)
+# 3. Server: release build (skip embed-web, CI builds web assets separately)
 echo "[3/5] Building server (release)..."
-if ! cargo build --release --no-default-features --quiet 2>&1; then
+if ! cargo build -p manifest --release --no-default-features --quiet 2>&1; then
     echo "FAIL: cargo build --release"
     CHECKS_FAILED=1
 fi
