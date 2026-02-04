@@ -131,6 +131,10 @@ jobs:
           ln -s ${{ github.workspace }}/manifest-server workspace/manifest-server
           # Copy manifest-app from workspace-full
           cp -r workspace-full/manifest-app workspace/manifest-app
+          # Create stub for manifest-cloud (private, not needed for desktop build)
+          mkdir -p workspace/manifest-cloud/src
+          echo 'fn main() {}' > workspace/manifest-cloud/src/main.rs
+          printf '[package]\nname = "manifest-cloud"\nversion = "0.1.0"\nedition = "2024"\n[dependencies]\nmanifest = { path = "../manifest-server" }\n' > workspace/manifest-cloud/Cargo.toml
 
       - name: Install Node.js
         uses: actions/setup-node@v4

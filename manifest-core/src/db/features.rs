@@ -3,7 +3,9 @@ use chrono::Utc;
 use sqlx::Row;
 
 use super::helpers::*;
-use super::{escape_like_pattern, Database, FeatureEvent, ManifestError, RootFeatureMigrationReport};
+use super::{
+    escape_like_pattern, Database, FeatureEvent, ManifestError, RootFeatureMigrationReport,
+};
 use crate::models::*;
 
 impl Database {
