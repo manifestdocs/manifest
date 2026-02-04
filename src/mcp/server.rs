@@ -70,7 +70,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Get the feature the user is currently looking at in the Manifest app. This is your DEFAULT tool for resolving what the user means—call it first when they say \"this feature\", \"work on this\", \"implement it\", or give instructions without naming a specific feature. Returns null if no feature is selected. After calling, confirm by naming the feature in your response (e.g., \"I see you have 'OAuth Login' selected\")."
+        description = "ORIENT: Get the feature the user is currently looking at in the Manifest app. This is your DEFAULT tool for resolving what the user means—call it first when they say \"this feature\", \"work on this\", \"implement it\", or give instructions without naming a specific feature. Requires project_id — call list_projects first if you don't have it. Returns null if no feature is selected. After calling, confirm by naming the feature in your response (e.g., \"I see you have 'OAuth Login' selected\")."
     )]
     async fn get_active_feature(
         &self,
@@ -144,7 +144,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have concise specifications. REQUIRES target_version_id - call list_versions first or create_version if none exist. With confirm=false, returns a proposal. With confirm=true, creates the features."
+        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have concise specifications. Always provide target_version_id so features land in a release — call list_versions first or create_version if none exist. Omitting it sends features to the Backlog. With confirm=false, returns a proposal. With confirm=true, creates the features."
     )]
     async fn plan(
         &self,
@@ -365,35 +365,6 @@ To write a spec:
 
 Specification length is guided by the project's ac_level setting. After implementation, update details to reflect what was built.
 
-WORKFLOW:
-
-1. ORIENT — understand what exists and what's needed:
-   - list_projects (filter by directory_path to find project for your CWD)
-   - render_feature_tree — see the full picture
-   - get_active_feature — check what the user is looking at
-   - get_feature (include_history=true) — read the spec AND what's been done before
-   - get_next_feature — find highest-priority work
-
-2. CLAIM — MANDATORY before implementing:
-   - ALWAYS call start_feature when asked to implement, work on, or build a feature
-   - start_feature checks specification completeness and transitions proposed → in_progress
-   - If the feature has no details, start_feature will refuse — write a spec first using update_feature
-   - If details are very sparse, you will see a warning — flesh out the spec before implementing
-   - IMPORTANT: The feature's target version is locked during implementation. Do not call set_feature_version while working on a feature.
-
-3. BUILD — implement against the spec:
-   - The feature details ARE your specification
-   - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
-   - Write tests first, then implement, then verify
-   - Use update_feature to evolve the spec as you learn more
-
-4. DOCUMENT — MANDATORY after implementing:
-   - You MUST call complete_feature when work is done. This is not optional.
-   - Provide a summary of what you did + commit SHAs
-   - This creates a history entry so future agents (or future you) know what happened
-   - If you skip this step, there is no record of the work and the feature stays in_progress forever
-   - If you learned something that applies to sibling features, update the parent's details with shared context
-
 UPDATING FEATURES:
 update_feature is the Swiss Army knife for modifying features. Use it to:
 - Change state: Set to 'in_progress', 'implemented', 'archived' as appropriate
@@ -438,4 +409,35 @@ Tool results are collapsed JSON. Always summarize for humans:
 - create_version: "Created version 'Name'"
 - set_feature_version: "Assigned 'Feature' to version 'Name'" or "Unassigned from version"
 - get_project_instructions: Show key sections or confirm instructions were retrieved
-- release_version: "Released 'Name'""#;
+- release_version: "Released 'Name'"
+
+WORKFLOW:
+
+1. ORIENT — understand what exists and what's needed:
+   - list_projects (filter by directory_path to find project for your CWD)
+   - render_feature_tree — see the full picture
+   - get_active_feature — check what the user is looking at
+   - get_feature (include_history=true) — read the spec AND what's been done before
+   - get_next_feature — find highest-priority work
+
+2. CLAIM — MANDATORY before implementing:
+   - ALWAYS call start_feature when asked to implement, work on, or build a feature
+   - start_feature checks specification completeness and transitions proposed → in_progress
+   - If the feature has no details, start_feature will refuse — write a spec first using update_feature
+   - If details are very sparse, you will see a warning — flesh out the spec before implementing
+   - IMPORTANT: The feature's target version is locked during implementation. Do not call set_feature_version while working on a feature.
+
+3. BUILD — implement against the spec:
+   - The feature details ARE your specification
+   - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
+   - Write tests first, then implement, then verify
+   - Use update_feature to evolve the spec as you learn more
+
+4. DOCUMENT — MANDATORY after implementing:
+   - You MUST call complete_feature when work is done. This is not optional.
+   - Provide a summary of what you did + commit SHAs
+   - This creates a history entry so future agents (or future you) know what happened
+   - If you skip this step, there is no record of the work and the feature stays in_progress forever
+   - If you learned something that applies to sibling features, update the parent's details with shared context
+
+Common sequence: list_projects → get_active_feature → start_feature → [implement] → complete_feature"#;

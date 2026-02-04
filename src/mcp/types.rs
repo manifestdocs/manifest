@@ -110,7 +110,7 @@ pub struct UpdateFeatureRequest {
     pub details_summary: Option<String>,
 
     #[schemars(
-        description = "New state. Valid values: 'proposed', 'in_progress', 'implemented', 'archived'. Use your judgment: working on it? 'in_progress'. Done? 'implemented'. Found a bug in 'implemented'? Set back to 'in_progress'. Want to hide but preserve history? 'archived'."
+        description = "New state. Valid values: 'proposed', 'in_progress', 'implemented', 'archived'. Use your judgment: working on it? 'in_progress'. Found a bug in 'implemented'? Set back to 'in_progress'. Want to hide but preserve history? 'archived'. To mark work as DONE, use complete_feature instead — it records history. Only set 'implemented' directly here for corrections or bulk updates."
     )]
     #[serde(default)]
     pub state: Option<String>,
