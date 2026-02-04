@@ -718,11 +718,9 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            "ALTER TABLE projects ADD COLUMN spec_level TEXT NOT NULL DEFAULT 'standard'",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("ALTER TABLE projects ADD COLUMN spec_level TEXT NOT NULL DEFAULT 'standard'")
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }
@@ -760,11 +758,9 @@ impl Database {
         tracing::info!("Renaming spec_level → ac_level and adding ac_format column");
 
         // Add ac_level column
-        sqlx::query(
-            "ALTER TABLE projects ADD COLUMN ac_level TEXT NOT NULL DEFAULT 'standard'",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("ALTER TABLE projects ADD COLUMN ac_level TEXT NOT NULL DEFAULT 'standard'")
+            .execute(&self.pool)
+            .await?;
 
         // Copy spec_level values into ac_level
         sqlx::query("UPDATE projects SET ac_level = spec_level")
@@ -772,11 +768,9 @@ impl Database {
             .await?;
 
         // Add ac_format column
-        sqlx::query(
-            "ALTER TABLE projects ADD COLUMN ac_format TEXT NOT NULL DEFAULT 'checkbox'",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("ALTER TABLE projects ADD COLUMN ac_format TEXT NOT NULL DEFAULT 'checkbox'")
+            .execute(&self.pool)
+            .await?;
 
         tracing::info!("spec_level → ac_level migration complete");
         Ok(())
@@ -816,11 +810,10 @@ impl Database {
     /// Add project_focus table if it doesn't exist.
     async fn migrate_add_project_focus(&self) -> Result<()> {
         let has_table = {
-            let count: i64 =
-                sqlx::query_scalar(&self.dialect.table_exists_sql("project_focus"))
-                    .fetch_one(&self.pool)
-                    .await
-                    .unwrap_or(0);
+            let count: i64 = sqlx::query_scalar(&self.dialect.table_exists_sql("project_focus"))
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
             count > 0
         };
 

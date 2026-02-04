@@ -679,7 +679,10 @@ impl Database {
     // ============================================================
 
     /// Get a feature with its full navigational context (parent, siblings, children, breadcrumb).
-    pub async fn get_feature_with_context(&self, id: FeatureId) -> Result<Option<FeatureWithContext>> {
+    pub async fn get_feature_with_context(
+        &self,
+        id: FeatureId,
+    ) -> Result<Option<FeatureWithContext>> {
         let feature = match self.get_feature(id).await? {
             Some(f) => f,
             None => return Ok(None),

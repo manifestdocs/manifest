@@ -223,7 +223,10 @@ impl Database {
     // ============================================================
 
     /// Get all directories associated with a project.
-    pub async fn get_project_directories(&self, project_id: ProjectId) -> Result<Vec<ProjectDirectory>> {
+    pub async fn get_project_directories(
+        &self,
+        project_id: ProjectId,
+    ) -> Result<Vec<ProjectDirectory>> {
         let rows = sqlx::query(
             "SELECT id, project_id, path, git_remote, is_primary, instructions, created_at
              FROM project_directories WHERE project_id = $1 ORDER BY is_primary DESC, path",
@@ -379,9 +382,7 @@ impl Database {
             if path == dir_path || path.starts_with(&format!("{}/", dir_path)) {
                 let project_id_str: String = row.get("project_id");
                 let project_id: ProjectId = parse_id(project_id_str)?;
-                return self
-                    .get_project_with_directories(project_id)
-                    .await;
+                return self.get_project_with_directories(project_id).await;
             }
         }
 

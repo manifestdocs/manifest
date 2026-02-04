@@ -166,7 +166,10 @@ impl Database {
     }
 
     /// Get OAuth identities for a user.
-    pub async fn get_oauth_identities_for_user(&self, user_id: UserId) -> Result<Vec<OAuthIdentity>> {
+    pub async fn get_oauth_identities_for_user(
+        &self,
+        user_id: UserId,
+    ) -> Result<Vec<OAuthIdentity>> {
         let rows = sqlx::query(
             "SELECT id, user_id, provider, provider_user_id, provider_email, access_token, refresh_token, token_expires_at, created_at
              FROM oauth_identities WHERE user_id = $1",
