@@ -199,17 +199,28 @@ pub async fn create_feature_history(
         .await
         .map_err(internal_error)?;
 
-    // Optionally update feature state to implemented
-    if input.mark_implemented && feature.state != FeatureState::Implemented {
+    // Optionally update feature state to implemented and clear desired_details
+    let needs_state_change = input.mark_implemented && feature.state != FeatureState::Implemented;
+    let has_pending_changes = feature.desired_details.is_some();
+
+    if needs_state_change || (input.mark_implemented && has_pending_changes) {
         db.update_feature(
             feature_id.into(),
             UpdateFeatureInput {
                 parent_id: None,
                 title: None,
                 details: None,
-                desired_details: None,
+                desired_details: if has_pending_changes {
+                    Some(None) // Clear desired_details
+                } else {
+                    None // Don't touch
+                },
                 details_summary: None,
-                state: Some(FeatureState::Implemented),
+                state: if needs_state_change {
+                    Some(FeatureState::Implemented)
+                } else {
+                    None
+                },
                 priority: None,
                 target_version_id: None,
             },

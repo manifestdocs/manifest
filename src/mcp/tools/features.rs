@@ -348,8 +348,16 @@ pub async fn start_feature(
         ))]));
     }
 
-    // Transition to in_progress if proposed
-    if feature_with_context.feature.state == FeatureState::Proposed {
+    // Track whether this is a change request (implemented feature with desired_details)
+    let has_change_request = feature_with_context.feature.desired_details.is_some();
+
+    // Transition to in_progress if proposed, or if implemented with pending changes
+    let should_transition = match feature_with_context.feature.state {
+        FeatureState::Proposed => true,
+        FeatureState::Implemented if feature_with_context.feature.desired_details.is_some() => true,
+        _ => false,
+    };
+    if should_transition {
         client
             .update_feature(
                 feature_id,
@@ -394,16 +402,29 @@ pub async fn start_feature(
 
     let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
 
+    // Build content blocks
+    let mut content = Vec::new();
+
+    // If this is a change request, prepend guidance
+    if has_change_request {
+        content.push(Content::text(
+            "This feature was previously implemented and has pending changes. \
+             The `desired_details` field shows the desired spec. Compare with \
+             `details` (current state) to understand what needs to change. \
+             After implementing, update `details` to match what was built."
+                .to_string(),
+        ));
+    }
+
     // If spec has warnings, prepend a warning text block
     if spec_status.has_warnings(&config) {
         let warning = spec_status.guidance(&config).unwrap_or_default();
-        return Ok(CallToolResult::success(vec![
-            Content::text(format!("\u{26a0} {}", warning)),
-            Content::text(yaml),
-        ]));
+        content.push(Content::text(format!("\u{26a0} {}", warning)));
     }
 
-    Ok(CallToolResult::success(vec![Content::text(yaml)]))
+    content.push(Content::text(yaml));
+
+    Ok(CallToolResult::success(content))
 }
 
 /// Recursively transition proposed children to in_progress.

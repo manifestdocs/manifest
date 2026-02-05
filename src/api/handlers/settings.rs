@@ -44,7 +44,7 @@ pub async fn update_settings(
         .unwrap_or(None);
 
     // Validate default_agent if provided
-    const ALLOWED_AGENTS: &[&str] = &["claude", "gemini", "copilot"];
+    const ALLOWED_AGENTS: &[&str] = &["claude", "gemini", "copilot", "codex"];
     let new_agent = if let Some(agent_val) = body.get("default_agent") {
         if agent_val.is_null() {
             Some(None) // Reset to default

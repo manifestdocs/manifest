@@ -168,7 +168,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement. IMPORTANT: You MUST call this tool when a user asks you to implement, work on, or build a feature—even if you just created the feature or already have context. Do not change the feature's target version during implementation."
+        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement. IMPORTANT: You MUST call this tool when a user asks you to implement, work on, or build a feature—even if you just created the feature or already have context. Also handles implemented features with pending changes (desired_details set by a human edit)—transitions implemented → in_progress so you can implement the requested changes. Do not change the feature's target version during implementation."
     )]
     async fn start_feature(
         &self,
@@ -178,7 +178,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Set mark_implemented=false to record progress without changing state. Call only after verification.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI."
+        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Automatically clears desired_details if present (pending change request fulfilled). Set mark_implemented=false to record progress without changing state. Call only after verification.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI."
     )]
     async fn complete_feature(
         &self,
@@ -363,6 +363,9 @@ To write a spec:
 - Use update_feature with `details` to set the spec directly
 - Use update_feature with `desired_details` to propose a spec for human review (they see a diff in the web UI)
 
+CHANGE REQUESTS (desired_details set by humans):
+When a human edits an implemented feature in the web UI, changes are saved to `desired_details` instead of overwriting `details`. This creates a pending change request visible as a "changes" badge. When you call start_feature on such a feature, it transitions implemented → in_progress and you receive guidance to compare desired_details with details. After implementing the changes, update details and call complete_feature (which clears desired_details automatically).
+
 Specification length is guided by the project's ac_level setting. After implementation, update details to reflect what was built.
 
 UPDATING FEATURES:
@@ -423,6 +426,7 @@ WORKFLOW:
 2. CLAIM — MANDATORY before implementing:
    - ALWAYS call start_feature when asked to implement, work on, or build a feature
    - start_feature checks specification completeness and transitions proposed → in_progress
+   - start_feature also handles CHANGE REQUESTS: if an implemented feature has desired_details (set by a human edit in the web UI), it transitions implemented → in_progress and returns guidance explaining what changed
    - If the feature has no details, start_feature will refuse — write a spec first using update_feature
    - If details are very sparse, you will see a warning — flesh out the spec before implementing
    - IMPORTANT: The feature's target version is locked during implementation. Do not call set_feature_version while working on a feature.
@@ -430,12 +434,14 @@ WORKFLOW:
 3. BUILD — implement against the spec:
    - The feature details ARE your specification
    - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
+   - If desired_details is present, this is a CHANGE REQUEST: compare desired_details (what's wanted) with details (what's currently built) to understand what needs to change. Update details to reflect what you build.
    - Write tests first, then implement, then verify
    - Use update_feature to evolve the spec as you learn more
 
 4. DOCUMENT — MANDATORY after implementing:
    - You MUST call complete_feature when work is done. This is not optional.
    - Provide a summary of what you did + commit SHAs
+   - complete_feature automatically clears desired_details when marking as implemented
    - This creates a history entry so future agents (or future you) know what happened
    - If you skip this step, there is no record of the work and the feature stays in_progress forever
    - If you learned something that applies to sibling features, update the parent's details with shared context
