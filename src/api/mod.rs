@@ -23,6 +23,7 @@ use crate::db::Database;
 use crate::mcp;
 
 pub use auth::{AuthContext, AuthError, AuthMethod};
+pub use handlers::start_session_reaper;
 pub use middleware::SecurityConfig;
 pub use state::{AppState, CurrentUser};
 
@@ -119,9 +120,13 @@ fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
         // Default: allow localhost origins only
         let localhost_origins = [
             "http://localhost:5173",  // Vite dev
+            "http://localhost:5174",  // Vite dev (fallback)
+            "http://localhost:5175",  // Vite dev (fallback)
             "http://localhost:1420",  // Tauri dev
             "http://localhost:17010", // Self
             "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
+            "http://127.0.0.1:5175",
             "http://127.0.0.1:1420",
             "http://127.0.0.1:17010",
             "tauri://localhost",       // Tauri webview (macOS)
@@ -290,7 +295,12 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
     // MCP router is stateless (uses its own HTTP client internally)
     let mcp_router = mcp::streamable_http_router();
 
+    // Terminal WebSocket (stateless — no DB needed, PTY spawned per connection)
+    let terminal_router =
+        Router::new().route("/api/v1/terminal/ws", get(handlers::ws_terminal_handler));
+
     let router = Router::new()
+        .merge(terminal_router)
         .nest("/api/v1", api)
         .with_state(db)
         .nest("/mcp", mcp_router);

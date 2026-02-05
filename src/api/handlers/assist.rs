@@ -1,10 +1,9 @@
-//! Chat completions endpoint using headless Claude Code.
+//! Chat completions endpoint using ACP (Agent Client Protocol).
 //!
-//! Receives a ChatRequest (messages + context), spawns `claude -p` with
-//! `--output-format stream-json`, and translates the output into SSE events
-//! matching the StreamEvent format expected by the web client.
+//! Receives a ChatRequest (messages + context), delegates to the AcpRouter
+//! which spawns and manages agent processes via JSON-RPC 2.0 over stdio,
+//! and streams the response as SSE events matching the web client's format.
 
-use async_stream::stream;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -12,14 +11,30 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+use std::sync::LazyLock;
 
 use manifest_core::config::ServerConfig;
 
 use super::ApiError;
+use crate::acp::AcpRouter;
 use crate::db::Database;
+
+/// Global ACP router instance (session pool + agent lifecycle).
+static ACP_ROUTER: LazyLock<AcpRouter> = LazyLock::new(AcpRouter::new);
+
+/// Start the idle session reaper. Call once on server startup.
+pub fn start_session_reaper() {
+    let router = &*ACP_ROUTER;
+    let sessions = router.sessions_ref();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            // Build a temporary router view just for reaping
+            AcpRouter::reap_idle_sessions(&sessions, std::time::Duration::from_secs(1800)).await;
+        }
+    });
+}
 
 // ============================================================
 // Request types (matches web client's ChatRequest)
@@ -33,7 +48,8 @@ pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     /// Optional feature context to scope the conversation.
     pub context: Option<ChatContext>,
-    /// Model to use (e.g., "sonnet", "opus"). Defaults to "sonnet".
+    /// Model to use (e.g., "sonnet", "opus"). Reserved for future use.
+    #[allow(dead_code)]
     pub model: Option<String>,
     /// Whether to stream the response. Currently always true.
     #[allow(dead_code)]
@@ -124,29 +140,17 @@ STYLE:
 
 /// Chat completions endpoint.
 ///
-/// Accepts messages + optional feature context, spawns Claude CLI in headless
-/// mode, and streams the response as SSE events.
+/// Accepts messages + optional feature context, delegates to the ACP router
+/// which spawns the configured agent, and streams the response as SSE events.
 pub async fn chat_completions(
     State(_db): State<Database>,
     Json(input): Json<ChatRequest>,
 ) -> Result<Response, ApiError> {
-    // Check configured agent — only Claude is supported for now
+    // Resolve configured agent
     let agent = ServerConfig::load()
         .ok()
         .and_then(|c| c.default_agent)
         .unwrap_or_else(|| "claude".to_string());
-
-    if agent != "claude" {
-        let hint = match agent.as_str() {
-            "gemini" => "Gemini CLI support coming soon",
-            "copilot" => "Copilot CLI support coming soon",
-            _ => "Unsupported agent",
-        };
-        return Err(ApiError::from((
-            StatusCode::BAD_REQUEST,
-            format!("{hint}. Switch to Claude in Settings to use chat."),
-        )));
-    }
 
     // Separate system messages from conversation messages
     let mut system_prompt = String::new();
@@ -197,7 +201,7 @@ pub async fn chat_completions(
     system_prompt.push_str("\n\n");
     system_prompt.push_str(BEHAVIORAL_GUIDELINES);
 
-    // Build the user prompt — when resuming a session, Claude already has
+    // Build the user prompt — when resuming a session, the agent already has
     // prior context so we only send the latest user message.
     let user_prompt = if input.session_id.is_some() {
         conversation
@@ -215,240 +219,35 @@ pub async fn chat_completions(
         )));
     }
 
-    // Determine the model to use
-    let model = input.model.as_deref().unwrap_or("sonnet");
+    tracing::info!("Chat completion via ACP agent={}", agent);
 
-    // Build CLI arguments.
-    // The prompt is passed via stdin to avoid --tools "" consuming the positional arg.
-    // --verbose is required for stream-json output with -p.
-    //
-    // We rely on the user's existing MCP configuration (manifest plugin) rather
-    // than passing --mcp-config + --strict-mcp-config, because the Streamable HTTP
-    // MCP handshake causes Claude CLI to hang during initialization.
-    // Instead, --allowed-tools restricts which tools Claude can actually use.
-    let mut args: Vec<String> = vec![
-        "-p".into(),
-        "--verbose".into(),
-        "--model".into(),
-        model.into(),
-        "--output-format".into(),
-        "stream-json".into(),
-        "--tools".into(),
-        "".to_string(), // Disable built-in tools (Read, Edit, Bash, etc.)
-    ];
-
-    // Whitelist all Manifest MCP tools so the chat agent has full access.
-    args.extend([
-        "--allowed-tools".into(),
-        [
-            "mcp__manifest__list_projects",
-            "mcp__manifest__find_features",
-            "mcp__manifest__get_feature",
-            "mcp__manifest__render_feature_tree",
-            "mcp__manifest__init_project",
-            "mcp__manifest__add_project_directory",
-            "mcp__manifest__generate_feature_tree",
-            "mcp__manifest__plan",
-            "mcp__manifest__create_feature",
-            "mcp__manifest__start_feature",
-            "mcp__manifest__complete_feature",
-            "mcp__manifest__update_feature",
-            "mcp__manifest__delete_feature",
-            "mcp__manifest__get_next_feature",
-            "mcp__manifest__list_versions",
-            "mcp__manifest__create_version",
-            "mcp__manifest__set_feature_version",
-            "mcp__manifest__release_version",
-        ]
-        .join(","),
-    ]);
-
-    // Session support: resume existing or start new
-    let new_session_id = if let Some(ref sid) = input.session_id {
-        // Resuming an existing session
-        args.extend(["--resume".into(), sid.clone()]);
-        sid.clone()
-    } else {
-        // First turn: generate a new session ID
-        let sid = uuid::Uuid::new_v4().to_string();
-        args.extend(["--session-id".into(), sid.clone()]);
-        sid
-    };
-
-    // Add system prompt if present
-    if !system_prompt.is_empty() {
-        args.push("--system-prompt".into());
-        args.push(system_prompt);
-    }
-
-    tracing::info!("Spawning claude CLI with model={}", model);
-
-    // Spawn claude in headless mode — prompt goes via stdin
-    let mut child = Command::new("claude")
-        .args(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+    // Delegate to the ACP router
+    let (_, stream) = ACP_ROUTER
+        .chat_completions(
+            &agent,
+            input.session_id.as_deref(),
+            system_prompt,
+            user_prompt,
+        )
+        .await
         .map_err(|e| {
-            tracing::error!("Failed to spawn claude: {}", e);
-            ApiError::from((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to spawn claude: {}", e),
-            ))
+            use crate::acp::router::RouterError;
+            tracing::error!("ACP router error: {:?}", e);
+            match &e {
+                RouterError::UnsupportedAgent(_) => {
+                    ApiError::from((StatusCode::BAD_REQUEST, e.to_string()))
+                }
+                RouterError::AgentNotInstalled { .. } => {
+                    ApiError::from((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+                }
+                RouterError::InitializeTimeout => {
+                    ApiError::from((StatusCode::GATEWAY_TIMEOUT, e.to_string()))
+                }
+                RouterError::Process(_) => {
+                    ApiError::from((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+                }
+            }
         })?;
-
-    // Write the prompt to stdin and close it
-    let mut stdin = child.stdin.take().ok_or_else(|| {
-        ApiError::from((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to open stdin".to_string(),
-        ))
-    })?;
-
-    // Write prompt and close stdin in a background task
-    tokio::spawn(async move {
-        if let Err(e) = stdin.write_all(user_prompt.as_bytes()).await {
-            tracing::error!("Failed to write to claude stdin: {}", e);
-        }
-        drop(stdin);
-    });
-
-    let stdout = child.stdout.take().ok_or_else(|| {
-        ApiError::from((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to capture stdout".to_string(),
-        ))
-    })?;
-
-    // Log stderr in the background
-    let stderr = child.stderr.take();
-    if let Some(stderr) = stderr {
-        tokio::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                tracing::warn!("claude stderr: {}", line);
-            }
-        });
-    }
-
-    let reader = BufReader::new(stdout);
-    let mut lines = reader.lines();
-
-    // Transform Claude's stream-json into SSE events matching the client's StreamEvent format
-    let stream = stream! {
-        // Emit session ID immediately so the client can track it
-        yield Ok::<_, std::convert::Infallible>(
-            axum::response::sse::Event::default().data(
-                serde_json::json!({
-                    "type": "session",
-                    "session_id": new_session_id
-                })
-                .to_string(),
-            )
-        );
-
-        while let Ok(Some(line)) = lines.next_line().await {
-            if line.is_empty() {
-                continue;
-            }
-
-            let json: serde_json::Value = match serde_json::from_str(&line) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            let event_type = match json.get("type").and_then(|t| t.as_str()) {
-                Some(t) => t,
-                None => continue,
-            };
-
-            match event_type {
-                "content_block_delta" => {
-                    // Text streaming delta
-                    if let Some(delta) = json.get("delta") {
-                        if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                            let event = serde_json::json!({
-                                "type": "content_block_delta",
-                                "delta": { "type": "text_delta", "text": text }
-                            });
-                            yield Ok::<_, std::convert::Infallible>(
-                                axum::response::sse::Event::default()
-                                    .data(event.to_string())
-                            );
-                        }
-                    }
-                }
-                "assistant" => {
-                    // Complete assistant message — emit content blocks and tool uses
-                    if let Some(content) = json.get("message")
-                        .and_then(|m| m.get("content"))
-                        .and_then(|c| c.as_array())
-                    {
-                        for item in content {
-                            let item_type = item.get("type").and_then(|t| t.as_str());
-                            match item_type {
-                                Some("text") => {
-                                    if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                                        let event = serde_json::json!({
-                                            "type": "content_block_delta",
-                                            "delta": { "type": "text_delta", "text": text }
-                                        });
-                                        yield Ok::<_, std::convert::Infallible>(
-                                            axum::response::sse::Event::default()
-                                                .data(event.to_string())
-                                        );
-                                    }
-                                }
-                                Some("tool_use") => {
-                                    let event = serde_json::json!({
-                                        "type": "tool_call",
-                                        "tool": {
-                                            "id": item.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-                                            "name": item.get("name").and_then(|v| v.as_str()).unwrap_or(""),
-                                            "input": item.get("input").unwrap_or(&serde_json::Value::Null)
-                                        }
-                                    });
-                                    yield Ok::<_, std::convert::Infallible>(
-                                        axum::response::sse::Event::default()
-                                            .data(event.to_string())
-                                    );
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                "content_block_start" => {
-                    // Check if this is a tool_use block starting
-                    if let Some(cb) = json.get("content_block") {
-                        if cb.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
-                            let event = serde_json::json!({
-                                "type": "tool_call",
-                                "tool": {
-                                    "id": cb.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-                                    "name": cb.get("name").and_then(|v| v.as_str()).unwrap_or(""),
-                                    "input": {}
-                                }
-                            });
-                            yield Ok::<_, std::convert::Infallible>(
-                                axum::response::sse::Event::default()
-                                    .data(event.to_string())
-                            );
-                        }
-                    }
-                }
-                "result" | "message_stop" => {
-                    yield Ok(
-                        axum::response::sse::Event::default().data("[DONE]")
-                    );
-                    break;
-                }
-                _ => {}
-            }
-        }
-    };
 
     Ok(Sse::new(stream).into_response())
 }
@@ -515,7 +314,7 @@ fn build_feature_context(ctx: &ChatContext) -> String {
 /// Build a lightweight anchor for resumed turns.
 ///
 /// Provides just the feature title and IDs so the AI stays scoped without
-/// repeating the full specification (which Claude already has from turn 1).
+/// repeating the full specification (which the agent already has from turn 1).
 fn build_feature_anchor(ctx: &ChatContext) -> String {
     let title = match ctx.feature_title.as_deref() {
         Some(t) if !t.is_empty() => t,
@@ -574,9 +373,9 @@ fn build_version_context(ctx: &ChatContext) -> String {
     parts.join("\n")
 }
 
-/// Format conversation messages into a single prompt string for Claude's `-p` flag.
+/// Format conversation messages into a single prompt string.
 ///
-/// Multi-turn conversations are formatted as labeled turns so Claude can
+/// Multi-turn conversations are formatted as labeled turns so the agent can
 /// distinguish prior context from the current request.
 fn build_conversation_prompt(messages: &[&ChatMessage]) -> String {
     if messages.len() == 1 {

@@ -106,6 +106,9 @@ async fn run_server(
 
     let app = api::create_router_with_shutdown(database, shutdown_rx.clone());
 
+    // Start the ACP idle session reaper (reaps agent processes idle > 30 min)
+    api::start_session_reaper();
+
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port)).await?;
     tracing::info!("Manifest server listening on http://{}:{}", bind_addr, port);
 
