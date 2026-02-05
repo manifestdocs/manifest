@@ -341,6 +341,8 @@ impl Database {
         self.migrate_rename_spec_to_ac().await?;
         // Migration: add project_focus table
         self.migrate_add_project_focus().await?;
+        // Migration: add 'copilot' to tasks.agent_type CHECK constraint
+        self.migrate_add_copilot_agent_type().await?;
         Ok(())
     }
 
@@ -833,6 +835,55 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
+        Ok(())
+    }
+
+    /// Add 'copilot' to tasks.agent_type CHECK constraint.
+    /// The tasks table is ephemeral (rows deleted when sessions complete) and
+    /// only exists in databases created with the old 001_initial.sql schema.
+    async fn migrate_add_copilot_agent_type(&self) -> Result<()> {
+        // Only relevant for SQLite databases with the old tasks table
+        if !self.dialect.is_sqlite() {
+            return Ok(());
+        }
+
+        let has_table = {
+            let count: i64 = sqlx::query_scalar(&self.dialect.table_exists_sql("tasks"))
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
+            count > 0
+        };
+
+        if !has_table {
+            tracing::debug!("copilot migration: no tasks table, skipping");
+            return Ok(());
+        }
+
+        // Check if 'copilot' is already in the CHECK constraint by trying an insert
+        // This is simpler than parsing SQLite's table_info for CHECK constraints.
+        // Since the table is always empty in practice, just recreate it.
+        let sql = include_str!("../db/migrations/019_add_copilot_agent_type.sql");
+        for statement in sql.split(';') {
+            let trimmed: String = statement
+                .lines()
+                .filter(|line| {
+                    let t = line.trim();
+                    !t.is_empty() && !t.starts_with("--")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let trimmed = trimmed.trim();
+            if !trimmed.is_empty() {
+                // Ignore errors from already-applied migration (e.g., tasks_new doesn't exist)
+                if let Err(e) = sqlx::query(trimmed).execute(&self.pool).await {
+                    tracing::debug!("copilot migration statement skipped: {}", e);
+                    return Ok(());
+                }
+            }
+        }
+
+        tracing::info!("Added 'copilot' to tasks.agent_type CHECK constraint");
         Ok(())
     }
 

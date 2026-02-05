@@ -81,6 +81,8 @@ pub enum AgentType {
     Gemini,
     /// OpenAI Codex
     Codex,
+    /// GitHub Copilot
+    Copilot,
 }
 
 impl AgentType {
@@ -89,6 +91,7 @@ impl AgentType {
             Self::Claude => "claude",
             Self::Gemini => "gemini",
             Self::Codex => "codex",
+            Self::Copilot => "copilot",
         }
     }
 }
@@ -101,6 +104,7 @@ impl FromStr for AgentType {
             "claude" => Ok(Self::Claude),
             "gemini" => Ok(Self::Gemini),
             "codex" => Ok(Self::Codex),
+            "copilot" => Ok(Self::Copilot),
             _ => Err(super::ParseEnumError(s.to_string())),
         }
     }
