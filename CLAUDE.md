@@ -6,40 +6,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Manifest (formerly "RocketManifest", "Legion") is an MCP server for living feature documentation. It was extracted from the RocketCrew VSCode extension to provide a standalone backend for technical product management.
-
-### Core Philosophy: Features as Living Documentation
-
-Unlike JIRA/Linear which track **work items** that accumulate as closed history, Manifest tracks **features** that describe the current state of the system:
-
-| Traditional Tools          | Manifest                            |
-| -------------------------- | ----------------------------------- |
-| Issue (work item)          | Feature (system capability)         |
-| Open → Closed → Forgotten  | Proposed → Implemented → **Living** |
-| Changelog of what happened | Description of what IS              |
-
-Features are not work items to be closed. They are living descriptions that evolve with the codebase.
-
-### MCP Server Purpose
-
-AI agents access features through deterministic MCP tools (not grep):
-
-- `get_task_context` - Get assigned task with feature context
-- `start_task` - Signal work is beginning
-- `complete_task` - Mark task as complete
-
-Agents are scoped to their assigned task and report progress back. Tasks are small units of work (1-3 story points). AI agents manage their own internal punch lists without Manifest tracking granular sub-items.
+Manifest is an MCP server for living feature documentation. It tracks **features** (system capabilities) rather than work items, providing a persistent description of what the system IS rather than a changelog of what happened.
 
 ## Build & Test
 
 ```bash
 cargo build                    # Debug build
 cargo build --release          # Release build
-cargo test                     # Run all tests
-cargo test db_spec             # Run db specs only
+cargo test --all               # Run all tests (~80+ specs across 4 files)
+cargo test db_spec             # Database specs only
+cargo test api_spec            # API specs only
+cargo test mcp_protocol_spec   # MCP protocol specs only
+cargo test acp_spec            # Agent chat protocol specs only
+cargo test -p manifest-core    # Core unit tests only
 cargo run                      # Start server on port 17010
 cargo run -- serve -p 8080     # Start on custom port
+cargo run -- mcp               # Start MCP server via stdio
+cargo clippy --all -- -W clippy::all  # Lint check
 ```
+
+### CLI Subcommands
+
+- `serve` — Start HTTP API server (default port 17010)
+- `mcp` — Start MCP server via stdio (for Claude Code/Cursor integration)
+- `open` — Open Manifest dashboard in browser
+- `status` — Check if server is running
+- `stop` — Stop the daemon
+- `migrate-roots` — Migrate existing projects to use root features
 
 ### BDD Testing with Speculate
 
@@ -60,7 +53,7 @@ speculate! {
 }
 ```
 
-Test files: `tests/db_spec.rs`, `tests/api_spec.rs` (58 tests total)
+Test files in `tests/`: `db_spec.rs`, `api_spec.rs`, `mcp_protocol_spec.rs`, `acp_spec.rs`
 
 ## Development Practices
 
@@ -70,36 +63,63 @@ Test files: `tests/db_spec.rs`, `tests/api_spec.rs` (58 tests total)
 2. Add tests for the new behavior
 3. Implement the feature
 
-The OpenAPI spec is the source of truth for the HTTP API. Keeping it current is as important as writing tests.
+The OpenAPI spec is the source of truth for the HTTP API.
 
 ## Architecture
 
-**Stack**: Rust 2024 + Axum 0.8 + SQLite (rusqlite with WAL mode) + Tokio
+**Stack**: Rust 2021 + Axum 0.8 + SQLx (SQLite/PostgreSQL) + Tokio
+
+### Two-Crate Structure
 
 ```
-src/
-├── main.rs         # CLI (clap) with serve/status/stop subcommands
-├── api/            # HTTP API — validation & presentation layer
-│   ├── mod.rs      # Router setup, all routes under /api/v1
-│   └── handlers/   # Request handlers (extract State<Database>)
-├── db/
-│   ├── mod.rs      # Database wrapper with CRUD operations + business logic
-│   └── schema.rs   # SQLite schema (embedded, auto-migrated)
-├── models/         # Domain types with serde + enums with as_str/from_str
-└── mcp/            # MCP server — execution layer for AI agents
+manifest-server/           # Binary crate — HTTP API, MCP server, CLI
+├── src/
+│   ├── main.rs            # CLI (clap) with serve/mcp/status/stop/open subcommands
+│   ├── api/               # HTTP API — validation & presentation layer
+│   │   ├── mod.rs         # Router setup, all routes under /api/v1
+│   │   ├── handlers/      # Request handlers (wildcard re-exports via mod.rs)
+│   │   ├── auth.rs        # API key auth (local) + Clerk JWT (cloud)
+│   │   ├── middleware.rs   # CORS, tracing, auth, security headers
+│   │   └── validation.rs  # Input validation helpers
+│   ├── mcp/               # MCP server — execution layer for AI agents
+│   │   ├── server.rs      # Tool registration + MCP protocol handling
+│   │   ├── client.rs      # HTTP client that calls own API
+│   │   ├── tools/         # Tool implementations (projects, features, versions, etc.)
+│   │   └── tree_render.rs # ASCII feature tree rendering
+│   ├── acp/               # Agent Chat Protocol — multi-agent JSON-RPC over stdio
+│   │   ├── router.rs      # Session pool (AcpRouter as static LazyLock)
+│   │   ├── transport.rs   # Reader/writer tasks + pending request tracking
+│   │   ├── process.rs     # Subprocess spawning for Claude/Gemini/Copilot/Codex
+│   │   ├── registry.rs    # Agent process registry
+│   │   └── types.rs       # JSON-RPC 2.0 message types with classify()
+│   └── analysis/          # Codebase analysis for project discovery
+│       ├── scanner.rs     # Directory/module detection
+│       ├── parsers.rs     # Language/framework detection
+│       ├── git_history.rs # Commit history analysis
+│       ├── feature_extractor.rs
+│       └── markdown_gen.rs
+│
+manifest-core/             # Library crate — models, DB operations, business logic
+├── src/
+│   ├── models/            # Domain types (Feature, Project, Version, Session, Task, etc.)
+│   └── db/
+│       ├── mod.rs         # All CRUD operations + business logic + migrations
+│       └── schema.rs      # SQLite schema definition
+└── migrations/
+    └── 20240101000000_initial.sql  # Fresh install schema
 ```
 
-### API vs MCP: Layering
+### Layering
 
-The **API layer** (`src/api/`) is the validation and presentation layer. It validates input (via `validation.rs`), maps HTTP concerns (status codes, JSON), and delegates to the DB layer. It does not contain business logic.
+The **API layer** (`src/api/`) validates input, maps HTTP concerns, and delegates to the DB layer. No business logic here.
 
-The **MCP layer** (`src/mcp/`) is the execution layer for AI agents. MCP tools call through a `ManifestClient` which hits the HTTP API, so they inherit all API validation. MCP tools add agent-specific orchestration (e.g., rendering trees, formatting responses as text).
+The **MCP layer** (`src/mcp/`) orchestrates AI agent interactions. MCP tools call through a `ManifestClient` which hits the HTTP API, inheriting all validation. Adds agent-specific formatting (tree rendering, text responses).
 
-**Business logic lives in the DB layer** (`manifest-core/src/db/mod.rs`). Both API handlers and MCP tools converge here. Examples: auto-assigning features to the "now" version when started, enforcing minimum unreleased version counts after release, respecting `default_feature_destination` project settings. This ensures consistent behavior regardless of whether a human (web UI → API) or an AI agent (MCP → API) triggers the action.
+**Business logic lives in the DB layer** (`manifest-core/src/db/mod.rs`). Both API and MCP converge here. Examples: auto-assigning features to the "next" version when started, enforcing minimum unreleased version counts, respecting project settings.
 
 ### Data Model
 
-Features form a **hierarchical tree** (like a file browser):
+Features form a **hierarchical tree**:
 
 ```
 Authentication/                 <- feature node with context
@@ -113,58 +133,48 @@ Authentication/                 <- feature node with context
 
 **Permanent entities:**
 
-- **Feature**: Self-referential tree via `parent_id`. Any node can have content (story + details). Only **leaf nodes** can have sessions.
-- **FeatureHistory**: Append-only log of implementation sessions (like `git log` for a feature). Records what was done during each session and links to git commits. This is NOT feature versioning—the feature content itself is mutable. History answers "what work was done on this feature and when?"
+- **Feature**: Self-referential tree via `parent_id`. States: Proposed → InProgress → Implemented → Archived. Only leaf nodes can have sessions.
+- **FeatureHistory**: Append-only log of work sessions + commit references.
+- **Project**: Container with directories, guidance settings (`ac_level`, `ac_format`).
+- **Version**: Release milestones with semantic versioning. Lifecycle: next → planned → released.
 
-**Ephemeral entities (exist only during active work):**
+**Ephemeral entities (deleted when session completes):**
 
-- **Session**: One active session per feature at a time. When completed, tasks are squashed into a `feature_history` entry and deleted.
-- **Task**: Work unit within Session, assigned to an agent (claude/gemini/codex). Self-referential via `parent_id` for optional sub-tasks. Deleted when session completes.
+- **Session**: One per leaf feature during active work.
+- **Task**: Work unit assigned to an agent (claude/gemini/copilot/codex).
 
-```
-Session lifecycle:
-1. Create session on leaf feature
-2. Create tasks, agents work
-3. Session completes:
-   └─> Summary of work → feature_history entry
-   └─> Task records deleted
-   └─> Session marked completed
-```
+### Database
 
-Key methods: `get_root_features()`, `get_children(id)`, `is_leaf(id)`
+- **Engine**: SQLx with `AnyPool` (SQLite primary, PostgreSQL supported via `DbDialect` enum)
+- **Location**: `~/.local/share/manifest/manifest.db`
+- **Migrations**: Fresh installs use `manifest-core/migrations/20240101000000_initial.sql`. Existing DBs use incremental `migrate_*()` functions in `db/mod.rs`.
+- **IDs**: TEXT (UUIDs), dates as RFC3339 strings
+
+### Code Patterns
+
+- Enums use manual `as_str()`/`from_str()` for DB serialization (not derive macros)
+- `Result<Option<T>>` for get operations (None = not found, Err = DB error)
+- Dynamic SQL building for partial updates (UpdateFeatureInput, etc.)
+- `api/handlers` is a private module with wildcard re-exports — to expose items to `main.rs`, add `pub use handlers::foo;` in `api/mod.rs`
+
+### ACP (Agent Chat Protocol)
+
+The `src/acp/` module implements JSON-RPC 2.0 over stdio for multi-agent support (Claude, Gemini, Copilot, Codex). Key patterns:
+
+- `RawJsonRpcMessage::classify()` routes messages by type
+- `mpsc::channel` + `ReceiverStream` for async streaming (not `async_stream::stream!` which doesn't work with `tokio::select!`)
+- Session reaper: every 5 min, kills agent processes idle > 30 min
+- `AgentTransport` needs clone accessors (`clone_write_tx`, `clone_pending`, `clone_next_id`) for spawned tasks
 
 ### API Routes
 
 All routes prefixed with `/api/v1`:
 
-- Projects: CRUD at `/projects`, `/projects/{id}`
-  - `/projects/{id}/directories` - GET/POST project directories
-  - `/projects/{id}/features` - GET/POST features for project
-  - `/projects/{id}/features/roots` - GET root features
-  - `/projects/{id}/features/tree` - GET complete feature tree (nested)
-- Features: CRUD at `/features`, `/features/{id}`
-  - `/features/{id}/children` - GET direct children
-  - `/features/{id}/history` - GET feature history
-- Sessions: POST `/sessions`, GET `/sessions/{id}`, `/sessions/{id}/status`
-  - Only allowed on leaf features (returns 500 if feature has children)
-- Tasks: GET/PUT `/tasks/{id}`
-
-### Database
-
-- Location: `~/.local/share/manifest/manifest.db` (via `directories` crate)
-- Schema auto-migrates on startup via `db.migrate()`
-- All IDs stored as TEXT (UUIDs), dates as RFC3339 strings, content as JSON
-
-### Code Patterns
-
-- Enums use manual `as_str()`/`from_str()` for DB serialization (not derive macros)
-- `Result<Option<T>>` pattern for get operations (None = not found, Err = DB error)
-- Dynamic SQL building for partial updates (UpdateTaskInput, UpdateFeatureInput)
-- Database wrapped in `Arc<Mutex<Connection>>` for thread-safe sharing
-
-## Related Projects
-
-- **RocketCrew** (`../RocketCrew`) - VSCode extension that consumes this server's HTTP API
-- **ManifestExtension** (`../ManifestExtension`) - VSCode extension with feature tree (icon style reference)
-- `../RocketCrew/design/vscode-extension-mvp.md` - Full vision for the TPM workflow
-- `design/legion-server-architecture.md` - Server architecture spec (local)
+- **Projects**: CRUD at `/projects`, `/projects/{id}` + directories, features (list/create/bulk/roots/tree/next), versions, history, focus, SSE subscribe
+- **Features**: CRUD at `/features`, `/features/{id}` + children, context, diff, history
+- **Versions**: CRUD at `/versions`, `/versions/{id}` + assignment
+- **Chat**: `POST /chat/completions` (agent chat)
+- **Settings**: `GET/PUT /settings`, MCP status/configure
+- **Analysis**: `GET /codebase/analyze`, filesystem browse/mkdir
+- **Terminal**: WebSocket at `/terminal/ws`
+- **MCP**: Stateless HTTP at `/mcp`
