@@ -144,7 +144,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have concise specifications. Always provide target_version_id so features land in a release — call list_versions first or create_version if none exist. Omitting it sends features to the Backlog. With confirm=false, returns a proposal. With confirm=true, creates the features."
+        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have concise specifications. Always provide target_version_id so features land in a release — call list_versions first or create_version if none exist. Omitting it sends features to the Backlog. With confirm=false, returns a proposal. With confirm=true, creates the features. IMPORTANT: After confirming, use update_feature to distill the root feature — replace the full PRD with high-level project context (tech stack, conventions, architecture) since detailed content now lives in child features."
     )]
     async fn plan(
         &self,
@@ -391,8 +391,9 @@ SETUP (when starting fresh):
 1. init_project — analyze codebase, create project, link directory
 2. generate_feature_tree — for existing codebases, extract features from code structure and git history
 3. plan — break down a PRD, tech spec, or vision into a feature tree
-4. add_project_directory — for monorepos with multiple directories
-5. create_version — define release milestones
+4. **After plan: distill the root** — plan distributes content to children but does NOT update the root. Use update_feature to replace the root's PRD/spec with high-level project context (tech stack, conventions, architecture). Set details_summary too. Skip if the root already has appropriate project-level content.
+5. add_project_directory — for monorepos with multiple directories
+6. create_version — define release milestones
 
 DISPLAY GUIDELINES:
 Tool results are collapsed JSON. Always summarize for humans:
