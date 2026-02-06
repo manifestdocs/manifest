@@ -92,7 +92,7 @@ pub struct UpdateFeatureRequest {
     pub title: Option<String>,
 
     #[schemars(
-        description = "New details for the feature. Content depends on the feature's role in the hierarchy: project-level features hold decisions and conventions; feature sets hold shared architectural context; leaf features hold concise specifications — goal, constraints, key interfaces. Use this to update living documentation as you learn more during implementation."
+        description = "New details for the feature. Content depends on the feature's role in the hierarchy: project-level features hold decisions and conventions; feature sets hold shared architectural context; leaf features hold concise specifications — goal, constraints, key interfaces. Use this to update living documentation as you learn more during implementation. Do not repeat the feature title in the details — the title is displayed separately."
     )]
     #[serde(default)]
     pub details: Option<String>,
@@ -185,7 +185,7 @@ pub struct CreateFeatureRequest {
     #[schemars(description = "Short title for the feature (e.g., 'User Authentication')")]
     pub title: String,
     #[schemars(
-        description = "Feature details. For leaf features: concise specification — goal, constraints, key interfaces. For parent features: shared context (architecture, patterns, constraints) that flows to children."
+        description = "Feature details. For leaf features: concise specification — goal, constraints, key interfaces. For parent features: shared context (architecture, patterns, constraints) that flows to children. IMPORTANT: Do not repeat the feature title in the details — the title is displayed separately."
     )]
     #[serde(default)]
     pub details: Option<String>,
@@ -469,6 +469,7 @@ pub struct ProposedFeature {
     /// constraints that apply to all children.
     /// For leaf features (no children): specification (length guided by project's ac_level
     /// setting) — goal, constraints, key interfaces. Parents provide context; leaves provide specifications.
+    /// IMPORTANT: Do not repeat the feature title in the details — the title is displayed separately.
     #[serde(default)]
     pub details: Option<String>,
     /// Priority for ordering. Lower values = implement first.
