@@ -550,9 +550,9 @@ impl ManifestClient {
     /// Get a summary of the project instructions.
     ///
     /// Returns `details_summary` from the root feature if available, otherwise
-    /// falls back to `project.instructions`. Never returns the full `feature.details`
-    /// — that can be 10KB+ and blows up token budgets in listing responses.
-    /// Use `get_project_instructions_full()` when the full text is needed.
+    /// returns `None`. Does NOT fall back to full `project.instructions` which
+    /// can be thousands of tokens. Agents should call `get_project_instructions`
+    /// when they need the full text.
     pub async fn get_project_instructions_summary(&self, project: &Project) -> Option<String> {
         if let Some(root_id) = project.root_feature_id {
             if let Ok(feature) = self.get_feature(root_id.into()).await {
@@ -561,7 +561,7 @@ impl ManifestClient {
                 }
             }
         }
-        project.instructions.clone()
+        None
     }
 
     /// Get project context for MCP response (project + matching directory info).
