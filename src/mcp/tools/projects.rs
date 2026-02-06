@@ -181,6 +181,7 @@ pub async fn init_project(
     let instructions = client.get_project_instructions_summary(&project).await;
 
     // Build response with project info and analysis
+    let summary = format!("Initialized project '{}'", project.name);
     let result = serde_json::json!({
         "project": {
             "id": project.id,
@@ -200,7 +201,10 @@ pub async fn init_project(
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }
 
 /// Associate an additional directory with an existing project.
@@ -221,6 +225,7 @@ pub async fn add_project_directory(
         .await
         .map_err(client_err)?;
 
+    let summary = format!("Added directory '{}'", directory.path);
     let result = DirectoryInfo {
         id: directory.id.into(),
         path: directory.path,
@@ -232,7 +237,10 @@ pub async fn add_project_directory(
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }
 
 /// Get full project instructions (root feature details).

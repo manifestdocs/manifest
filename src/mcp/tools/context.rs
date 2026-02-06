@@ -18,6 +18,7 @@ pub async fn get_active_feature(
         .map_err(client_err)?
     {
         Some((feature_id, title, state)) => {
+            let summary = format!("'{}' selected ({})", title, state);
             let response = ActiveFeatureResponse {
                 feature_id: Some(feature_id),
                 feature_title: Some(title),
@@ -25,7 +26,10 @@ pub async fn get_active_feature(
             };
             let json = serde_json::to_string_pretty(&response)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-            Ok(CallToolResult::success(vec![Content::text(json)]))
+            Ok(CallToolResult::success(vec![
+                Content::text(summary),
+                Content::text(json),
+            ]))
         }
         None => {
             let response = ActiveFeatureResponse {
@@ -35,7 +39,10 @@ pub async fn get_active_feature(
             };
             let json = serde_json::to_string_pretty(&response)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-            Ok(CallToolResult::success(vec![Content::text(json)]))
+            Ok(CallToolResult::success(vec![
+                Content::text("No feature selected."),
+                Content::text(json),
+            ]))
         }
     }
 }

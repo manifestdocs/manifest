@@ -86,5 +86,12 @@ pub async fn generate_feature_tree(
     let json = serde_json::to_string_pretty(&response)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    let summary = format!(
+        "Extracted {} features from codebase ({} commits analyzed)",
+        stats.total_features, stats.commits_analyzed,
+    );
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }

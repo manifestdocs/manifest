@@ -108,6 +108,7 @@ pub async fn create_version(
         .await
         .map_err(client_err)?;
 
+    let summary = format!("Created version '{}'", version.name);
     let result = VersionInfo {
         id: version.id.into(),
         name: version.name,
@@ -120,7 +121,10 @@ pub async fn create_version(
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }
 
 /// Assign a feature to a target version.
@@ -150,6 +154,12 @@ pub async fn set_feature_version(
         .await
         .map_err(client_err)?;
 
+    let summary = if req.version_id.is_some() {
+        format!("Assigned '{}' to version", feature.title)
+    } else {
+        format!("Unassigned '{}' from version", feature.title)
+    };
+
     let result: FeatureInfo = (&feature).into();
 
     let mut result_json =
@@ -165,7 +175,10 @@ pub async fn set_feature_version(
     let json = serde_json::to_string_pretty(&result_json)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }
 
 /// Mark a version as released.
@@ -185,6 +198,7 @@ pub async fn release_version(
         .await
         .map_err(client_err)?;
 
+    let summary = format!("Released '{}'", version.name);
     let result = VersionInfo {
         id: version.id.into(),
         name: version.name,
@@ -197,5 +211,8 @@ pub async fn release_version(
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }
