@@ -389,6 +389,8 @@ pub struct GetFeatureResponse {
     /// The feature with hierarchical context.
     #[serde(flatten)]
     pub feature: FeatureInfoWithContext,
+    /// Feature tier: "project", "feature_set", or "leaf".
+    pub feature_tier: String,
     /// Implementation history (past work summaries and commits).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<Vec<HistoryEntryInfo>>,

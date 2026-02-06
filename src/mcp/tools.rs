@@ -17,6 +17,7 @@ pub fn client_err(e: ClientError) -> McpError {
         ClientError::Unauthorized => {
             McpError::internal_error("Unauthorized: check MANIFEST_API_KEY", None)
         }
+        ClientError::Conflict(msg) => McpError::invalid_params(msg, None),
         ClientError::Http(e) => McpError::internal_error(e.to_string(), None),
         ClientError::Server(msg) => McpError::internal_error(msg, None),
     }

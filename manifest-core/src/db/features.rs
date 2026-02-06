@@ -398,9 +398,14 @@ impl Database {
         let details_summary = input.details_summary.unwrap_or(existing.details_summary);
         let is_proposing_changes = desired_details.is_some() && !had_desired_details;
         // Guard rail: feature sets (parents with children) do not have mutable state.
-        // Their state is informational only — ignore state changes on non-leaf features.
+        // Reject explicit state changes on non-leaf features so agents get clear feedback.
         let is_feature_set = !self.is_leaf(id).await?;
-        let state = if is_proposing_changes || is_feature_set {
+        if is_feature_set && input.state.is_some() {
+            return Err(ManifestError::invalid_state(
+                "Cannot change state on a feature set. Feature sets group related capabilities — only leaf features have mutable state. To work on this area, start one of its child features instead."
+            ).into());
+        }
+        let state = if is_proposing_changes {
             existing.state
         } else {
             input.state.unwrap_or(existing.state)
@@ -785,7 +790,8 @@ impl Database {
         }))
     }
 
-    /// Get the highest-priority proposed or in-progress feature, preferring the "next" version.
+    /// Get the highest-priority proposed or in-progress leaf feature, preferring the "next" version.
+    /// Excludes feature sets (parents with children) and root features since they are not implementable.
     pub async fn get_next_workable_feature(
         &self,
         project_id: ProjectId,
@@ -794,11 +800,13 @@ impl Database {
         let row = if let Some(vid) = version_id {
             sqlx::query(
                 "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                 FROM features
-                 WHERE project_id = $1
-                   AND target_version_id = $2
-                   AND state IN ('proposed', 'in_progress')
-                 ORDER BY priority ASC, created_at ASC
+                 FROM features f
+                 WHERE f.project_id = $1
+                   AND f.target_version_id = $2
+                   AND f.state IN ('proposed', 'in_progress')
+                   AND f.parent_id IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
+                 ORDER BY f.priority ASC, f.created_at ASC
                  LIMIT 1",
             )
             .bind(project_id.to_string())
@@ -817,6 +825,8 @@ impl Database {
                 LEFT JOIN next_version nv ON f.target_version_id = nv.id
                 WHERE f.project_id = $1
                   AND f.state IN ('proposed', 'in_progress')
+                  AND f.parent_id IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
                 ORDER BY
                     CASE WHEN f.target_version_id IS NOT NULL AND f.target_version_id = (SELECT id FROM next_version) THEN 0
                          WHEN f.target_version_id IS NULL THEN 1

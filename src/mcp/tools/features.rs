@@ -141,14 +141,34 @@ pub async fn get_feature(
         None
     };
 
+    let is_root = feature_with_context.feature.parent_id.is_none();
+    let has_children = !feature_with_context.children.is_empty();
+    let tier = if is_root {
+        super::spec::FeatureTier::Project
+    } else if has_children {
+        super::spec::FeatureTier::FeatureSet
+    } else {
+        super::spec::FeatureTier::Leaf
+    };
+
     let response = crate::mcp::types::GetFeatureResponse {
         feature: feature_info,
+        feature_tier: tier.as_str().to_string(),
         history,
     };
 
     let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(yaml)]))
+    let summary = format!(
+        "Feature: '{}' ({}, {})",
+        feature_with_context.feature.title,
+        feature_with_context.feature.state.as_str(),
+        tier.as_str(),
+    );
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(yaml),
+    ]))
 }
 
 /// Render a project's feature tree as ASCII art.
@@ -184,7 +204,23 @@ pub async fn plan(
     let json = serde_json::to_string_pretty(&response)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    let count = response.proposed_features.len();
+    let verb = if response.created {
+        "Created"
+    } else {
+        "Proposed"
+    };
+    let summary = format!(
+        "{} {} feature{}",
+        verb,
+        count,
+        if count == 1 { "" } else { "s" }
+    );
+
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }
 
 /// Create a feature within a project.
@@ -218,12 +254,16 @@ pub async fn create_feature(
         .await
         .map_err(client_err)?;
 
+    let summary = format!("Created '{}' ({})", feature.title, feature.state.as_str());
     let result: FeatureInfo = (&feature).into();
 
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }
 
 /// Update any field on a feature.
@@ -272,12 +312,16 @@ pub async fn update_feature(
         .await
         .map_err(client_err)?;
 
+    let summary = format!("Updated '{}' ({})", feature.title, feature.state.as_str());
     let result: FeatureInfo = (&feature).into();
 
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }
 
 /// Permanently delete a feature and its descendants.
@@ -322,6 +366,21 @@ pub async fn start_feature(
         .get_feature_with_context(feature_id)
         .await
         .map_err(client_err)?;
+
+    // Guard: feature sets cannot be started — only leaf features
+    if !feature_with_context.children.is_empty() {
+        let child_list: Vec<String> = feature_with_context
+            .children
+            .iter()
+            .map(|c| format!("  - {} ({})", c.title, c.state.as_str()))
+            .collect();
+        return Ok(CallToolResult::error(vec![Content::text(format!(
+            "Cannot start '{}' — it is a feature set with {} children:\n{}\n\nUse start_feature on a specific child instead.",
+            feature_with_context.feature.title,
+            feature_with_context.children.len(),
+            child_list.join("\n")
+        ))]));
+    }
 
     // Fetch project settings for configurable guidance levels
     let project_id: uuid::Uuid = feature_with_context.feature.project_id.into();
@@ -405,6 +464,12 @@ pub async fn start_feature(
     // Build content blocks
     let mut content = Vec::new();
 
+    // Human-readable summary line
+    content.push(Content::text(format!(
+        "Started '{}' — now in_progress",
+        feature_with_context.feature.title,
+    )));
+
     // If this is a change request, prepend guidance
     if has_change_request {
         content.push(Content::text(
@@ -439,30 +504,34 @@ async fn start_children_recursive(
         .filter(|child| child.state == FeatureState::Proposed)
         .map(|child| async move {
             let child_uuid: uuid::Uuid = child.id.into();
-            // Update this child to in_progress
-            client
-                .update_feature(
-                    child_uuid,
-                    &UpdateFeatureInput {
-                        parent_id: None,
-                        title: None,
-                        details: None,
-                        desired_details: None,
-                        details_summary: None,
-                        state: Some(FeatureState::InProgress),
-                        priority: None,
-                        target_version_id: None,
-                    },
-                )
-                .await
-                .map_err(client_err)?;
 
-            // Recursively start this child's children
+            // Get child context to check if it has its own children
             let child_context = client
                 .get_feature_with_context(child_uuid)
                 .await
                 .map_err(client_err)?;
 
+            // Only update state on leaf children; skip feature sets
+            if child_context.children.is_empty() {
+                client
+                    .update_feature(
+                        child_uuid,
+                        &UpdateFeatureInput {
+                            parent_id: None,
+                            title: None,
+                            details: None,
+                            desired_details: None,
+                            details_summary: None,
+                            state: Some(FeatureState::InProgress),
+                            priority: None,
+                            target_version_id: None,
+                        },
+                    )
+                    .await
+                    .map_err(client_err)?;
+            }
+
+            // Recurse into children regardless
             Box::pin(start_children_recursive(client, &child_context.children)).await
         })
         .collect();
@@ -499,6 +568,7 @@ pub async fn complete_feature(
         .await
         .map_err(client_err)?;
 
+    let commit_count = history.details.commits.len();
     let feature_info: FeatureInfo = (&feature).into();
     let history_id: uuid::Uuid = history.id.into();
     let result = serde_json::json!({
@@ -513,7 +583,16 @@ pub async fn complete_feature(
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    let summary = format!(
+        "Completed '{}' — recorded {} commit{}",
+        feature.title,
+        commit_count,
+        if commit_count == 1 { "" } else { "s" },
+    );
+    Ok(CallToolResult::success(vec![
+        Content::text(summary),
+        Content::text(json),
+    ]))
 }
 
 /// Get the next workable feature for a project.
@@ -527,7 +606,7 @@ pub async fn get_next_feature(
         .await
         .map_err(client_err)?;
 
-    let output = match result {
+    match result {
         Some(feature_ctx) => {
             // Fetch project settings for configurable guidance levels
             let project_id: uuid::Uuid = feature_ctx.feature.project_id.into();
@@ -545,6 +624,13 @@ pub async fn get_next_feature(
                 is_root,
             );
 
+            let summary = format!(
+                "Next: '{}' ({}, {})",
+                feature_ctx.feature.title,
+                feature_ctx.feature.state.as_str(),
+                spec_status.tier.as_str(),
+            );
+
             let mut info: FeatureInfoWithContext = (&feature_ctx).into();
 
             // Apply LOD to breadcrumb
@@ -560,10 +646,14 @@ pub async fn get_next_feature(
                 spec_guidance: spec_status.guidance(&config),
             };
 
-            format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?
+            let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
+            Ok(CallToolResult::success(vec![
+                Content::text(summary),
+                Content::text(yaml),
+            ]))
         }
-        None => "null".to_string(),
-    };
-
-    Ok(CallToolResult::success(vec![Content::text(output)]))
+        None => Ok(CallToolResult::success(vec![Content::text(
+            "No workable features found.",
+        )])),
+    }
 }

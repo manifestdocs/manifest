@@ -33,6 +33,9 @@ pub enum ClientError {
     #[error("Bad request: {0}")]
     BadRequest(String),
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
     #[error("Unauthorized: API key required or invalid")]
     Unauthorized,
 
@@ -99,6 +102,7 @@ impl ManifestClient {
             match status {
                 StatusCode::NOT_FOUND => Err(ClientError::NotFound(body)),
                 StatusCode::BAD_REQUEST => Err(ClientError::BadRequest(body)),
+                StatusCode::CONFLICT => Err(ClientError::Conflict(body)),
                 StatusCode::UNAUTHORIZED => Err(ClientError::Unauthorized),
                 _ => Err(ClientError::Server(format!("{}: {}", status, body))),
             }
@@ -294,6 +298,7 @@ impl ManifestClient {
             match status {
                 StatusCode::NOT_FOUND => Err(ClientError::NotFound(body)),
                 StatusCode::BAD_REQUEST => Err(ClientError::BadRequest(body)),
+                StatusCode::CONFLICT => Err(ClientError::Conflict(body)),
                 StatusCode::UNAUTHORIZED => Err(ClientError::Unauthorized),
                 _ => Err(ClientError::Server(format!("{}: {}", status, body))),
             }

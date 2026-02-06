@@ -296,7 +296,7 @@ Every project has a feature tree—a hierarchy of capabilities the system provid
 ● implemented — complete and documented
 ✗ archived — soft-deleted, kept for historical reference
 
-IMPORTANT: Parent feature states are managed independently by the user. Do NOT suggest changing a parent's state based on its children's states. A feature set marked ◇ proposed with all ● implemented children is normal — the parent may be proposed because the user plans to add more children, or simply hasn't updated it yet. Only change parent states when the user explicitly asks.
+IMPORTANT: Feature sets (parents with children) have immutable state — the server rejects state changes on them. Only leaf features can be started, completed, or archived. If get_next_feature or get_active_feature returns a feature set, work on its children instead.
 
 DISCOVERING FEATURES:
 When the user asks you to work on something, use these tools to find the right feature:
