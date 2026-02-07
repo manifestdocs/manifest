@@ -104,48 +104,51 @@ pub async fn browse_filesystem(
         )));
     }
 
-    // Read directory entries
-    let mut entries = Vec::new();
-    let read_dir = std::fs::read_dir(root).map_err(|e| {
-        ApiError::from((
-            StatusCode::FORBIDDEN,
-            format!("Cannot read directory: {}", e),
-        ))
-    })?;
+    // Read directory entries (blocking I/O off the async runtime)
+    let root_owned = root.to_path_buf();
+    let entries = tokio::task::spawn_blocking(move || -> Result<Vec<DirectoryEntry>, String> {
+        let read_dir =
+            std::fs::read_dir(&root_owned).map_err(|e| format!("Cannot read directory: {}", e))?;
 
-    for entry in read_dir.flatten() {
-        let file_type = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
+        let mut entries = Vec::new();
+        for entry in read_dir.flatten() {
+            let file_type = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
 
-        if !file_type.is_dir() {
-            continue;
+            if !file_type.is_dir() {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            // Skip hidden directories
+            if name.starts_with('.') {
+                continue;
+            }
+
+            // Skip noise directories
+            if SKIP_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+
+            let entry_path = entry.path();
+            let has_children = peek_has_subdirs(&entry_path);
+
+            entries.push(DirectoryEntry {
+                name,
+                path: entry_path.to_string_lossy().to_string(),
+                has_children,
+            });
         }
 
-        let name = entry.file_name().to_string_lossy().to_string();
-
-        // Skip hidden directories
-        if name.starts_with('.') {
-            continue;
-        }
-
-        // Skip noise directories
-        if SKIP_DIRS.contains(&name.as_str()) {
-            continue;
-        }
-
-        let entry_path = entry.path();
-        let has_children = peek_has_subdirs(&entry_path);
-
-        entries.push(DirectoryEntry {
-            name,
-            path: entry_path.to_string_lossy().to_string(),
-            has_children,
-        });
-    }
-
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(entries)
+    })
+    .await
+    .map_err(|e| ApiError::from((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())))?
+    .map_err(|e| ApiError::from((StatusCode::FORBIDDEN, e)))?;
 
     let parent = root.parent().map(|p| p.to_string_lossy().to_string());
 
@@ -207,13 +210,17 @@ pub async fn create_directory(
         )));
     }
 
-    // Create directory and all intermediate parents (idempotent)
-    std::fs::create_dir_all(target).map_err(|e| {
-        ApiError::from((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to create directory: {}", e),
-        ))
-    })?;
+    // Create directory and all intermediate parents (blocking I/O off async runtime)
+    let target_owned = target.to_path_buf();
+    tokio::task::spawn_blocking(move || std::fs::create_dir_all(&target_owned))
+        .await
+        .map_err(|e| ApiError::from((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())))?
+        .map_err(|e| {
+            ApiError::from((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create directory: {}", e),
+            ))
+        })?;
 
     Ok(Json(MkdirResponse { path: body.path }))
 }

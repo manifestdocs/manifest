@@ -60,6 +60,7 @@ portable-pty = "0.8"
 
 # Security (API key auth for self-hosted)
 subtle = "2"
+sha2 = "0.10"
 validator = { version = "0.20", features = ["derive"] }
 dotenvy = "0.15.7"
 open = "5.3.3"

@@ -399,8 +399,8 @@ impl Database {
         let is_proposing_changes = desired_details.is_some() && !had_desired_details;
         // Guard rail: feature sets (parents with children) do not have mutable state.
         // Reject explicit state changes on non-leaf features so agents get clear feedback.
-        let is_feature_set = !self.is_leaf(id).await?;
-        if is_feature_set && input.state.is_some() {
+        // Only check is_leaf when a state change is actually requested (avoids extra query).
+        if input.state.is_some() && !self.is_leaf(id).await? {
             return Err(ManifestError::invalid_state(
                 "Cannot change state on a feature set. Feature sets group related capabilities — only leaf features have mutable state. To work on this area, start one of its child features instead."
             ).into());

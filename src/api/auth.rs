@@ -38,15 +38,17 @@ pub enum AuthMethod {
 }
 
 /// Timing-safe string comparison to prevent timing attacks.
+///
+/// Hashes both inputs to a fixed-size digest before comparing, so the
+/// comparison time is constant regardless of input lengths.
 pub fn constant_time_compare(a: &str, b: &str) -> bool {
+    use sha2::{Digest, Sha256};
     use subtle::ConstantTimeEq;
 
-    // Pad to same length to prevent length-based timing leaks
-    if a.len() != b.len() {
-        return false;
-    }
+    let hash_a = Sha256::digest(a.as_bytes());
+    let hash_b = Sha256::digest(b.as_bytes());
 
-    a.as_bytes().ct_eq(b.as_bytes()).into()
+    hash_a.ct_eq(&hash_b).into()
 }
 
 #[cfg(test)]

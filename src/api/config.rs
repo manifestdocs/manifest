@@ -3,6 +3,8 @@
 //! This module provides path validation and other configuration for the local
 //! self-hosted version of Manifest.
 
+use std::sync::LazyLock;
+
 use thiserror::Error;
 
 /// Errors that can occur during configuration validation.
@@ -21,9 +23,17 @@ pub struct PathRestrictions {
     pub denied_paths: Vec<String>,
 }
 
+/// Global path restrictions, constructed once from environment variables.
+static PATH_RESTRICTIONS: LazyLock<PathRestrictions> = LazyLock::new(PathRestrictions::init);
+
 impl PathRestrictions {
-    /// Load path restrictions from environment.
-    pub fn from_env() -> Self {
+    /// Get the global path restrictions (constructed once, cached).
+    pub fn from_env() -> &'static Self {
+        &PATH_RESTRICTIONS
+    }
+
+    /// Initialize path restrictions from environment variables.
+    fn init() -> Self {
         let allowed_roots = std::env::var("MANIFEST_ALLOWED_ROOTS")
             .ok()
             .map(|s| s.split(',').map(|p| p.trim().to_string()).collect());

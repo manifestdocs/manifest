@@ -37,12 +37,20 @@ impl DbDialect {
 
     /// Returns SQL to check if a table exists.
     ///
-    /// # Safety
-    /// The `table_name` parameter is interpolated directly into SQL.
-    /// This is safe because all callers pass hardcoded string literals.
-    /// Do NOT call this with user-provided input.
+    /// # Panics
+    /// Panics if `table_name` contains non-alphanumeric/underscore characters,
+    /// since the name is interpolated directly into SQL. All callers must pass
+    /// hardcoded string literals.
     #[must_use]
     pub fn table_exists_sql(&self, table_name: &str) -> String {
+        assert!(
+            !table_name.is_empty()
+                && table_name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "table_exists_sql: table name must be [a-zA-Z0-9_]+, got '{}'",
+            table_name
+        );
         match self {
             DbDialect::Sqlite => format!(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{}'",

@@ -295,13 +295,21 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
     // MCP router is stateless (uses its own HTTP client internally)
     let mcp_router = mcp::streamable_http_router();
 
-    // Terminal WebSocket (stateless — no DB needed, PTY spawned per connection)
-    let terminal_router =
-        Router::new().route("/api/v1/terminal/ws", get(handlers::ws_terminal_handler));
+    // Apply auth middleware to MCP router if API key is configured
+    let mcp_router = if config.api_key.is_some() {
+        mcp_router.layer(axum::middleware::from_fn_with_state(
+            config.clone(),
+            middleware::auth_middleware,
+        ))
+    } else {
+        mcp_router
+    };
+
+    // Terminal WebSocket — protected by the same auth as the API
+    let terminal_router = Router::new().route("/terminal/ws", get(handlers::ws_terminal_handler));
 
     let router = Router::new()
-        .merge(terminal_router)
-        .nest("/api/v1", api)
+        .nest("/api/v1", api.merge(terminal_router))
         .with_state(db)
         .nest("/mcp", mcp_router);
 

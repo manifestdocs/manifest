@@ -435,8 +435,8 @@ pub async fn start_feature(
             .map_err(client_err)?;
     }
 
-    // Cascade: also start all proposed children
-    start_children_recursive(client, &feature_with_context.children).await?;
+    // Cascade: also start all proposed children (max 5 levels deep)
+    start_children_recursive(client, &feature_with_context.children, 0, 5).await?;
 
     // Re-fetch context to get updated states
     let feature_with_context = client
@@ -493,10 +493,19 @@ pub async fn start_feature(
 }
 
 /// Recursively transition proposed children to in_progress.
+///
+/// `depth` tracks current recursion level, `max_depth` caps it to prevent
+/// unbounded recursion on deep trees.
 async fn start_children_recursive(
     client: &ManifestClient,
     children: &[crate::models::FeatureSummaryContext],
+    depth: u32,
+    max_depth: u32,
 ) -> Result<(), McpError> {
+    if depth >= max_depth {
+        return Ok(());
+    }
+
     use futures_util::future::try_join_all;
 
     let update_futures: Vec<_> = children
@@ -531,8 +540,14 @@ async fn start_children_recursive(
                     .map_err(client_err)?;
             }
 
-            // Recurse into children regardless
-            Box::pin(start_children_recursive(client, &child_context.children)).await
+            // Recurse into children (bounded)
+            Box::pin(start_children_recursive(
+                client,
+                &child_context.children,
+                depth + 1,
+                max_depth,
+            ))
+            .await
         })
         .collect();
 

@@ -150,16 +150,24 @@ pub async fn update_settings(
 /// GET /api/v1/settings/mcp-status — check if the default agent has MCP configured.
 pub async fn check_mcp_status() -> impl IntoResponse {
     let config = ServerConfig::load().unwrap_or_default();
-    let agent = config.default_agent.as_deref().unwrap_or("claude");
+    let agent = config
+        .default_agent
+        .as_deref()
+        .unwrap_or("claude")
+        .to_string();
 
-    let (configured, config_file, setup_hint) = match agent {
-        "claude" => check_claude_mcp_config(),
-        _ => (
-            false,
-            String::new(),
-            format!("MCP config check not supported for agent '{agent}'"),
-        ),
-    };
+    let agent_clone = agent.clone();
+    let (configured, config_file, setup_hint) =
+        tokio::task::spawn_blocking(move || match agent_clone.as_str() {
+            "claude" => check_claude_mcp_config(),
+            _ => (
+                false,
+                String::new(),
+                format!("MCP config check not supported for agent '{agent_clone}'"),
+            ),
+        })
+        .await
+        .unwrap_or((false, String::new(), "Internal error".to_string()));
 
     Json(serde_json::json!({
         "agent": agent,
@@ -172,15 +180,22 @@ pub async fn check_mcp_status() -> impl IntoResponse {
 /// POST /api/v1/settings/configure-mcp — auto-configure MCP for the default agent.
 pub async fn configure_mcp() -> Result<impl IntoResponse, ApiError> {
     let config = ServerConfig::load().unwrap_or_default();
-    let agent = config.default_agent.as_deref().unwrap_or("claude");
+    let agent = config
+        .default_agent
+        .as_deref()
+        .unwrap_or("claude")
+        .to_string();
 
-    match agent {
+    // Filesystem I/O runs off the async runtime
+    tokio::task::spawn_blocking(move || match agent.as_str() {
         "claude" => configure_claude_mcp(),
         _ => Err(ApiError::from((
             StatusCode::BAD_REQUEST,
             format!("Auto-configure not supported for agent '{agent}'"),
         ))),
-    }
+    })
+    .await
+    .map_err(|e| ApiError::from((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())))?
 }
 
 /// Check if Claude Code has a manifest MCP server configured.

@@ -49,6 +49,14 @@ async fn handle_session(socket: WebSocket, cwd: Option<String>) {
     let working_dir =
         cwd.unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
 
+    // Validate cwd against path restrictions
+    let restrictions = crate::api::config::PathRestrictions::from_env();
+    let path = std::path::Path::new(&working_dir);
+    if !path.is_absolute() || restrictions.validate(path).is_err() {
+        tracing::warn!(path = %working_dir, "Terminal session rejected: path not allowed");
+        return;
+    }
+
     tracing::info!(working_dir = %working_dir, "Starting terminal session");
 
     // Spawn PTY with user's shell

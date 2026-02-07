@@ -1,5 +1,6 @@
 //! Security middleware for API authentication and rate limiting.
 
+use crate::api::auth::constant_time_compare;
 use axum::{
     body::Body,
     extract::State,
@@ -13,7 +14,6 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use subtle::ConstantTimeEq;
 
 /// Security configuration loaded from environment variables.
 #[derive(Clone, Debug)]
@@ -206,9 +206,7 @@ pub async fn auth_middleware(
         Some(header) if header.starts_with("Bearer ") => {
             let token = &header[7..];
             // Use constant-time comparison to prevent timing attacks
-            let token_valid = token.len() == expected_key.len()
-                && token.as_bytes().ct_eq(expected_key.as_bytes()).into();
-            if token_valid {
+            if constant_time_compare(token, expected_key) {
                 Ok(next.run(request).await)
             } else {
                 tracing::warn!("Invalid API key provided");
