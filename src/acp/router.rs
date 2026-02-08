@@ -20,6 +20,12 @@ pub struct AcpRouter {
     sessions: Arc<Mutex<HashMap<String, AgentProcess>>>,
 }
 
+impl Default for AcpRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AcpRouter {
     pub fn new() -> Self {
         Self {

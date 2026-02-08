@@ -19,6 +19,12 @@ use serde::Deserialize;
 use std::io::{Read, Write};
 use tokio::sync::mpsc;
 
+/// Result type for spawning a PTY shell process.
+type SpawnShellResult = (
+    Box<dyn portable_pty::MasterPty + Send>,
+    Box<dyn portable_pty::Child + Send + Sync>,
+);
+
 /// Query parameters for the terminal WebSocket endpoint.
 #[derive(Debug, Deserialize)]
 pub struct TerminalParams {
@@ -79,15 +85,7 @@ async fn handle_session(socket: WebSocket, cwd: Option<String>) {
     let _ = child.wait();
 }
 
-fn spawn_shell(
-    working_dir: &str,
-) -> Result<
-    (
-        Box<dyn portable_pty::MasterPty + Send>,
-        Box<dyn portable_pty::Child + Send + Sync>,
-    ),
-    anyhow::Error,
-> {
+fn spawn_shell(working_dir: &str) -> Result<SpawnShellResult, anyhow::Error> {
     let pty_system = native_pty_system();
 
     let pair = pty_system.openpty(PtySize {

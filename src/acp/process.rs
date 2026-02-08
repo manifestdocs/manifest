@@ -25,8 +25,8 @@ pub struct AgentProcess {
 impl AgentProcess {
     /// Spawn a new agent, run the ACP initialize + session/new handshake.
     pub async fn start(config: AgentSpawnConfig, agent_name: &str) -> Result<Self, ProcessError> {
-        let transport = AgentTransport::spawn(config.command, &config.args)
-            .map_err(|e| ProcessError::Transport(e))?;
+        let transport =
+            AgentTransport::spawn(config.command, &config.args).map_err(ProcessError::Transport)?;
 
         // Step 1: initialize
         let init_params = InitializeParams {

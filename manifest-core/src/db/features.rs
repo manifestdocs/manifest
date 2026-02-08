@@ -396,13 +396,17 @@ impl Database {
         // Guard rail: desired_details is only for proposing changes to implemented features.
         // For non-implemented features, redirect desired_details to details directly —
         // there's nothing to "review", the spec should just be edited.
-        let (desired_details, is_proposing_changes) = if existing.state != FeatureState::Implemented {
+        let (desired_details, is_proposing_changes) = if existing.state != FeatureState::Implemented
+        {
             if let Some(Some(dd)) = input.desired_details {
                 // Apply directly to details instead of desired_details
                 details = Some(dd);
                 (existing.desired_details, false)
             } else {
-                (input.desired_details.unwrap_or(existing.desired_details), false)
+                (
+                    input.desired_details.unwrap_or(existing.desired_details),
+                    false,
+                )
             }
         } else {
             let had_desired_details = existing.desired_details.is_some();

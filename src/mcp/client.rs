@@ -269,9 +269,9 @@ impl ManifestClient {
         }
 
         // Try prefix resolution
-        let mut params: Vec<(&str, String)> = vec![("prefix".into(), id_or_prefix.to_string())];
+        let mut params: Vec<(&str, String)> = vec![("prefix", id_or_prefix.to_string())];
         if let Some(pid) = project_id {
-            params.push(("project_id".into(), pid.to_string()));
+            params.push(("project_id", pid.to_string()));
         }
 
         let response = self

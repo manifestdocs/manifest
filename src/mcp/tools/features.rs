@@ -63,7 +63,7 @@ pub async fn find_features(
             let id: uuid::Uuid = f.id.into();
             vec![
                 format::short_id(&id),
-                format::state_symbol(&f.state.as_str()).to_string(),
+                format::state_symbol(f.state.as_str()).to_string(),
                 f.priority.to_string(),
                 f.parent_id
                     .map(|pid| {
