@@ -122,15 +122,11 @@ fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
             "http://localhost:5173",  // Vite dev
             "http://localhost:5174",  // Vite dev (fallback)
             "http://localhost:5175",  // Vite dev (fallback)
-            "http://localhost:1420",  // Tauri dev
             "http://localhost:17010", // Self
             "http://127.0.0.1:5173",
             "http://127.0.0.1:5174",
             "http://127.0.0.1:5175",
-            "http://127.0.0.1:1420",
             "http://127.0.0.1:17010",
-            "tauri://localhost",       // Tauri webview (macOS)
-            "https://tauri.localhost", // Tauri webview (Windows/Linux)
         ];
         let origins: Vec<_> = localhost_origins
             .iter()

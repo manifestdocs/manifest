@@ -9,7 +9,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 WORKSPACE_ROOT="$(dirname "$PROJECT_ROOT")"
-APP_DIR="$WORKSPACE_ROOT/manifest-app"
 
 VERSION="$1"
 
@@ -126,24 +125,6 @@ if [ -f "$PROJECT_ROOT/manifest-core/Cargo.toml" ]; then
     sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" "$PROJECT_ROOT/manifest-core/Cargo.toml"
 fi
 
-# Desktop app Cargo.toml
-if [ -f "$APP_DIR/src-tauri/Cargo.toml" ]; then
-    echo "Updating manifest-app/src-tauri/Cargo.toml..."
-    sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" "$APP_DIR/src-tauri/Cargo.toml"
-fi
-
-# Desktop app package.json
-if [ -f "$APP_DIR/package.json" ]; then
-    echo "Updating manifest-app/package.json..."
-    sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$APP_DIR/package.json"
-fi
-
-# Tauri config
-if [ -f "$APP_DIR/src-tauri/tauri.conf.json" ]; then
-    echo "Updating manifest-app/src-tauri/tauri.conf.json..."
-    sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$APP_DIR/src-tauri/tauri.conf.json"
-fi
-
 # Update plugin.json in claude-plugins marketplace
 echo "Updating plugin.json in claude-plugins..."
 CLAUDE_PLUGINS_DIR="$(dirname "$PROJECT_ROOT")/claude-plugins"
@@ -184,23 +165,6 @@ git tag "v$VERSION"
 echo "Pushing manifest-server to origin..."
 git push origin main
 git push origin "v$VERSION"
-
-# Commit manifest-app (in workspace repo)
-if [ -d "$APP_DIR/.." ] && git -C "$WORKSPACE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo
-    echo "Committing manifest-app version bump in workspace..."
-    git -C "$WORKSPACE_ROOT" add \
-        "$APP_DIR/src-tauri/Cargo.toml" \
-        "$APP_DIR/package.json" \
-        "$APP_DIR/src-tauri/tauri.conf.json" 2>/dev/null || true
-    if git -C "$WORKSPACE_ROOT" diff --cached --quiet; then
-        echo "No changes to commit in workspace"
-    else
-        git -C "$WORKSPACE_ROOT" commit -m "Bump manifest-app version to $VERSION"
-        echo "Pushing workspace to origin..."
-        git -C "$WORKSPACE_ROOT" push origin main
-    fi
-fi
 
 # Commit and push claude-plugins if files were updated
 if [ -d "$CLAUDE_PLUGINS_DIR/.git" ]; then
