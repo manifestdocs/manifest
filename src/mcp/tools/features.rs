@@ -456,7 +456,7 @@ pub async fn start_feature(
         ac_level: config.ac_level.as_str().to_string(),
         ac_format: config.ac_format.as_str().to_string(),
         detail_level: config.detail_level.as_str().to_string(),
-        workflow_reminder: "IMPORTANT: When you finish this work, you MUST call complete_feature with a summary of what you did and any commit SHAs. This records history for future agents.".to_string(),
+        workflow_reminder: "CRITICAL: When you finish implementing this feature, you MUST do two things: (1) Update the feature details via update_feature to reflect what was actually built — the spec is living documentation, not a frozen plan. (2) Call complete_feature with a summary of what you did and any commit SHAs. This marks the feature as implemented and records history. Skipping either step leaves the feature in a broken state for future agents.".to_string(),
     };
 
     let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;

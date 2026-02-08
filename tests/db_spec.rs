@@ -605,7 +605,7 @@ mod features {
                         details: Some("Current".to_string()),
                         priority: None,
                         target_version_id: None,
-                        state: None,
+                        state: Some(FeatureState::Implemented),
                     },
                 )
                 .await
@@ -652,7 +652,7 @@ mod features {
         use super::*;
 
         #[tokio::test]
-        async fn stores_and_retrieves_desired_details() {
+        async fn stores_and_retrieves_desired_details_on_implemented_feature() {
             let db = setup().await;
             let project = create_test_project(&db).await;
             let feature = db
@@ -665,7 +665,7 @@ mod features {
                         details: Some("Current".to_string()),
                         priority: None,
                         target_version_id: None,
-                        state: None,
+                        state: Some(FeatureState::Implemented),
                     },
                 )
                 .await
@@ -691,6 +691,49 @@ mod features {
 
             assert_eq!(updated.details, Some("Current".to_string()));
             assert_eq!(updated.desired_details, Some("Desired".to_string()));
+        }
+
+        #[tokio::test]
+        async fn redirects_desired_details_to_details_on_non_implemented_feature() {
+            let db = setup().await;
+            let project = create_test_project(&db).await;
+            let feature = db
+                .create_feature(
+                    project.id,
+                    CreateFeatureInput {
+                        id: None,
+                        parent_id: None,
+                        title: "Feature".to_string(),
+                        details: Some("Original".to_string()),
+                        priority: None,
+                        target_version_id: None,
+                        state: None, // proposed
+                    },
+                )
+                .await
+                .expect("Failed to create");
+
+            let updated = db
+                .update_feature(
+                    feature.id,
+                    UpdateFeatureInput {
+                        parent_id: None,
+                        title: None,
+                        details: None,
+                        desired_details: Some(Some("New spec".to_string())),
+                        details_summary: None,
+                        priority: None,
+                        target_version_id: None,
+                        state: None,
+                    },
+                )
+                .await
+                .expect("Failed to update")
+                .unwrap();
+
+            // desired_details should be redirected to details
+            assert_eq!(updated.details, Some("New spec".to_string()));
+            assert!(updated.desired_details.is_none());
         }
     }
 

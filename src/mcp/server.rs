@@ -435,16 +435,15 @@ WORKFLOW:
 3. BUILD — implement against the spec:
    - The feature details ARE your specification
    - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
-   - If desired_details is present, this is a CHANGE REQUEST: compare desired_details (what's wanted) with details (what's currently built) to understand what needs to change. Update details to reflect what you build.
+   - If desired_details is present, this is a CHANGE REQUEST: compare desired_details (what's wanted) with details (what's currently built) to understand what needs to change.
    - Write tests first, then implement, then verify
-   - Use update_feature to evolve the spec as you learn more
+   - As you implement, update_feature details to reflect what you actually built — the spec is living documentation, not a frozen plan
 
-4. DOCUMENT — MANDATORY after implementing:
-   - You MUST call complete_feature when work is done. This is not optional.
-   - Provide a summary of what you did + commit SHAs
+4. DOCUMENT — MANDATORY after implementing. You MUST complete BOTH steps:
+   a) Update the feature spec: call update_feature to set details to what was actually built. If the implementation deviated from the original spec, the details MUST reflect the final state. Features are living documentation — stale specs mislead future agents.
+   b) Mark complete: call complete_feature with a summary of what you did + commit SHAs. This transitions the feature to implemented and records history.
    - complete_feature automatically clears desired_details when marking as implemented
-   - This creates a history entry so future agents (or future you) know what happened
-   - If you skip this step, there is no record of the work and the feature stays in_progress forever
+   - If you skip these steps, the feature stays in_progress forever with a stale spec — the worst possible outcome
    - If you learned something that applies to sibling features, update the parent's details with shared context
 
-Common sequence: list_projects → get_active_feature → start_feature → [implement] → complete_feature"#;
+Common sequence: list_projects → get_active_feature → start_feature → [implement] → update_feature (details) → complete_feature"#;

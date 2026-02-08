@@ -390,13 +390,26 @@ impl Database {
 
         let now = Utc::now();
         let title = input.title.unwrap_or(existing.title);
-        let details = input.details.or(existing.details);
-        // Guard rail: setting desired_details (proposing changes) must not change state.
-        // AI agents may accidentally set state alongside desired_details.
-        let had_desired_details = existing.desired_details.is_some();
-        let desired_details = input.desired_details.unwrap_or(existing.desired_details);
+        let mut details = input.details.or(existing.details);
         let details_summary = input.details_summary.unwrap_or(existing.details_summary);
-        let is_proposing_changes = desired_details.is_some() && !had_desired_details;
+
+        // Guard rail: desired_details is only for proposing changes to implemented features.
+        // For non-implemented features, redirect desired_details to details directly —
+        // there's nothing to "review", the spec should just be edited.
+        let (desired_details, is_proposing_changes) = if existing.state != FeatureState::Implemented {
+            if let Some(Some(dd)) = input.desired_details {
+                // Apply directly to details instead of desired_details
+                details = Some(dd);
+                (existing.desired_details, false)
+            } else {
+                (input.desired_details.unwrap_or(existing.desired_details), false)
+            }
+        } else {
+            let had_desired_details = existing.desired_details.is_some();
+            let desired_details = input.desired_details.unwrap_or(existing.desired_details);
+            let is_proposing = desired_details.is_some() && !had_desired_details;
+            (desired_details, is_proposing)
+        };
         // Guard rail: feature sets (parents with children) do not have mutable state.
         // Reject explicit state changes on non-leaf features so agents get clear feedback.
         // Only check is_leaf when a state change is actually requested (avoids extra query).
