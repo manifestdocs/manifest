@@ -204,20 +204,24 @@ jobs:
           git commit -m "Update manifest to ${{ github.ref_name }}"
           git push
 
-  deploy-pages:
-    name: Deploy GitHub Pages
+  deploy-site:
+    name: Deploy to Cloudflare Pages
     needs: release
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout manifest
+      - name: Checkout manifest-site
         uses: actions/checkout@v4
+        with:
+          repository: manifestdocs/manifest-site
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: manifest-site
+
+      - name: Checkout manifest-svelte
+        uses: actions/checkout@v4
+        with:
+          repository: manifestdocs/manifest-svelte
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: manifest-svelte
 
       - uses: pnpm/action-setup@v4
         with:
@@ -226,24 +230,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: manifest-site/pnpm-lock.yaml
 
       - name: Build manifest-site
-        env:
-          BASE_PATH: /manifest
         run: |
-          cd manifest-site
-          pnpm install
-          pnpm build
+          # Set up pnpm workspace so manifest-svelte resolves
+          cat > pnpm-workspace.yaml << 'EOF'
+          packages:
+            - manifest-site
+            - manifest-svelte
+          EOF
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @manifest/svelte build
+          pnpm --filter manifest-site build
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
-          path: manifest-site/build
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy manifest-site/build --project-name=manifest-site
 
   update-plugin:
     name: Update Claude Plugin
