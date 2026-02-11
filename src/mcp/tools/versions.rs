@@ -67,7 +67,7 @@ pub async fn list_versions(
             let id: uuid::Uuid = v.id.into();
             let feat_count = version_feature_counts.get(&v.id).copied().unwrap_or(0);
             vec![
-                format::short_id(&id),
+                id.to_string(),
                 v.name.clone(),
                 status.to_string(),
                 feat_count.to_string(),
