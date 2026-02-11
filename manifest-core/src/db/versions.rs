@@ -5,29 +5,28 @@ use super::helpers::*;
 use super::{Database, ManifestError};
 use crate::models::*;
 
+/// SELECT columns for the versions table.
+const VERSION_COLS: &str = "id, project_id, name, description, released_at, created_at, updated_at";
+
 impl Database {
     /// Get all versions for a project, ordered by creation date.
     pub async fn get_versions_by_project(&self, project_id: ProjectId) -> Result<Vec<Version>> {
-        let rows = sqlx::query(
-            "SELECT id, project_id, name, description, released_at, created_at, updated_at
-             FROM versions WHERE project_id = $1 ORDER BY created_at",
-        )
-        .bind(project_id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
+        let sql = format!("SELECT {VERSION_COLS} FROM versions WHERE project_id = $1 ORDER BY created_at");
+        let rows = sqlx::query(&sql)
+            .bind(project_id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
 
         rows.iter().map(row_to_version).collect()
     }
 
     /// Get a single version by ID.
     pub async fn get_version(&self, id: VersionId) -> Result<Option<Version>> {
-        let row = sqlx::query(
-            "SELECT id, project_id, name, description, released_at, created_at, updated_at
-             FROM versions WHERE id = $1",
-        )
-        .bind(id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let sql = format!("SELECT {VERSION_COLS} FROM versions WHERE id = $1");
+        let row = sqlx::query(&sql)
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
 
         row.as_ref().map(row_to_version).transpose()
     }
@@ -35,13 +34,13 @@ impl Database {
     /// Get the "Next" version (first unreleased version) for a project.
     /// Returns None if no unreleased versions exist.
     pub async fn get_next_version(&self, project_id: ProjectId) -> Result<Option<Version>> {
-        let row = sqlx::query(
-            "SELECT id, project_id, name, description, released_at, created_at, updated_at
-             FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at LIMIT 1",
-        )
-        .bind(project_id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let sql = format!(
+            "SELECT {VERSION_COLS} FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at LIMIT 1"
+        );
+        let row = sqlx::query(&sql)
+            .bind(project_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
 
         row.as_ref().map(row_to_version).transpose()
     }
@@ -49,13 +48,13 @@ impl Database {
     /// Get the latest unreleased version for a project (for new feature assignment).
     /// Returns None if no unreleased versions exist.
     pub async fn get_latest_version(&self, project_id: ProjectId) -> Result<Option<Version>> {
-        let row = sqlx::query(
-            "SELECT id, project_id, name, description, released_at, created_at, updated_at
-             FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(project_id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let sql = format!(
+            "SELECT {VERSION_COLS} FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at DESC LIMIT 1"
+        );
+        let row = sqlx::query(&sql)
+            .bind(project_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
 
         row.as_ref().map(row_to_version).transpose()
     }

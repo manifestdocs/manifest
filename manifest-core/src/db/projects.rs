@@ -6,41 +6,36 @@ use super::helpers::*;
 use super::{Database, ManifestError};
 use crate::models::*;
 
+/// SELECT columns for the projects table.
+const PROJECT_COLS: &str = "id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, created_at, updated_at";
+
 impl Database {
     /// Get all projects ordered by name.
     pub async fn get_all_projects(&self) -> Result<Vec<Project>> {
-        let rows = sqlx::query(
-            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, created_at, updated_at
-             FROM projects ORDER BY name",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let sql = format!("SELECT {PROJECT_COLS} FROM projects ORDER BY name");
+        let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
 
         rows.iter().map(row_to_project).collect()
     }
 
     /// Get a project by its ID.
     pub async fn get_project(&self, id: ProjectId) -> Result<Option<Project>> {
-        let row = sqlx::query(
-            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, created_at, updated_at
-             FROM projects WHERE id = $1",
-        )
-        .bind(id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let sql = format!("SELECT {PROJECT_COLS} FROM projects WHERE id = $1");
+        let row = sqlx::query(&sql)
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
 
         row.as_ref().map(row_to_project).transpose()
     }
 
     /// Get a project by its URL-friendly slug.
     pub async fn get_project_by_slug(&self, slug: &str) -> Result<Option<Project>> {
-        let row = sqlx::query(
-            "SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, created_at, updated_at
-             FROM projects WHERE slug = $1",
-        )
-        .bind(slug)
-        .fetch_optional(&self.pool)
-        .await?;
+        let sql = format!("SELECT {PROJECT_COLS} FROM projects WHERE slug = $1");
+        let row = sqlx::query(&sql)
+            .bind(slug)
+            .fetch_optional(&self.pool)
+            .await?;
 
         row.as_ref().map(row_to_project).transpose()
     }

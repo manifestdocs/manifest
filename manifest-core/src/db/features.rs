@@ -8,6 +8,12 @@ use super::{
 };
 use crate::models::*;
 
+/// SELECT columns for the features table (bare names).
+const FEATURE_COLS: &str = "id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at";
+
+/// SELECT columns for the features table with `f.` table alias.
+const FEATURE_COLS_F: &str = "f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.target_version_id, f.created_at, f.updated_at";
+
 impl Database {
     /// Get all features across all projects with optional pagination.
     pub async fn get_all_features_paginated(
@@ -17,28 +23,27 @@ impl Database {
     ) -> Result<Vec<Feature>> {
         let rows = match (limit, offset) {
             (Some(lim), Some(off)) => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features ORDER BY priority, title LIMIT $1 OFFSET $2",
-                )
-                .bind(lim as i64)
-                .bind(off as i64)
-                .fetch_all(&self.pool)
-                .await?
+                let sql = format!(
+                    "SELECT {FEATURE_COLS} FROM features ORDER BY priority, title LIMIT $1 OFFSET $2"
+                );
+                sqlx::query(&sql)
+                    .bind(lim as i64)
+                    .bind(off as i64)
+                    .fetch_all(&self.pool)
+                    .await?
             }
             (Some(lim), None) => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features ORDER BY priority, title LIMIT $1",
-                )
-                .bind(lim as i64)
-                .fetch_all(&self.pool)
-                .await?
+                let sql = format!(
+                    "SELECT {FEATURE_COLS} FROM features ORDER BY priority, title LIMIT $1"
+                );
+                sqlx::query(&sql)
+                    .bind(lim as i64)
+                    .fetch_all(&self.pool)
+                    .await?
             }
             (None, Some(off)) => {
                 let sql = format!(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features ORDER BY priority, title {} OFFSET $1",
+                    "SELECT {FEATURE_COLS} FROM features ORDER BY priority, title {} OFFSET $1",
                     self.dialect.unlimited_offset_sql()
                 );
                 sqlx::query(&sql)
@@ -47,12 +52,9 @@ impl Database {
                     .await?
             }
             (None, None) => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features ORDER BY priority, title",
-                )
-                .fetch_all(&self.pool)
-                .await?
+                let sql =
+                    format!("SELECT {FEATURE_COLS} FROM features ORDER BY priority, title");
+                sqlx::query(&sql).fetch_all(&self.pool).await?
             }
         };
 
@@ -73,30 +75,29 @@ impl Database {
     ) -> Result<Vec<Feature>> {
         let rows = match (limit, offset) {
             (Some(lim), Some(off)) => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2 OFFSET $3",
-                )
-                .bind(project_id.to_string())
-                .bind(lim as i64)
-                .bind(off as i64)
-                .fetch_all(&self.pool)
-                .await?
+                let sql = format!(
+                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2 OFFSET $3"
+                );
+                sqlx::query(&sql)
+                    .bind(project_id.to_string())
+                    .bind(lim as i64)
+                    .bind(off as i64)
+                    .fetch_all(&self.pool)
+                    .await?
             }
             (Some(lim), None) => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2",
-                )
-                .bind(project_id.to_string())
-                .bind(lim as i64)
-                .fetch_all(&self.pool)
-                .await?
+                let sql = format!(
+                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2"
+                );
+                sqlx::query(&sql)
+                    .bind(project_id.to_string())
+                    .bind(lim as i64)
+                    .fetch_all(&self.pool)
+                    .await?
             }
             (None, Some(off)) => {
                 let sql = format!(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features WHERE project_id = $1 ORDER BY priority, title {} OFFSET $2",
+                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title {} OFFSET $2",
                     self.dialect.unlimited_offset_sql()
                 );
                 sqlx::query(&sql)
@@ -106,13 +107,13 @@ impl Database {
                     .await?
             }
             (None, None) => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features WHERE project_id = $1 ORDER BY priority, title",
-                )
-                .bind(project_id.to_string())
-                .fetch_all(&self.pool)
-                .await?
+                let sql = format!(
+                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title"
+                );
+                sqlx::query(&sql)
+                    .bind(project_id.to_string())
+                    .fetch_all(&self.pool)
+                    .await?
             }
         };
 
@@ -127,13 +128,11 @@ impl Database {
 
     /// Get a single feature by ID.
     pub async fn get_feature(&self, id: FeatureId) -> Result<Option<Feature>> {
-        let row = sqlx::query(
-            "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-             FROM features WHERE id = $1",
-        )
-        .bind(id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id = $1");
+        let row = sqlx::query(&sql)
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
 
         row.as_ref().map(row_to_feature).transpose()
     }
@@ -152,23 +151,22 @@ impl Database {
         let pattern = format!("{}%", prefix);
         let rows = match project_id {
             Some(pid) => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features WHERE id LIKE $1 AND project_id = $2 LIMIT 2",
-                )
-                .bind(&pattern)
-                .bind(pid.to_string())
-                .fetch_all(&self.pool)
-                .await?
+                let sql = format!(
+                    "SELECT {FEATURE_COLS} FROM features WHERE id LIKE $1 AND project_id = $2 LIMIT 2"
+                );
+                sqlx::query(&sql)
+                    .bind(&pattern)
+                    .bind(pid.to_string())
+                    .fetch_all(&self.pool)
+                    .await?
             }
             None => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features WHERE id LIKE $1 LIMIT 2",
-                )
-                .bind(&pattern)
-                .fetch_all(&self.pool)
-                .await?
+                let sql =
+                    format!("SELECT {FEATURE_COLS} FROM features WHERE id LIKE $1 LIMIT 2");
+                sqlx::query(&sql)
+                    .bind(&pattern)
+                    .fetch_all(&self.pool)
+                    .await?
             }
         };
 
@@ -549,23 +547,23 @@ impl Database {
 
         let rows = match project.and_then(|p| p.root_feature_id) {
             Some(root_id) => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features WHERE project_id = $1 AND parent_id = $2 ORDER BY priority, title",
-                )
-                .bind(project_id.to_string())
-                .bind(root_id.to_string())
-                .fetch_all(&self.pool)
-                .await?
+                let sql = format!(
+                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 AND parent_id = $2 ORDER BY priority, title"
+                );
+                sqlx::query(&sql)
+                    .bind(project_id.to_string())
+                    .bind(root_id.to_string())
+                    .fetch_all(&self.pool)
+                    .await?
             }
             None => {
-                sqlx::query(
-                    "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-                     FROM features WHERE project_id = $1 AND parent_id IS NULL ORDER BY priority, title",
-                )
-                .bind(project_id.to_string())
-                .fetch_all(&self.pool)
-                .await?
+                let sql = format!(
+                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 AND parent_id IS NULL ORDER BY priority, title"
+                );
+                sqlx::query(&sql)
+                    .bind(project_id.to_string())
+                    .fetch_all(&self.pool)
+                    .await?
             }
         };
 
@@ -574,13 +572,13 @@ impl Database {
 
     /// Get the direct children of a feature.
     pub async fn get_children(&self, parent_id: FeatureId) -> Result<Vec<Feature>> {
-        let rows = sqlx::query(
-            "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
-             FROM features WHERE parent_id = $1 ORDER BY priority, title",
-        )
-        .bind(parent_id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
+        let sql = format!(
+            "SELECT {FEATURE_COLS} FROM features WHERE parent_id = $1 ORDER BY priority, title"
+        );
+        let rows = sqlx::query(&sql)
+            .bind(parent_id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
 
         rows.iter().map(row_to_feature).collect()
     }
@@ -815,8 +813,8 @@ impl Database {
         version_id: Option<VersionId>,
     ) -> Result<Option<Feature>> {
         let row = if let Some(vid) = version_id {
-            sqlx::query(
-                "SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at
+            let sql = format!(
+                "SELECT {FEATURE_COLS}
                  FROM features f
                  WHERE f.project_id = $1
                    AND f.target_version_id = $2
@@ -824,20 +822,21 @@ impl Database {
                    AND f.parent_id IS NOT NULL
                    AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
                  ORDER BY f.priority ASC, f.created_at ASC
-                 LIMIT 1",
-            )
-            .bind(project_id.to_string())
-            .bind(vid.to_string())
-            .fetch_optional(&self.pool)
-            .await?
+                 LIMIT 1"
+            );
+            sqlx::query(&sql)
+                .bind(project_id.to_string())
+                .bind(vid.to_string())
+                .fetch_optional(&self.pool)
+                .await?
         } else {
-            sqlx::query(
+            let sql = format!(
                 "WITH next_version AS (
                     SELECT id FROM versions
                     WHERE project_id = $1 AND released_at IS NULL
                     ORDER BY created_at ASC LIMIT 1
                 )
-                SELECT f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.target_version_id, f.created_at, f.updated_at
+                SELECT {FEATURE_COLS_F}
                 FROM features f
                 LEFT JOIN next_version nv ON f.target_version_id = nv.id
                 WHERE f.project_id = $1
@@ -850,11 +849,12 @@ impl Database {
                          ELSE 2 END,
                     f.priority ASC,
                     f.created_at ASC
-                LIMIT 1",
-            )
-            .bind(project_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?
+                LIMIT 1"
+            );
+            sqlx::query(&sql)
+                .bind(project_id.to_string())
+                .fetch_optional(&self.pool)
+                .await?
         };
 
         row.as_ref().map(row_to_feature).transpose()
