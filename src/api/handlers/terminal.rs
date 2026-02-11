@@ -1,5 +1,11 @@
 //! WebSocket terminal handler for PTY-backed shell sessions.
 //!
+//! Security:
+//! - A random connection token is generated once per server launch.
+//! - The client must fetch the token via `GET /api/v1/terminal/token` (CORS-protected)
+//!   and include it as `?token=<value>` on the WebSocket URL.
+//! - This prevents Cross-Site WebSocket Hijacking (CSWSH) even in local mode.
+//!
 //! Protocol:
 //! - Client → Server: Text frames. If valid JSON with `type: "resize"`, handle as resize.
 //!   Otherwise, write raw string to PTY stdin.
@@ -13,12 +19,15 @@ use axum::{
     },
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
+    Json,
 };
 use futures_util::{SinkExt, StreamExt};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Deserialize;
 use std::io::{Read, Write};
+use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Result type for spawning a PTY shell process.
 type SpawnShellResult = (
@@ -26,11 +35,22 @@ type SpawnShellResult = (
     Box<dyn portable_pty::Child + Send + Sync>,
 );
 
+/// Per-launch connection token. Generated once, stable for the lifetime of the process.
+static CONNECTION_TOKEN: LazyLock<String> =
+    LazyLock::new(|| Uuid::new_v4().to_string().replace('-', ""));
+
+/// Get the connection token for this server instance.
+pub fn connection_token() -> &'static str {
+    &CONNECTION_TOKEN
+}
+
 /// Query parameters for the terminal WebSocket endpoint.
 #[derive(Debug, Deserialize)]
 pub struct TerminalParams {
     /// Working directory to start the shell in.
     pub cwd: Option<String>,
+    /// Connection token (must match the server's startup token).
+    pub token: Option<String>,
 }
 
 /// Resize control message from the client.
@@ -67,7 +87,10 @@ pub fn allowed_origins() -> Vec<&'static str> {
 }
 
 /// Check if the Origin header is from an allowed origin.
-fn is_origin_allowed(headers: &HeaderMap) -> bool {
+///
+/// Accepts a pre-resolved list of allowed origins (from `SecurityConfig::resolved_origins()`).
+/// This avoids duplicating MANIFEST_CORS_ORIGINS parsing.
+pub(crate) fn is_origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
     let origin = match headers.get("origin").and_then(|v| v.to_str().ok()) {
         Some(o) => o,
         // No Origin header — not a browser request (e.g. CLI WebSocket client).
@@ -75,24 +98,40 @@ fn is_origin_allowed(headers: &HeaderMap) -> bool {
         None => return true,
     };
 
-    // Custom origins override everything
-    if let Ok(custom) = std::env::var("MANIFEST_CORS_ORIGINS") {
-        return custom.split(',').any(|allowed| allowed.trim() == origin);
-    }
-
-    allowed_origins().iter().any(|allowed| *allowed == origin)
+    allowed.iter().any(|a| a == origin)
 }
 
-/// WebSocket endpoint: `/api/v1/terminal/ws?cwd=/path/to/dir`
+/// Returns the connection token as JSON.
 ///
-/// Validates the Origin header to prevent cross-origin browser attacks,
-/// then upgrades to WebSocket, spawns a PTY shell, and bridges I/O.
+/// This endpoint is protected by CORS (only allowed origins can fetch it)
+/// and by auth middleware when `MANIFEST_API_KEY` is set.
+pub async fn terminal_token_handler() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "token": connection_token() }))
+}
+
+/// Newtype for injecting resolved allowed origins via Extension layer.
+#[derive(Clone)]
+pub struct AllowedOrigins(pub Arc<Vec<String>>);
+
+/// WebSocket endpoint: `/api/v1/terminal/ws?cwd=/path/to/dir&token=<token>`
+///
+/// Validates the connection token and Origin header before upgrading.
 pub async fn ws_terminal_handler(
     headers: HeaderMap,
+    axum::Extension(origins): axum::Extension<AllowedOrigins>,
     ws: WebSocketUpgrade,
     Query(params): Query<TerminalParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    if !is_origin_allowed(&headers) {
+    // Validate connection token
+    match &params.token {
+        Some(t) if t == connection_token() => {}
+        _ => {
+            tracing::warn!("Terminal WebSocket rejected: invalid or missing connection token");
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+
+    if !is_origin_allowed(&headers, &origins.0) {
         let origin = headers
             .get("origin")
             .and_then(|v| v.to_str().ok())
@@ -276,4 +315,52 @@ async fn bridge_ws_pty(
     ws_send_task.abort();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+
+    fn origins(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn no_origin_header_is_allowed() {
+        let headers = HeaderMap::new();
+        let allowed = origins(&["http://localhost:17010"]);
+        assert!(is_origin_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn matching_origin_is_allowed() {
+        let mut headers = HeaderMap::new();
+        headers.insert("origin", "http://localhost:17010".parse().unwrap());
+        let allowed = origins(&["http://localhost:17010", "http://127.0.0.1:17010"]);
+        assert!(is_origin_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn disallowed_origin_is_rejected() {
+        let mut headers = HeaderMap::new();
+        headers.insert("origin", "http://evil.com".parse().unwrap());
+        let allowed = origins(&["http://localhost:17010"]);
+        assert!(!is_origin_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn custom_origins_override() {
+        let mut headers = HeaderMap::new();
+        headers.insert("origin", "https://myapp.example.com".parse().unwrap());
+        let allowed = origins(&["https://myapp.example.com"]);
+        assert!(is_origin_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn allowed_origins_includes_production() {
+        let origins = allowed_origins();
+        assert!(origins.contains(&"http://localhost:17010"));
+        assert!(origins.contains(&"http://127.0.0.1:17010"));
+    }
 }

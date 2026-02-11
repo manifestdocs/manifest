@@ -27,13 +27,17 @@ pub struct SecurityConfig {
 }
 
 impl SecurityConfig {
+    /// Parse MANIFEST_CORS_ORIGINS from environment (shared helper).
+    fn cors_origins_from_env() -> Option<Vec<String>> {
+        std::env::var("MANIFEST_CORS_ORIGINS")
+            .ok()
+            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+    }
+
     /// Load security configuration from environment variables.
     pub fn from_env() -> Self {
         let api_key = std::env::var("MANIFEST_API_KEY").ok();
-
-        let cors_origins = std::env::var("MANIFEST_CORS_ORIGINS")
-            .ok()
-            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect());
+        let cors_origins = Self::cors_origins_from_env();
 
         let rate_limit = std::env::var("MANIFEST_RATE_LIMIT")
             .ok()
@@ -60,9 +64,7 @@ impl SecurityConfig {
 
     /// Create security config for cloud mode with rate limiting enabled.
     pub fn for_cloud_mode() -> Self {
-        let cors_origins = std::env::var("MANIFEST_CORS_ORIGINS")
-            .ok()
-            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect());
+        let cors_origins = Self::cors_origins_from_env();
 
         let rate_limit = std::env::var("MANIFEST_RATE_LIMIT")
             .ok()
@@ -73,6 +75,19 @@ impl SecurityConfig {
             api_key: None,
             cors_origins,
             rate_limiter: Some(RateLimiter::new(rate_limit, Duration::from_secs(60))),
+        }
+    }
+
+    /// Return the resolved list of allowed origins.
+    ///
+    /// If `MANIFEST_CORS_ORIGINS` was set, uses those. Otherwise falls back
+    /// to the default production + dev origins from terminal config.
+    pub fn resolved_origins(&self) -> Vec<String> {
+        if let Some(ref custom) = self.cors_origins {
+            custom.clone()
+        } else {
+            use crate::api::handlers::terminal::allowed_origins;
+            allowed_origins().iter().map(|s| s.to_string()).collect()
         }
     }
 

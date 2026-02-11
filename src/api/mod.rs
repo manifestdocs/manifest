@@ -5,7 +5,7 @@ mod middleware;
 pub mod state;
 pub mod validation;
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use axum::{
     extract::DefaultBodyLimit,
@@ -103,15 +103,11 @@ fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
     use axum::http::{header, Method};
     use tower_http::cors::AllowOrigin;
 
-    let origins: Vec<_> = if let Some(ref custom) = config.cors_origins {
-        custom.iter().filter_map(|s| s.parse().ok()).collect()
-    } else {
-        // Default: allow localhost origins only (shared with terminal WebSocket origin check)
-        handlers::terminal::allowed_origins()
-            .iter()
-            .filter_map(|s| s.parse().ok())
-            .collect()
-    };
+    let origins: Vec<_> = config
+        .resolved_origins()
+        .into_iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
 
     CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
@@ -123,6 +119,21 @@ fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
             Method::OPTIONS,
         ])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+}
+
+/// Apply auth middleware to a router if an API key is configured.
+fn apply_auth_layer<S: Clone + Send + Sync + 'static>(
+    router: Router<S>,
+    config: &SecurityConfig,
+) -> Router<S> {
+    if config.api_key.is_some() {
+        router.layer(axum::middleware::from_fn_with_state(
+            config.clone(),
+            middleware::auth_middleware,
+        ))
+    } else {
+        router
+    }
 }
 
 /// Create the API router with default security configuration.
@@ -238,17 +249,16 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
             get(handlers::get_settings).put(handlers::update_settings),
         )
         .route("/settings/mcp-status", get(handlers::check_mcp_status))
-        .route("/settings/configure-mcp", post(handlers::configure_mcp));
+        .route("/settings/configure-mcp", post(handlers::configure_mcp))
+        // Terminal — connection token + WebSocket (behind auth when API key is set)
+        .route(
+            "/terminal/token",
+            get(handlers::terminal::terminal_token_handler),
+        )
+        .route("/terminal/ws", get(handlers::terminal::ws_terminal_handler));
 
     // Apply auth middleware to protected routes if API key is configured
-    let protected_api = if config.api_key.is_some() {
-        protected_api.layer(axum::middleware::from_fn_with_state(
-            config.clone(),
-            middleware::auth_middleware,
-        ))
-    } else {
-        protected_api
-    };
+    let protected_api = apply_auth_layer(protected_api, &config);
 
     // Apply rate limiting if configured
     let protected_api = if let Some(rate_limiter) = config.rate_limiter.clone() {
@@ -270,22 +280,19 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
     let mcp_router = mcp::streamable_http_router();
 
     // Apply auth middleware to MCP router if API key is configured
-    let mcp_router = if config.api_key.is_some() {
-        mcp_router.layer(axum::middleware::from_fn_with_state(
-            config.clone(),
-            middleware::auth_middleware,
-        ))
-    } else {
-        mcp_router
-    };
+    let mcp_router = apply_auth_layer(mcp_router, &config);
 
-    // Terminal WebSocket — protected by the same auth as the API
-    let terminal_router = Router::new().route("/terminal/ws", get(handlers::ws_terminal_handler));
+    // Resolve allowed origins once for CORS + terminal origin check
+    let resolved_origins = Arc::new(config.resolved_origins());
 
     let router = Router::new()
-        .nest("/api/v1", api.merge(terminal_router))
+        .nest("/api/v1", api)
         .with_state(db)
-        .nest("/mcp", mcp_router);
+        .nest("/mcp", mcp_router)
+        // Inject resolved origins for terminal WS handler (must be after with_state)
+        .layer(axum::Extension(handlers::terminal::AllowedOrigins(
+            resolved_origins,
+        )));
 
     #[cfg(feature = "embed-web")]
     let router = router.fallback(static_handler);

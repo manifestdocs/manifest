@@ -13,7 +13,6 @@ pub use filesystem::*;
 pub use health::*;
 pub use projects::*;
 pub use settings::*;
-pub use terminal::ws_terminal_handler;
 pub use versions::*;
 
 use crate::db::ManifestError;
