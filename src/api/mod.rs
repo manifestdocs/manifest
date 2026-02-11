@@ -107,7 +107,7 @@ fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
         custom.iter().filter_map(|s| s.parse().ok()).collect()
     } else {
         // Default: allow localhost origins only (shared with terminal WebSocket origin check)
-        handlers::terminal::ALLOWED_WS_ORIGINS
+        handlers::terminal::allowed_origins()
             .iter()
             .filter_map(|s| s.parse().ok())
             .collect()

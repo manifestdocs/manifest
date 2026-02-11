@@ -42,21 +42,29 @@ struct ResizeMessage {
     cols: u16,
 }
 
-/// Default localhost origins allowed to open terminal WebSocket connections.
-/// Browsers always send the `Origin` header on WebSocket handshakes, so checking
-/// it blocks cross-origin attacks (e.g. malicious JS on evil.com connecting to
-/// localhost:17010). Non-browser clients can spoof this, but they can already
-/// spawn shells directly.
-pub const ALLOWED_WS_ORIGINS: &[&str] = &[
+/// Production origins — only the embedded web app on port 17010.
+const PRODUCTION_ORIGINS: &[&str] = &["http://localhost:17010", "http://127.0.0.1:17010"];
+
+/// Additional dev origins (Vite dev server ports).
+const DEV_ORIGINS: &[&str] = &[
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:5175",
-    "http://localhost:17010",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
     "http://127.0.0.1:5175",
-    "http://127.0.0.1:17010",
 ];
+
+/// Returns the allowed origins based on the current mode.
+/// Production: only port 17010. Dev mode (MANIFEST_DEV=1): also Vite ports.
+/// Custom origins (MANIFEST_CORS_ORIGINS) override everything.
+pub fn allowed_origins() -> Vec<&'static str> {
+    let mut origins = PRODUCTION_ORIGINS.to_vec();
+    if std::env::var("MANIFEST_DEV").is_ok() {
+        origins.extend_from_slice(DEV_ORIGINS);
+    }
+    origins
+}
 
 /// Check if the Origin header is from an allowed origin.
 fn is_origin_allowed(headers: &HeaderMap) -> bool {
@@ -67,12 +75,12 @@ fn is_origin_allowed(headers: &HeaderMap) -> bool {
         None => return true,
     };
 
-    // Check custom origins from MANIFEST_CORS_ORIGINS first
+    // Custom origins override everything
     if let Ok(custom) = std::env::var("MANIFEST_CORS_ORIGINS") {
         return custom.split(',').any(|allowed| allowed.trim() == origin);
     }
 
-    ALLOWED_WS_ORIGINS.iter().any(|allowed| *allowed == origin)
+    allowed_origins().iter().any(|allowed| *allowed == origin)
 }
 
 /// WebSocket endpoint: `/api/v1/terminal/ws?cwd=/path/to/dir`
