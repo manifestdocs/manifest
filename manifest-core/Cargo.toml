@@ -1,6 +1,6 @@
 [package]
 name = "manifest-core"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 description = "Core library for Manifest: models and database operations"
 license = "BUSL-1.1"
