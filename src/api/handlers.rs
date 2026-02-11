@@ -35,6 +35,16 @@ pub struct ApiError {
     message: String,
 }
 
+impl ApiError {
+    /// Create a 404 Not Found error for the given entity name.
+    pub fn not_found(entity: &str) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: format!("{} not found", entity),
+        }
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let body = serde_json::json!({ "error": self.message });

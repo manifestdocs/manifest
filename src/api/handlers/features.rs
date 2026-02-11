@@ -168,10 +168,7 @@ pub async fn create_feature_history(
         .get_feature(feature_id.into())
         .await
         .map_err(internal_error)?
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Feature not found".to_string(),
-        )))?;
+        .ok_or(ApiError::not_found("Feature"))?;
 
     // Verify it's a leaf feature
     if !db
@@ -241,10 +238,7 @@ pub async fn get_feature(
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Feature not found".to_string(),
-        )))
+        .ok_or(ApiError::not_found("Feature"))
 }
 
 /// Get a feature with hierarchical context (parent, siblings, children, breadcrumb).
@@ -259,10 +253,7 @@ pub async fn get_feature_with_context(
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Feature not found".to_string(),
-        )))
+        .ok_or(ApiError::not_found("Feature"))
 }
 
 /// Get the diff between current and desired details for a feature.
@@ -274,10 +265,7 @@ pub async fn get_feature_diff(
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Feature not found".to_string(),
-        )))
+        .ok_or(ApiError::not_found("Feature"))
 }
 
 /// Create a new feature in a project.
@@ -302,10 +290,7 @@ pub async fn update_feature(
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Feature not found".to_string(),
-        )))
+        .ok_or(ApiError::not_found("Feature"))
 }
 
 /// Delete a feature and its descendants.
@@ -316,10 +301,7 @@ pub async fn delete_feature(
     if db.delete_feature(id.into()).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Feature not found".to_string(),
-        )))
+        Err(ApiError::not_found("Feature"))
     }
 }
 
@@ -412,10 +394,7 @@ pub async fn bulk_create_features(
     db.get_project(project_id.into())
         .await
         .map_err(internal_error)?
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Project not found".to_string(),
-        )))?;
+        .ok_or(ApiError::not_found("Project"))?;
 
     let mut created_ids = Vec::new();
 
@@ -425,10 +404,7 @@ pub async fn bulk_create_features(
             db.get_version(vid.into())
                 .await
                 .map_err(internal_error)?
-                .ok_or(ApiError::from((
-                    StatusCode::NOT_FOUND,
-                    "Version not found".to_string(),
-                )))?;
+                .ok_or(ApiError::not_found("Version"))?;
         }
 
         // Flatten the tree into a list of inputs with pre-generated UUIDs

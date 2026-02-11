@@ -49,10 +49,7 @@ pub async fn get_version(
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Version not found".to_string(),
-        )))
+        .ok_or(ApiError::not_found("Version"))
 }
 
 /// Update a version. Creates a release history entry when marking as released.
@@ -66,10 +63,7 @@ pub async fn update_version(
         .get_version(id.into())
         .await
         .map_err(internal_error)?
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Version not found".to_string(),
-        )))?;
+        .ok_or(ApiError::not_found("Version"))?;
     let was_unreleased = existing.released_at.is_none();
 
     // Update the version
@@ -77,10 +71,7 @@ pub async fn update_version(
         .update_version(id.into(), input)
         .await
         .map_err(internal_error)?
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Version not found".to_string(),
-        )))?;
+        .ok_or(ApiError::not_found("Version"))?;
 
     // If version was just released, create history entry and ensure minimum versions
     if was_unreleased && updated.released_at.is_some() {
@@ -115,9 +106,6 @@ pub async fn delete_version(
     if db.delete_version(id.into()).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Version not found".to_string(),
-        )))
+        Err(ApiError::not_found("Version"))
     }
 }

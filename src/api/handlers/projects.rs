@@ -36,10 +36,7 @@ pub async fn get_project(
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Project not found".to_string(),
-        )))
+        .ok_or(ApiError::not_found("Project"))
 }
 
 /// Get a project by slug with its associated directories.
@@ -51,10 +48,7 @@ pub async fn get_project_by_slug(
         .get_project_by_slug(&slug)
         .await
         .map_err(internal_error)?
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Project not found".to_string(),
-        )))?;
+        .ok_or(ApiError::not_found("Project"))?;
 
     let directories = db
         .get_project_directories(project.id)
@@ -90,10 +84,7 @@ pub async fn update_project(
         .await
         .map_err(internal_error)?
         .map(Json)
-        .ok_or(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Project not found".to_string(),
-        )))
+        .ok_or(ApiError::not_found("Project"))
 }
 
 /// Delete a project and all associated data.
@@ -104,10 +95,7 @@ pub async fn delete_project(
     if db.delete_project(id.into()).await.map_err(internal_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Project not found".to_string(),
-        )))
+        Err(ApiError::not_found("Project"))
     }
 }
 
@@ -196,10 +184,7 @@ pub async fn remove_project_directory(
     {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "Directory not found".to_string(),
-        )))
+        Err(ApiError::not_found("Directory"))
     }
 }
 
@@ -255,10 +240,7 @@ pub async fn get_project_focus(
             feature_title: title,
             feature_state: state,
         })),
-        None => Err(ApiError::from((
-            StatusCode::NOT_FOUND,
-            "No feature is currently focused".to_string(),
-        ))),
+        None => Err(ApiError::not_found("Focus")),
     }
 }
 
