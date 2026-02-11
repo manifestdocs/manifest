@@ -100,7 +100,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (▣ project root, ▪ feature set, ◇ proposed, ○ in_progress, ● implemented, ✗ archived)."
+        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (▣ project root, ▪ feature set, ◇ proposed, ○ in_progress, ● implemented, ✗ archived). Do NOT suggest changing parent feature states based on children's states."
     )]
     async fn render_feature_tree(
         &self,
@@ -114,7 +114,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "SETUP: Initialize a project from a directory. Analyzes codebase, creates project (or links to existing), and returns analysis. Use this before `plan`."
+        description = "SETUP: Initialize a project from a directory. Analyzes codebase, creates project (or links to existing), and returns analysis. Typical setup sequence: init_project → generate_feature_tree (existing codebases) → plan (decompose PRD) → update_feature (distill root with project context) → create_version (define milestones)."
     )]
     async fn init_project(
         &self,
@@ -282,12 +282,12 @@ impl ServerHandler for McpServer {
     }
 }
 
-const INSTRUCTIONS: &str = r#"Manifest is living documentation for the software we are building in this project.
+const INSTRUCTIONS: &str = r#"<manifest_instructions>
+<overview>
+Manifest is living documentation for the software we are building in this project. It provides context: what the system does, what has been built, what needs work, and why decisions were made. Read feature specs before implementing, check history to see prior work, and update features when you complete work.
+</overview>
 
-HOW TO USE MANIFEST:
-Manifest provides context: what the system does, what has been built, what needs work, and why decisions were made. Read feature specs before implementing. Check history to see prior work. Update features when you complete work.
-
-THE FEATURE TREE:
+<feature_tree>
 Every project has a feature tree—a hierarchy of capabilities the system provides. The tree structure groups related features (e.g., Auth > Login > OAuth). Parent features (feature sets) can have details too—use them for shared context like architectural decisions, conventions, or constraints that apply to all children. Each feature has a state:
 
 ▪ feature set — parent with children (state not shown; managed by user)
@@ -296,21 +296,10 @@ Every project has a feature tree—a hierarchy of capabilities the system provid
 ● implemented — complete and documented
 ✗ archived — soft-deleted, kept for historical reference
 
-IMPORTANT: Feature sets (parents with children) have immutable state — the server rejects state changes on them. Only leaf features can be started, completed, or archived. If get_next_feature or get_active_feature returns a feature set, work on its children instead.
+Feature sets (parents with children) have immutable state — the server rejects state changes on them. Only leaf features can be started, completed, or archived. If get_next_feature or get_active_feature returns a feature set, work on its children instead.
+</feature_tree>
 
-DISCOVERING FEATURES:
-When the user asks you to work on something, use these tools to find the right feature:
-
-- get_active_feature — returns the feature selected in the Manifest app. Call this FIRST when the user says "this feature", "work on this", "implement it", or gives instructions without specifying which feature. After calling, confirm by naming the feature (e.g., "I'll work on 'OAuth Login'").
-- get_next_feature — returns the highest-priority proposed or in_progress feature from the next unreleased version. Use ONLY when the user explicitly says "next feature", "what's next", or "what should I work on next".
-- find_features — search features by project, state, or keyword when you need to locate a specific feature by name
-- get_feature — get full details and history for a feature you already have an ID for
-- get_project_instructions — get full project instructions when the breadcrumb summary isn't enough
-- render_feature_tree — display the full tree as ASCII art for the user
-
-RULE: The word "next" triggers get_next_feature. Everything else triggers get_active_feature.
-
-VERSIONS & BACKLOG:
+<versions>
 Versions use semantic versioning (e.g., 0.1.0, 0.2.0, 1.0.0) and organize features into releases. Each version has a lifecycle status:
 - **next** — first unreleased version, next to ship, highest priority
 - **planned** — remaining unreleased versions, queued for future releases
@@ -318,105 +307,58 @@ Versions use semantic versioning (e.g., 0.1.0, 0.2.0, 1.0.0) and organize featur
 
 Features without a version assignment are in the **Backlog**—unscheduled work. By default, new features go to the Backlog. When you start working on a backlog feature (start_feature), it automatically moves to the "next" version.
 
-Assigning features to a released version will be rejected with an error. Use list_versions to find valid (unreleased) targets.
+Version tools:
+- list_versions — see Next, Planned, Released, and Backlog counts
+- create_version — define milestones (e.g., "0.2.0", "v1.0.0")
+- set_feature_version — assign features to unreleased versions only (pass null for Backlog)
+- release_version — mark a version as shipped
 
-FEATURES AS LIVING DOCUMENTATION:
+When all features in the "next" version are implemented, ask the user before calling release_version.
+</versions>
+
+<tool_selection>
+When the user asks you to work on something, use these tools to find the right feature:
+
+- get_active_feature — the feature selected in the Manifest app. Call this FIRST when the user says "this feature", "work on this", "implement it", or gives instructions without specifying which feature. After calling, confirm by naming the feature.
+- get_next_feature — highest-priority proposed or in_progress feature from the next unreleased version. Use ONLY when the user explicitly says "next feature", "what's next", or "what should I work on next".
+- find_features — search by project, state, or keyword
+- get_feature — full details and history for a known feature ID
+- get_project_instructions — full project instructions when the breadcrumb summary isn't enough
+- render_feature_tree — display the full tree as ASCII art
+
+RULE: The word "next" triggers get_next_feature. Everything else triggers get_active_feature.
+</tool_selection>
+
+<features_as_docs>
 Features describe system capabilities, not work items to close. A feature titled "Router" should make sense years from now. Before creating one, apply the user story test: "As a [user], I can [capability] so that [benefit]."
-- Good: "As a developer, I can match dynamic URL paths so that I can build REST APIs" → Router
-- Bad: "As a user, I can have data persistence" → quality attribute, not capability
 
-CONTENT GUIDANCE BY TIER:
-Features form a three-tier hierarchy. Write different content at each level:
+start_feature returns tier-specific guidance for writing specs at each level (project, feature set, leaf). To write a spec, use update_feature with `details` to set it directly, or `desired_details` to propose changes for human review.
 
-PROJECT LEVEL (root feature — the top-level feature with no parent):
-This is the project's source of truth for all agents. Write content that applies across every feature:
-- Tech stack and key dependencies (language, framework, database)
-- Architectural decisions and rationale ("We use X because Y")
-- Coding conventions and patterns ("Error handling uses Result<T,E>, never exceptions")
-- Security boundaries and constraints ("Never commit secrets", "All endpoints require auth")
-- Testing expectations ("TDD with property-based tests for core logic")
-- Domain terminology ("User means authenticated account, not session")
+When a human edits an implemented feature in the web UI, changes are saved to `desired_details` — start_feature returns guidance for handling these change requests.
+</features_as_docs>
 
-When updating project instructions (root feature details), also provide a details_summary (~200 words) via update_feature. The summary appears in breadcrumbs and project listings; agents call get_project_instructions for full text when they need it.
-
-FEATURE SET LEVEL (parent feature — has children):
-Shared context for a group of related capabilities. Write content that applies to all children:
-- Architectural context for this area ("Auth uses JWT with refresh tokens")
-- Shared patterns and interfaces ("All handlers implement the RequestHandler trait")
-- Cross-cutting constraints ("All endpoints in this group require admin role")
-- Design decisions specific to this scope ("We chose OAuth over SAML because...")
-
-LEAF FEATURE LEVEL (no children — the implementable unit):
-Concise specification that an agent implements against:
-- Goal statement: what the feature does and why (~1-2 sentences)
-- Key constraints: performance, security, compatibility requirements
-- For interface-heavy features: function signatures with types
-- For complex logic: structural hints (main sequence, branching, loops)
-- 1-3 concrete examples of expected behavior when helpful
-
-Specification length and guidance adapt to the project's configured `ac_level` and `detail_level` settings (concise, standard, or thorough). The project also has an `ac_format` setting (checkbox or gherkin) that controls how acceptance criteria are formatted. The `start_feature` and `get_next_feature` tools return the active levels and tailored guidance text.
-
-start_feature will block if a leaf feature has no details at all — write a spec first using update_feature.
-If details are very sparse, you will receive a warning (threshold adapts to ac_level).
-
-To write a spec:
-- Use update_feature with `details` to set the spec directly
-- Use update_feature with `desired_details` to propose a spec for human review (they see a diff in the web UI)
-
-CHANGE REQUESTS (desired_details set by humans):
-When a human edits an implemented feature in the web UI, changes are saved to `desired_details` instead of overwriting `details`. This creates a pending change request visible as a "changes" badge. When you call start_feature on such a feature, it transitions implemented → in_progress and you receive guidance to compare desired_details with details. After implementing the changes, update details and call complete_feature (which clears desired_details automatically).
-
-Specification length is guided by the project's ac_level setting. After implementation, update details to reflect what was built.
-
-UPDATING FEATURES:
-update_feature is the Swiss Army knife for modifying features. Use it to:
+<updating_features>
+update_feature is the Swiss Army knife for modifying features:
 - Change state: Set to 'in_progress', 'implemented', 'archived' as appropriate
 - Update spec: Modify details when implementation reveals new information
-- Propose changes: Set desired_details to suggest changes for human review (they see a diff in web UI)
+- Propose changes: Set desired_details to suggest changes for human review
 - Reorganize: Change parent_id to move features in the tree
 - Reprioritize: Adjust priority to reorder within parent
 
-DELETING FEATURES:
-delete_feature permanently removes a feature and all its descendants. Use it only for archived features that are no longer needed. This cannot be undone. Prefer archiving (update_feature with state='archived') to preserve history.
+delete_feature permanently removes a feature and all its descendants. Use only for archived features. Prefer archiving to preserve history.
+</updating_features>
 
-VERSIONS & PLANNING:
-- list_versions — see Next (next to ship), Planned, Released, and Backlog counts. Each version includes a `status` field.
-- create_version — define milestones with semantic versions (e.g., "0.2.0", "v1.0.0")
-- set_feature_version — assign features to unreleased versions only (pass null to move to Backlog). Released versions are rejected.
-- release_version — mark a version as shipped (auto-creates new versions to maintain minimum of 4 unreleased)
+<planning>
+When asked to break down, plan, or decompose a project into features:
+1. Call get_project_instructions to read the root feature content
+2. If the root has content (PRD, spec, or description), use that as input — do NOT explore the filesystem or ask the user what the project is about
+3. Call list_versions to find the target version (use the "next" unreleased version)
+4. Design the feature tree, then call plan with confirm=false to propose
+5. After user confirms, call plan with confirm=true
+6. Distill the root — replace the verbatim PRD with high-level project context using update_feature
+</planning>
 
-When all features in the "next" version are implemented, ask the user before calling release_version. Releasing promotes the next planned version to become the new "next". New versions are auto-created to maintain at least 4 unreleased versions.
-
-SETUP (when starting fresh):
-1. init_project — analyze codebase, create project, link directory
-2. generate_feature_tree — for existing codebases, extract features from code structure and git history
-3. plan — break down a PRD, tech spec, or vision into a feature tree
-4. **After plan: distill the root** — plan distributes content to children but does NOT update the root. Use update_feature to replace the root's PRD/spec with high-level project context (tech stack, conventions, architecture). Set details_summary too. Skip if the root already has appropriate project-level content.
-5. add_project_directory — for monorepos with multiple directories
-6. create_version — define release milestones
-
-DISPLAY GUIDELINES:
-Tool results are collapsed JSON. Always summarize for humans:
-- list_projects: "Found project 'Name'" or "No project found for this directory"
-- find_features: "Found N features" + brief list
-- get_feature: "Feature: Title (state)" + key spec details + breadcrumb context if relevant
-- get_active_feature: "You have '[Title]' selected ([state])" or "No feature is currently selected in the app"
-- get_next_feature: "Next up: Title" or "No workable features"
-- render_feature_tree: Show the ASCII tree directly. Do NOT suggest changing parent feature states based on children
-- init_project: "Initialized 'Name' with N detected modules"
-- generate_feature_tree: "Extracted N features from codebase" + summary
-- plan: "Proposed N features" (confirm=false) or "Created N features" (confirm=true)
-- start_feature: "Started 'Title' — now in_progress" + note any spec warnings or breadcrumb context. If blocked: "Cannot start 'Title' — specification required"
-- complete_feature: "Completed 'Title' — recorded N commits"
-- update_feature: "Updated 'Title'" + what changed
-- list_versions: "0.1.0 (released), 0.2.0 (next, 3 features), 0.3.0 (planned)"
-- create_version: "Created version 'Name'"
-- set_feature_version: "Assigned 'Feature' to version 'Name'" or "Unassigned from version"
-- get_project_instructions: Show key sections or confirm instructions were retrieved
-- release_version: "Released 'Name'"
-
-WORKFLOW:
-
+<workflow>
 1. ORIENT — understand what exists and what's needed:
    - list_projects (filter by directory_path to find project for your CWD)
    - render_feature_tree — see the full picture
@@ -427,23 +369,29 @@ WORKFLOW:
 2. CLAIM — MANDATORY before implementing:
    - ALWAYS call start_feature when asked to implement, work on, or build a feature
    - start_feature checks specification completeness and transitions proposed → in_progress
-   - start_feature also handles CHANGE REQUESTS: if an implemented feature has desired_details (set by a human edit in the web UI), it transitions implemented → in_progress and returns guidance explaining what changed
    - If the feature has no details, start_feature will refuse — write a spec first using update_feature
    - If details are very sparse, you will see a warning — flesh out the spec before implementing
-   - IMPORTANT: The feature's target version is locked during implementation. Do not call set_feature_version while working on a feature.
 
 3. BUILD — implement against the spec:
    - The feature details ARE your specification
    - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
-   - If desired_details is present, this is a CHANGE REQUEST: compare desired_details (what's wanted) with details (what's currently built) to understand what needs to change.
+   - If desired_details is present, this is a CHANGE REQUEST: compare desired_details with details
    - Write tests first, then implement, then verify
-   - As you implement, update_feature details to reflect what you actually built — the spec is living documentation, not a frozen plan
+   - As you implement, update_feature details to reflect what you actually built
 
-4. DOCUMENT — MANDATORY after implementing. You MUST complete BOTH steps:
-   a) Update the feature spec: call update_feature to set details to what was actually built. If the implementation deviated from the original spec, the details MUST reflect the final state. Features are living documentation — stale specs mislead future agents.
-   b) Mark complete: call complete_feature with a summary of what you did + commit SHAs. This transitions the feature to implemented and records history.
-   - complete_feature automatically clears desired_details when marking as implemented
-   - If you skip these steps, the feature stays in_progress forever with a stale spec — the worst possible outcome
-   - If you learned something that applies to sibling features, update the parent's details with shared context
+4. DOCUMENT — MANDATORY after implementing:
+   a) call update_feature to set details to what was actually built
+   b) call complete_feature with a summary of what you did + commit SHAs
 
-Common sequence: list_projects → get_active_feature → start_feature → [implement] → update_feature (details) → complete_feature"#;
+Common sequence: list_projects → get_active_feature → start_feature → [implement] → update_feature (details) → complete_feature
+</workflow>
+
+<critical_rules>
+ALWAYS call start_feature before implementing — it checks spec completeness and returns your specification.
+ALWAYS call update_feature after implementing — details must reflect what was actually built.
+ALWAYS call complete_feature with summary and commit SHAs — this records history and marks the feature done.
+NEVER change a feature's target version during implementation.
+Feature sets (parents with children) cannot be started or completed — work on their leaf children instead.
+The word "next" triggers get_next_feature. All other references trigger get_active_feature.
+</critical_rules>
+</manifest_instructions>"#;
