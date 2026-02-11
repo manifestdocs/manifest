@@ -52,7 +52,6 @@ jobs:
       - name: Build manifest-web
         env:
           PUBLIC_MANIFEST_MODE: local
-          PUBLIC_MANIFEST_API_URL: http://localhost:17010/api/v1
           PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_dummy
         run: |
           # Set up pnpm workspace so workspace:* resolves
