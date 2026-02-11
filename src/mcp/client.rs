@@ -98,14 +98,29 @@ impl ManifestClient {
         if status.is_success() {
             Ok(response.json().await?)
         } else {
-            let body = response.text().await.unwrap_or_default();
-            match status {
-                StatusCode::NOT_FOUND => Err(ClientError::NotFound(body)),
-                StatusCode::BAD_REQUEST => Err(ClientError::BadRequest(body)),
-                StatusCode::CONFLICT => Err(ClientError::Conflict(body)),
-                StatusCode::UNAUTHORIZED => Err(ClientError::Unauthorized),
-                _ => Err(ClientError::Server(format!("{}: {}", status, body))),
-            }
+            Err(Self::error_from_response(status, response).await)
+        }
+    }
+
+    /// Handle response for endpoints that return no body (e.g. DELETE → 204).
+    async fn handle_response_empty(&self, response: reqwest::Response) -> Result<(), ClientError> {
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(Self::error_from_response(status, response).await)
+        }
+    }
+
+    /// Convert an error HTTP response into a ClientError.
+    async fn error_from_response(status: StatusCode, response: reqwest::Response) -> ClientError {
+        let body = response.text().await.unwrap_or_default();
+        match status {
+            StatusCode::NOT_FOUND => ClientError::NotFound(body),
+            StatusCode::BAD_REQUEST => ClientError::BadRequest(body),
+            StatusCode::CONFLICT => ClientError::Conflict(body),
+            StatusCode::UNAUTHORIZED => ClientError::Unauthorized,
+            _ => ClientError::Server(format!("{}: {}", status, body)),
         }
     }
 
@@ -290,19 +305,7 @@ impl ManifestClient {
             .request(reqwest::Method::DELETE, &format!("/features/{}", id))
             .send()
             .await?;
-        let status = response.status();
-        if status.is_success() {
-            Ok(())
-        } else {
-            let body = response.text().await.unwrap_or_default();
-            match status {
-                StatusCode::NOT_FOUND => Err(ClientError::NotFound(body)),
-                StatusCode::BAD_REQUEST => Err(ClientError::BadRequest(body)),
-                StatusCode::CONFLICT => Err(ClientError::Conflict(body)),
-                StatusCode::UNAUTHORIZED => Err(ClientError::Unauthorized),
-                _ => Err(ClientError::Server(format!("{}: {}", status, body))),
-            }
-        }
+        self.handle_response_empty(response).await
     }
 
     /// Update a feature.
