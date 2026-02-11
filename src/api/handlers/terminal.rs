@@ -76,11 +76,12 @@ const DEV_ORIGINS: &[&str] = &[
 ];
 
 /// Returns the allowed origins based on the current mode.
-/// Production: only port 17010. Dev mode (MANIFEST_DEV=1): also Vite ports.
+/// Debug builds (cargo run) include Vite dev ports automatically.
+/// Release builds only allow port 17010. MANIFEST_DEV=1 forces dev ports in release.
 /// Custom origins (MANIFEST_CORS_ORIGINS) override everything.
 pub fn allowed_origins() -> Vec<&'static str> {
     let mut origins = PRODUCTION_ORIGINS.to_vec();
-    if std::env::var("MANIFEST_DEV").is_ok() {
+    if cfg!(debug_assertions) || std::env::var("MANIFEST_DEV").is_ok() {
         origins.extend_from_slice(DEV_ORIGINS);
     }
     origins
@@ -195,9 +196,10 @@ fn spawn_shell(working_dir: &str) -> Result<SpawnShellResult, anyhow::Error> {
 
     let mut cmd = CommandBuilder::new(&shell);
     let path = std::path::Path::new(working_dir);
-    if path.is_dir() {
-        cmd.cwd(working_dir);
+    if !path.is_dir() {
+        anyhow::bail!("Working directory does not exist: {}", working_dir);
     }
+    cmd.cwd(working_dir);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
 
