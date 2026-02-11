@@ -17,7 +17,6 @@ manifest-core = { path = "manifest-core" }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
-async-stream = "0.3"
 
 # HTTP server
 axum = { version = "0.8", features = ["ws"] }

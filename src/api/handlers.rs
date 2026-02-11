@@ -1,5 +1,4 @@
 mod analysis;
-mod assist;
 mod features;
 mod filesystem;
 mod health;
@@ -9,7 +8,6 @@ pub mod terminal;
 mod versions;
 
 pub use analysis::*;
-pub use assist::*;
 pub use features::*;
 pub use filesystem::*;
 pub use health::*;

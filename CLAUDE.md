@@ -17,7 +17,6 @@ cargo test --all               # Run all tests (~80+ specs across 4 files)
 cargo test db_spec             # Database specs only
 cargo test api_spec            # API specs only
 cargo test mcp_protocol_spec   # MCP protocol specs only
-cargo test acp_spec            # Agent chat protocol specs only
 cargo test -p manifest-core    # Core unit tests only
 cargo run                      # Start server on port 17010
 cargo run -- serve -p 8080     # Start on custom port
@@ -53,7 +52,7 @@ speculate! {
 }
 ```
 
-Test files in `tests/`: `db_spec.rs`, `api_spec.rs`, `mcp_protocol_spec.rs`, `acp_spec.rs`
+Test files in `tests/`: `db_spec.rs`, `api_spec.rs`, `mcp_protocol_spec.rs`
 
 ## Development Practices
 
@@ -86,12 +85,6 @@ manifest-server/           # Binary crate — HTTP API, MCP server, CLI
 │   │   ├── client.rs      # HTTP client that calls own API
 │   │   ├── tools/         # Tool implementations (projects, features, versions, etc.)
 │   │   └── tree_render.rs # ASCII feature tree rendering
-│   ├── acp/               # Agent Chat Protocol — multi-agent JSON-RPC over stdio
-│   │   ├── router.rs      # Session pool (AcpRouter as static LazyLock)
-│   │   ├── transport.rs   # Reader/writer tasks + pending request tracking
-│   │   ├── process.rs     # Subprocess spawning for Claude/Gemini/Copilot/Codex
-│   │   ├── registry.rs    # Agent process registry
-│   │   └── types.rs       # JSON-RPC 2.0 message types with classify()
 │   └── analysis/          # Codebase analysis for project discovery
 │       ├── scanner.rs     # Directory/module detection
 │       ├── parsers.rs     # Language/framework detection
@@ -157,15 +150,6 @@ Authentication/                 <- feature node with context
 - Dynamic SQL building for partial updates (UpdateFeatureInput, etc.)
 - `api/handlers` is a private module with wildcard re-exports — to expose items to `main.rs`, add `pub use handlers::foo;` in `api/mod.rs`
 
-### ACP (Agent Chat Protocol)
-
-The `src/acp/` module implements JSON-RPC 2.0 over stdio for multi-agent support (Claude, Gemini, Copilot, Codex). Key patterns:
-
-- `RawJsonRpcMessage::classify()` routes messages by type
-- `mpsc::channel` + `ReceiverStream` for async streaming (not `async_stream::stream!` which doesn't work with `tokio::select!`)
-- Session reaper: every 5 min, kills agent processes idle > 30 min
-- `AgentTransport` needs clone accessors (`clone_write_tx`, `clone_pending`, `clone_next_id`) for spawned tasks
-
 ### API Routes
 
 All routes prefixed with `/api/v1`:
@@ -173,7 +157,6 @@ All routes prefixed with `/api/v1`:
 - **Projects**: CRUD at `/projects`, `/projects/{id}` + directories, features (list/create/bulk/roots/tree/next), versions, history, focus, SSE subscribe
 - **Features**: CRUD at `/features`, `/features/{id}` + children, context, diff, history
 - **Versions**: CRUD at `/versions`, `/versions/{id}` + assignment
-- **Chat**: `POST /chat/completions` (agent chat)
 - **Settings**: `GET/PUT /settings`, MCP status/configure
 - **Analysis**: `GET /codebase/analyze`, filesystem browse/mkdir
 - **Terminal**: WebSocket at `/terminal/ws`

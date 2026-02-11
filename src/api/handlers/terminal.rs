@@ -11,6 +11,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query,
     },
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -41,14 +42,57 @@ struct ResizeMessage {
     cols: u16,
 }
 
+/// Default localhost origins allowed to open terminal WebSocket connections.
+/// Browsers always send the `Origin` header on WebSocket handshakes, so checking
+/// it blocks cross-origin attacks (e.g. malicious JS on evil.com connecting to
+/// localhost:17010). Non-browser clients can spoof this, but they can already
+/// spawn shells directly.
+pub const ALLOWED_WS_ORIGINS: &[&str] = &[
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
+    "http://localhost:17010",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "http://127.0.0.1:5175",
+    "http://127.0.0.1:17010",
+];
+
+/// Check if the Origin header is from an allowed origin.
+fn is_origin_allowed(headers: &HeaderMap) -> bool {
+    let origin = match headers.get("origin").and_then(|v| v.to_str().ok()) {
+        Some(o) => o,
+        // No Origin header — not a browser request (e.g. CLI WebSocket client).
+        // Allow these through since they can already spawn shells directly.
+        None => return true,
+    };
+
+    // Check custom origins from MANIFEST_CORS_ORIGINS first
+    if let Ok(custom) = std::env::var("MANIFEST_CORS_ORIGINS") {
+        return custom.split(',').any(|allowed| allowed.trim() == origin);
+    }
+
+    ALLOWED_WS_ORIGINS.iter().any(|allowed| *allowed == origin)
+}
+
 /// WebSocket endpoint: `/api/v1/terminal/ws?cwd=/path/to/dir`
 ///
-/// Upgrades to WebSocket, spawns a PTY shell, bridges I/O.
+/// Validates the Origin header to prevent cross-origin browser attacks,
+/// then upgrades to WebSocket, spawns a PTY shell, and bridges I/O.
 pub async fn ws_terminal_handler(
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
     Query(params): Query<TerminalParams>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_session(socket, params.cwd))
+) -> Result<impl IntoResponse, StatusCode> {
+    if !is_origin_allowed(&headers) {
+        let origin = headers
+            .get("origin")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown");
+        tracing::warn!(origin = %origin, "Terminal WebSocket rejected: origin not allowed");
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(ws.on_upgrade(move |socket| handle_session(socket, params.cwd)))
 }
 
 async fn handle_session(socket: WebSocket, cwd: Option<String>) {

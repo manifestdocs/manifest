@@ -23,7 +23,6 @@ use crate::db::Database;
 use crate::mcp;
 
 pub use auth::{AuthContext, AuthError, AuthMethod};
-pub use handlers::start_session_reaper;
 pub use middleware::SecurityConfig;
 pub use state::{AppState, CurrentUser};
 
@@ -94,7 +93,7 @@ fn security_headers_layer() -> ServiceBuilder<
         .layer(SetResponseHeaderLayer::overriding(
             csp,
             HeaderValue::from_static(
-                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com",
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://api.github.com",
             ),
         ))
 }
@@ -104,45 +103,26 @@ fn build_cors_layer(config: &SecurityConfig) -> CorsLayer {
     use axum::http::{header, Method};
     use tower_http::cors::AllowOrigin;
 
-    if let Some(ref origins) = config.cors_origins {
-        let origins: Vec<_> = origins.iter().filter_map(|s| s.parse().ok()).collect();
-        CorsLayer::new()
-            .allow_origin(AllowOrigin::list(origins))
-            .allow_methods([
-                Method::GET,
-                Method::POST,
-                Method::PUT,
-                Method::DELETE,
-                Method::OPTIONS,
-            ])
-            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+    let origins: Vec<_> = if let Some(ref custom) = config.cors_origins {
+        custom.iter().filter_map(|s| s.parse().ok()).collect()
     } else {
-        // Default: allow localhost origins only
-        let localhost_origins = [
-            "http://localhost:5173",  // Vite dev
-            "http://localhost:5174",  // Vite dev (fallback)
-            "http://localhost:5175",  // Vite dev (fallback)
-            "http://localhost:17010", // Self
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:5174",
-            "http://127.0.0.1:5175",
-            "http://127.0.0.1:17010",
-        ];
-        let origins: Vec<_> = localhost_origins
+        // Default: allow localhost origins only (shared with terminal WebSocket origin check)
+        handlers::terminal::ALLOWED_WS_ORIGINS
             .iter()
             .filter_map(|s| s.parse().ok())
-            .collect();
-        CorsLayer::new()
-            .allow_origin(AllowOrigin::list(origins))
-            .allow_methods([
-                Method::GET,
-                Method::POST,
-                Method::PUT,
-                Method::DELETE,
-                Method::OPTIONS,
-            ])
-            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
-    }
+            .collect()
+    };
+
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
 }
 
 /// Create the API router with default security configuration.
@@ -252,8 +232,6 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
             "/features/{id}/history",
             get(handlers::get_feature_history).post(handlers::create_feature_history),
         )
-        // Chat completions (AI assistance via Claude CLI)
-        .route("/chat/completions", post(handlers::chat_completions))
         // Server settings
         .route(
             "/settings",
