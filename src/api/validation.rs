@@ -60,28 +60,3 @@ fn format_validation_errors(errors: &validator::ValidationErrors) -> String {
         .collect();
     messages.join("; ")
 }
-
-/// Escape special characters in LIKE patterns to prevent SQL injection.
-///
-/// SQLite LIKE uses % and _ as wildcards. This function escapes them
-/// using \ as the escape character.
-pub fn escape_like_pattern(query: &str) -> String {
-    query
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_escape_like_pattern() {
-        assert_eq!(escape_like_pattern("hello"), "hello");
-        assert_eq!(escape_like_pattern("hello%world"), "hello\\%world");
-        assert_eq!(escape_like_pattern("hello_world"), "hello\\_world");
-        assert_eq!(escape_like_pattern("50% off"), "50\\% off");
-        assert_eq!(escape_like_pattern("a\\b"), "a\\\\b");
-    }
-}

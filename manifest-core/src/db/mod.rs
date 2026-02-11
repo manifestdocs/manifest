@@ -91,7 +91,10 @@ impl DbDialect {
 // ============================================================
 
 /// Escape special characters in LIKE patterns to prevent SQL injection.
-fn escape_like_pattern(query: &str) -> String {
+///
+/// SQLite LIKE uses `%` and `_` as wildcards. This function escapes them
+/// using `\` as the escape character.
+pub fn escape_like_pattern(query: &str) -> String {
     query
         .replace('\\', "\\\\")
         .replace('%', "\\%")
@@ -915,6 +918,23 @@ impl Clone for Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn escape_like_pattern_leaves_plain_text() {
+        assert_eq!(escape_like_pattern("hello"), "hello");
+    }
+
+    #[test]
+    fn escape_like_pattern_escapes_wildcards() {
+        assert_eq!(escape_like_pattern("hello%world"), "hello\\%world");
+        assert_eq!(escape_like_pattern("hello_world"), "hello\\_world");
+        assert_eq!(escape_like_pattern("50% off"), "50\\% off");
+    }
+
+    #[test]
+    fn escape_like_pattern_escapes_backslash() {
+        assert_eq!(escape_like_pattern("a\\b"), "a\\\\b");
+    }
 
     #[tokio::test]
     async fn migrate_is_idempotent() {

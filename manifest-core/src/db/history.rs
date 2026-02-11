@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 
 use super::helpers::*;
-use super::{Database, DbDialect};
+use super::Database;
 use crate::models::*;
 
 impl Database {
