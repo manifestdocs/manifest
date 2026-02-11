@@ -9,6 +9,17 @@ use crate::models::*;
 const VERSION_COLS: &str = "id, project_id, name, description, released_at, created_at, updated_at";
 
 impl Database {
+    /// Count unreleased versions for a project using `SELECT COUNT(*)`.
+    async fn count_unreleased_versions(&self, project_id: ProjectId) -> Result<usize> {
+        let row: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM versions WHERE project_id = $1 AND released_at IS NULL",
+        )
+        .bind(project_id.to_string())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0 as usize)
+    }
+
     /// Get all versions for a project, ordered by creation date.
     pub async fn get_versions_by_project(&self, project_id: ProjectId) -> Result<Vec<Version>> {
         let sql = format!("SELECT {VERSION_COLS} FROM versions WHERE project_id = $1 ORDER BY created_at");
@@ -66,17 +77,15 @@ impl Database {
         project_id: ProjectId,
         min_count: usize,
     ) -> Result<Vec<Version>> {
-        let mut all_versions = self.get_versions_by_project(project_id).await?;
-        let unreleased_count = all_versions
-            .iter()
-            .filter(|v| v.released_at.is_none())
-            .count();
+        let unreleased_count = self.count_unreleased_versions(project_id).await?;
 
         let mut created = Vec::new();
         if unreleased_count >= min_count {
             return Ok(created);
         }
 
+        // Only fetch full list when we need to compute next version names
+        let mut all_versions = self.get_versions_by_project(project_id).await?;
         let needed = min_count - unreleased_count;
         for _ in 0..needed {
             let next_name = compute_next_version_name(&all_versions);
@@ -118,8 +127,7 @@ impl Database {
             .ok_or_else(|| ManifestError::not_found("Project"))?;
 
         // Guard rail: cap unreleased versions at 6
-        let versions = self.get_versions_by_project(project_id).await?;
-        let unreleased_count = versions.iter().filter(|v| v.released_at.is_none()).count();
+        let unreleased_count = self.count_unreleased_versions(project_id).await?;
         if unreleased_count >= 6 {
             return Err(ManifestError::validation(format!(
                 "Project already has {} unreleased versions (max 6). Release or delete existing versions before creating new ones.",

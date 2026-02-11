@@ -11,7 +11,7 @@ use axum::{
 use std::{
     collections::HashMap,
     net::IpAddr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -248,9 +248,12 @@ pub async fn rate_limit_middleware(
 /// `MANIFEST_TRUST_PROXY=true` is set. Without this, a malicious client
 /// could spoof their IP to bypass rate limiting.
 fn extract_client_ip(request: &Request<Body>) -> IpAddr {
-    let trust_proxy = std::env::var("MANIFEST_TRUST_PROXY")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
+    static TRUST_PROXY: OnceLock<bool> = OnceLock::new();
+    let trust_proxy = *TRUST_PROXY.get_or_init(|| {
+        std::env::var("MANIFEST_TRUST_PROXY")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false)
+    });
 
     if trust_proxy {
         // Try X-Forwarded-For header first (for proxied requests)
