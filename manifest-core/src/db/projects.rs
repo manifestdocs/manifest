@@ -173,6 +173,7 @@ impl Database {
     }
 
     /// Delete a project and all associated data (features, history, directories, versions).
+    #[must_use = "check whether the project existed"]
     pub async fn delete_project(&self, id: ProjectId) -> Result<bool> {
         let mut tx = self.pool.begin().await?;
 
@@ -272,6 +273,7 @@ impl Database {
     }
 
     /// Remove a directory association from a project.
+    #[must_use = "check whether the directory existed"]
     pub async fn remove_project_directory(&self, id: DirectoryId) -> Result<bool> {
         let result = sqlx::query("DELETE FROM project_directories WHERE id = $1")
             .bind(id.to_string())

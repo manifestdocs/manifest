@@ -201,6 +201,7 @@ impl Database {
     }
 
     /// Delete a version by ID.
+    #[must_use = "check whether the version existed"]
     pub async fn delete_version(&self, id: VersionId) -> Result<bool> {
         let result = sqlx::query("DELETE FROM versions WHERE id = $1")
             .bind(id.to_string())

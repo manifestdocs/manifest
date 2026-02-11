@@ -53,7 +53,7 @@ enum Commands {
         #[arg(short, long, default_value = "127.0.0.1")]
         bind: String,
 
-        /// Run as daemon
+        /// Run as background daemon (not yet implemented)
         #[arg(short, long)]
         daemon: bool,
     },
@@ -104,7 +104,7 @@ async fn run_server(
     let database = db::Database::open_with_override(db_path).await?;
     database.migrate().await?;
 
-    let app = api::create_router_with_shutdown(database, shutdown_rx.clone());
+    let app = api::create_router_with_shutdown(database);
 
     // Start the ACP idle session reaper (reaps agent processes idle > 30 min)
     api::start_session_reaper();
@@ -190,12 +190,12 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Status) => {
-            println!("Checking Manifest server status...");
-            // TODO: Check if server is running
+            eprintln!("Not implemented yet");
+            std::process::exit(1);
         }
         Some(Commands::Stop) => {
-            println!("Stopping Manifest server...");
-            // TODO: Stop daemon
+            eprintln!("Not implemented yet");
+            std::process::exit(1);
         }
         Some(Commands::MigrateRoots) => {
             println!("Migrating existing projects to use root features...");

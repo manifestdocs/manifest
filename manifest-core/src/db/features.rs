@@ -432,6 +432,7 @@ impl Database {
     }
 
     /// Delete a feature and all its descendants recursively.
+    #[must_use = "check whether the feature existed"]
     pub async fn delete_feature(&self, id: FeatureId) -> Result<bool> {
         // Get project_id before deleting
         let project_id: Option<ProjectId> =

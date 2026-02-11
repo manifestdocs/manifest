@@ -68,8 +68,15 @@ pub async fn analyze_project(
         )));
     }
 
-    // Delegate to analysis module
-    let analysis = crate::analysis::analyze(root, query.include_docs, query.max_depth);
+    // Delegate to analysis module — runs synchronous I/O, so offload to blocking pool
+    let root = root.to_path_buf();
+    let include_docs = query.include_docs;
+    let max_depth = query.max_depth;
+    let analysis = tokio::task::spawn_blocking(move || {
+        crate::analysis::analyze(&root, include_docs, max_depth)
+    })
+    .await
+    .map_err(|e| ApiError::from((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())))?;
 
     Ok(Json(analysis))
 }

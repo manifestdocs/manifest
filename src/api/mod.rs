@@ -151,7 +151,7 @@ pub fn create_router(db: Database) -> Router {
 }
 
 /// Create the API router with shutdown support for graceful restart.
-pub fn create_router_with_shutdown(db: Database, _shutdown_rx: watch::Receiver<bool>) -> Router {
+pub fn create_router_with_shutdown(db: Database) -> Router {
     create_router_with_config(db, SecurityConfig::from_env())
 }
 
