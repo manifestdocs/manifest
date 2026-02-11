@@ -21,43 +21,18 @@ impl Database {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Feature>> {
-        let rows = match (limit, offset) {
-            (Some(lim), Some(off)) => {
-                let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features ORDER BY priority, title LIMIT $1 OFFSET $2"
-                );
-                sqlx::query(&sql)
-                    .bind(lim as i64)
-                    .bind(off as i64)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (Some(lim), None) => {
-                let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features ORDER BY priority, title LIMIT $1"
-                );
-                sqlx::query(&sql)
-                    .bind(lim as i64)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (None, Some(off)) => {
-                let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features ORDER BY priority, title {} OFFSET $1",
-                    self.dialect.unlimited_offset_sql()
-                );
-                sqlx::query(&sql)
-                    .bind(off as i64)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (None, None) => {
-                let sql =
-                    format!("SELECT {FEATURE_COLS} FROM features ORDER BY priority, title");
-                sqlx::query(&sql).fetch_all(&self.pool).await?
-            }
-        };
+        let mut sql =
+            format!("SELECT {FEATURE_COLS} FROM features ORDER BY priority, title");
+        append_pagination(&mut sql, limit, offset, 1, &self.dialect);
 
+        let mut q = sqlx::query(&sql);
+        if let Some(lim) = limit {
+            q = q.bind(lim as i64);
+        }
+        if let Some(off) = offset {
+            q = q.bind(off as i64);
+        }
+        let rows = q.fetch_all(&self.pool).await?;
         rows.iter().map(row_to_feature).collect()
     }
 
@@ -73,50 +48,19 @@ impl Database {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Feature>> {
-        let rows = match (limit, offset) {
-            (Some(lim), Some(off)) => {
-                let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2 OFFSET $3"
-                );
-                sqlx::query(&sql)
-                    .bind(project_id.to_string())
-                    .bind(lim as i64)
-                    .bind(off as i64)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (Some(lim), None) => {
-                let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title LIMIT $2"
-                );
-                sqlx::query(&sql)
-                    .bind(project_id.to_string())
-                    .bind(lim as i64)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (None, Some(off)) => {
-                let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title {} OFFSET $2",
-                    self.dialect.unlimited_offset_sql()
-                );
-                sqlx::query(&sql)
-                    .bind(project_id.to_string())
-                    .bind(off as i64)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (None, None) => {
-                let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title"
-                );
-                sqlx::query(&sql)
-                    .bind(project_id.to_string())
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-        };
+        let mut sql = format!(
+            "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title"
+        );
+        append_pagination(&mut sql, limit, offset, 2, &self.dialect);
 
+        let mut q = sqlx::query(&sql).bind(project_id.to_string());
+        if let Some(lim) = limit {
+            q = q.bind(lim as i64);
+        }
+        if let Some(off) = offset {
+            q = q.bind(off as i64);
+        }
+        let rows = q.fetch_all(&self.pool).await?;
         rows.iter().map(row_to_feature).collect()
     }
 

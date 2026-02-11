@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 
 use super::helpers::*;
-use super::Database;
+use super::{Database, DbDialect};
 use crate::models::*;
 
 impl Database {
@@ -73,77 +73,48 @@ impl Database {
         offset: Option<u32>,
         since: Option<DateTime<Utc>>,
     ) -> Result<Vec<ProjectHistoryEntry>> {
-        let limit_val = limit.unwrap_or(50) as i64;
-        let offset_val = offset.unwrap_or(0) as i64;
+        // Build dynamic WHERE clause
+        let mut sql = String::from(
+            "SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
+             FROM feature_history fh
+             INNER JOIN features f ON f.id = fh.feature_id
+             LEFT JOIN versions v ON v.id = fh.version_id
+             WHERE f.project_id = $1",
+        );
+        let mut next_param: u32 = 2;
 
-        // Build dynamic query based on filters
-        let rows = match (version_id, since) {
-            (Some(vid), Some(since_dt)) => {
-                sqlx::query(
-                    "SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
-                     FROM feature_history fh
-                     INNER JOIN features f ON f.id = fh.feature_id
-                     LEFT JOIN versions v ON v.id = fh.version_id
-                     WHERE f.project_id = $1 AND fh.version_id = $2 AND fh.created_at > $3
-                     ORDER BY fh.created_at DESC LIMIT $4 OFFSET $5",
-                )
-                .bind(project_id.to_string())
-                .bind(vid.to_string())
-                .bind(since_dt.to_rfc3339())
-                .bind(limit_val)
-                .bind(offset_val)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            (Some(vid), None) => {
-                sqlx::query(
-                    "SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
-                     FROM feature_history fh
-                     INNER JOIN features f ON f.id = fh.feature_id
-                     LEFT JOIN versions v ON v.id = fh.version_id
-                     WHERE f.project_id = $1 AND fh.version_id = $2
-                     ORDER BY fh.created_at DESC LIMIT $3 OFFSET $4",
-                )
-                .bind(project_id.to_string())
-                .bind(vid.to_string())
-                .bind(limit_val)
-                .bind(offset_val)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            (None, Some(since_dt)) => {
-                sqlx::query(
-                    "SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
-                     FROM feature_history fh
-                     INNER JOIN features f ON f.id = fh.feature_id
-                     LEFT JOIN versions v ON v.id = fh.version_id
-                     WHERE f.project_id = $1 AND fh.created_at > $2
-                     ORDER BY fh.created_at DESC LIMIT $3 OFFSET $4",
-                )
-                .bind(project_id.to_string())
-                .bind(since_dt.to_rfc3339())
-                .bind(limit_val)
-                .bind(offset_val)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            (None, None) => {
-                sqlx::query(
-                    "SELECT fh.id, fh.feature_id, f.title, f.state, fh.version_id, v.name, fh.details, fh.created_at
-                     FROM feature_history fh
-                     INNER JOIN features f ON f.id = fh.feature_id
-                     LEFT JOIN versions v ON v.id = fh.version_id
-                     WHERE f.project_id = $1
-                     ORDER BY fh.created_at DESC LIMIT $2 OFFSET $3",
-                )
-                .bind(project_id.to_string())
-                .bind(limit_val)
-                .bind(offset_val)
-                .fetch_all(&self.pool)
-                .await?
-            }
-        };
+        if version_id.is_some() {
+            sql.push_str(&format!(" AND fh.version_id = ${next_param}"));
+            next_param += 1;
+        }
+        if since.is_some() {
+            sql.push_str(&format!(" AND fh.created_at > ${next_param}"));
+            next_param += 1;
+        }
 
+        sql.push_str(" ORDER BY fh.created_at DESC");
+
+        // Default limit/offset
+        let limit = Some(limit.unwrap_or(50));
+        let offset = Some(offset.unwrap_or(0));
+        append_pagination(&mut sql, limit, offset, next_param, &self.dialect);
+
+        // Bind in the same order params were appended
+        let mut q = sqlx::query(&sql).bind(project_id.to_string());
+        if let Some(vid) = version_id {
+            q = q.bind(vid.to_string());
+        }
+        if let Some(since_dt) = since {
+            q = q.bind(since_dt.to_rfc3339());
+        }
+        if let Some(lim) = limit {
+            q = q.bind(lim as i64);
+        }
+        if let Some(off) = offset {
+            q = q.bind(off as i64);
+        }
+
+        let rows = q.fetch_all(&self.pool).await?;
         rows.iter().map(row_to_project_history_entry).collect()
     }
 }

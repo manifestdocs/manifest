@@ -6,7 +6,40 @@ use sqlx::any::AnyRow;
 use sqlx::Row;
 use uuid::Uuid;
 
+use super::DbDialect;
 use crate::models::*;
+
+/// Append `LIMIT` / `OFFSET` clauses to a SQL string based on optional pagination params.
+///
+/// Returns the next available parameter index after any newly appended `$N` placeholders.
+/// Bind order convention: limit (if `Some`) is bound first, then offset (if `Some`).
+/// When only offset is provided, the dialect's unlimited-offset literal is inlined
+/// (e.g. `LIMIT -1` for SQLite, `LIMIT ALL` for Postgres) so no extra bind is needed.
+pub(crate) fn append_pagination(
+    sql: &mut String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    next_param: u32,
+    dialect: &DbDialect,
+) -> u32 {
+    let mut p = next_param;
+    match (limit, offset) {
+        (Some(_), Some(_)) => {
+            sql.push_str(&format!(" LIMIT ${p} OFFSET ${}", p + 1));
+            p += 2;
+        }
+        (Some(_), None) => {
+            sql.push_str(&format!(" LIMIT ${p}"));
+            p += 1;
+        }
+        (None, Some(_)) => {
+            sql.push_str(&format!(" {} OFFSET ${p}", dialect.unlimited_offset_sql()));
+            p += 1;
+        }
+        (None, None) => {}
+    }
+    p
+}
 
 /// Parse a UUID string from the database into a strongly-typed ID.
 pub(crate) fn parse_id<T: From<Uuid>>(s: String) -> Result<T> {
