@@ -168,7 +168,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement. IMPORTANT: You MUST call this tool when a user asks you to implement, work on, or build a feature—even if you just created the feature or already have context. Also handles implemented features with pending changes (desired_details set by a human edit)—transitions implemented → in_progress so you can implement the requested changes. Do not change the feature's target version during implementation."
+        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement. IMPORTANT: You MUST call this tool when a user asks you to implement, work on, or build a feature—even if you just created the feature or already have context. Also handles implemented features with pending changes (desired_details set by a human edit)—transitions implemented → in_progress so you can implement the requested changes. Do not change the feature's target version during implementation.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). If you need to work on an area that has children, start one of its child features instead."
     )]
     async fn start_feature(
         &self,
@@ -178,7 +178,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Automatically clears desired_details if present (pending change request fulfilled). Set mark_implemented=false to record progress without changing state. Call only after verification.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI."
+        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Automatically clears desired_details if present (pending change request fulfilled). Set mark_implemented=false to record progress without changing state. Call only after verification.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). Only leaf features can be completed. If a parent's children are all implemented, the parent's status is derived automatically — do NOT attempt to complete the parent.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI."
     )]
     async fn complete_feature(
         &self,
@@ -391,7 +391,7 @@ ALWAYS call start_feature before implementing — it checks spec completeness an
 ALWAYS call update_feature after implementing — details must reflect what was actually built.
 ALWAYS call complete_feature with summary and commit SHAs — this records history and marks the feature done.
 NEVER change a feature's target version during implementation.
-Feature sets (parents with children) cannot be started or completed — work on their leaf children instead.
+NEVER call start_feature or complete_feature on a feature set (▪ symbol, has children). These tools reject non-leaf features. Work on leaf children instead.
 The word "next" triggers get_next_feature. All other references trigger get_active_feature.
 </critical_rules>
 </manifest_instructions>"#;
