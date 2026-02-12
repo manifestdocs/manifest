@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::Result;
 use chrono::Utc;
 use sqlx::Row;
@@ -33,7 +35,9 @@ impl Database {
             q = q.bind(off as i64);
         }
         let rows = q.fetch_all(&self.pool).await?;
-        rows.iter().map(row_to_feature).collect()
+        let mut features: Vec<Feature> = rows.iter().map(row_to_feature).collect::<Result<_>>()?;
+        self.resolve_derived_states(&mut features).await?;
+        Ok(features)
     }
 
     /// Get all features across all projects without pagination.
@@ -61,7 +65,9 @@ impl Database {
             q = q.bind(off as i64);
         }
         let rows = q.fetch_all(&self.pool).await?;
-        rows.iter().map(row_to_feature).collect()
+        let mut features: Vec<Feature> = rows.iter().map(row_to_feature).collect::<Result<_>>()?;
+        self.resolve_derived_states(&mut features).await?;
+        Ok(features)
     }
 
     /// Get all features for a project without pagination.
@@ -78,7 +84,13 @@ impl Database {
             .fetch_optional(&self.pool)
             .await?;
 
-        row.as_ref().map(row_to_feature).transpose()
+        match row.as_ref().map(row_to_feature).transpose()? {
+            Some(mut feature) => {
+                self.resolve_derived_state_single(&mut feature).await?;
+                Ok(Some(feature))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Resolve a feature by UUID prefix (e.g., first 8 chars from short IDs).
@@ -116,7 +128,11 @@ impl Database {
 
         match rows.len() {
             0 => Ok(None),
-            1 => Ok(Some(row_to_feature(&rows[0])?)),
+            1 => {
+                let mut feature = row_to_feature(&rows[0])?;
+                self.resolve_derived_state_single(&mut feature).await?;
+                Ok(Some(feature))
+            }
             _ => Err(anyhow::anyhow!(
                 "Ambiguous prefix '{}': matches multiple features",
                 prefix
@@ -415,7 +431,7 @@ impl Database {
             project_id: existing.project_id,
         });
 
-        Ok(Some(Feature {
+        let mut feature = Feature {
             id,
             project_id: existing.project_id,
             parent_id,
@@ -428,7 +444,9 @@ impl Database {
             target_version_id,
             created_at: existing.created_at,
             updated_at: now,
-        }))
+        };
+        self.resolve_derived_state_single(&mut feature).await?;
+        Ok(Some(feature))
     }
 
     /// Delete a feature and all its descendants recursively.
@@ -512,7 +530,9 @@ impl Database {
             }
         };
 
-        rows.iter().map(row_to_feature).collect()
+        let mut features: Vec<Feature> = rows.iter().map(row_to_feature).collect::<Result<_>>()?;
+        self.resolve_derived_states(&mut features).await?;
+        Ok(features)
     }
 
     /// Get the direct children of a feature.
@@ -525,7 +545,9 @@ impl Database {
             .fetch_all(&self.pool)
             .await?;
 
-        rows.iter().map(row_to_feature).collect()
+        let mut features: Vec<Feature> = rows.iter().map(row_to_feature).collect::<Result<_>>()?;
+        self.resolve_derived_states(&mut features).await?;
+        Ok(features)
     }
 
     /// Check whether a feature is a leaf node (has no children).
@@ -535,6 +557,104 @@ impl Database {
             .fetch_one(&self.pool)
             .await?;
         Ok(count == 0)
+    }
+
+    /// Enrich a batch of features with derived states for parents.
+    /// Parents get their state computed from children; leaves keep their DB state.
+    pub async fn resolve_derived_states(&self, features: &mut [Feature]) -> Result<()> {
+        if features.is_empty() {
+            return Ok(());
+        }
+
+        // Collect all feature IDs and query for children states in one batch
+        let ids: Vec<String> = features.iter().map(|f| f.id.to_string()).collect();
+        let placeholders: String = ids.iter().map(|id| format!("'{}'", id)).collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})"
+        );
+
+        let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
+
+        // Group child states by parent_id
+        let mut children_states: std::collections::HashMap<FeatureId, Vec<FeatureState>> =
+            std::collections::HashMap::new();
+        for row in &rows {
+            let parent_id: FeatureId = parse_id(row.get::<String, _>("parent_id"))?;
+            let state = FeatureState::from_str(&row.get::<String, _>("state"))
+                .unwrap_or(FeatureState::Proposed);
+            children_states.entry(parent_id).or_default().push(state);
+        }
+
+        // Patch parent states in place
+        for feature in features.iter_mut() {
+            if let Some(states) = children_states.get(&feature.id) {
+                if let Some(derived) = FeatureState::derive_from_children(states) {
+                    feature.state = derived;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Enrich a single feature with derived state if it has children.
+    async fn resolve_derived_state_single(&self, feature: &mut Feature) -> Result<()> {
+        let rows = sqlx::query("SELECT state FROM features WHERE parent_id = $1")
+            .bind(feature.id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
+
+        if !rows.is_empty() {
+            let states: Vec<FeatureState> = rows
+                .iter()
+                .map(|r| {
+                    FeatureState::from_str(&r.get::<String, _>("state"))
+                        .unwrap_or(FeatureState::Proposed)
+                })
+                .collect();
+            if let Some(derived) = FeatureState::derive_from_children(&states) {
+                feature.state = derived;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Enrich a batch of feature summaries with derived states for parents.
+    pub async fn resolve_derived_states_summary(
+        &self,
+        features: &mut [FeatureSummary],
+    ) -> Result<()> {
+        if features.is_empty() {
+            return Ok(());
+        }
+
+        let ids: Vec<String> = features.iter().map(|f| f.id.to_string()).collect();
+        let placeholders: String = ids.iter().map(|id| format!("'{}'", id)).collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})"
+        );
+
+        let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
+
+        let mut children_states: std::collections::HashMap<FeatureId, Vec<FeatureState>> =
+            std::collections::HashMap::new();
+        for row in &rows {
+            let parent_id: FeatureId = parse_id(row.get::<String, _>("parent_id"))?;
+            let state = FeatureState::from_str(&row.get::<String, _>("state"))
+                .unwrap_or(FeatureState::Proposed);
+            children_states.entry(parent_id).or_default().push(state);
+        }
+
+        for feature in features.iter_mut() {
+            if let Some(states) = children_states.get(&feature.id) {
+                if let Some(derived) = FeatureState::derive_from_children(states) {
+                    feature.state = derived;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Search features by title or details using LIKE matching, ranked by title matches first.
@@ -584,7 +704,10 @@ impl Database {
             }
         };
 
-        rows.iter().map(row_to_feature_summary).collect()
+        let mut summaries: Vec<FeatureSummary> =
+            rows.iter().map(row_to_feature_summary).collect::<Result<_>>()?;
+        self.resolve_derived_states_summary(&mut summaries).await?;
+        Ok(summaries)
     }
 
     /// Build the complete feature tree for a project as nested nodes.
@@ -617,10 +740,24 @@ impl Database {
                 .map(|features| {
                     features
                         .iter()
-                        .map(|f| FeatureTreeNode {
-                            feature: f.clone(),
-                            children: build_subtree(Some(f.id), children_map),
-                            is_root: false,
+                        .map(|f| {
+                            let children = build_subtree(Some(f.id), children_map);
+                            let mut feature = f.clone();
+                            // Derive parent state from children
+                            if !children.is_empty() {
+                                let child_states: Vec<FeatureState> =
+                                    children.iter().map(|c| c.feature.state).collect();
+                                if let Some(derived) =
+                                    FeatureState::derive_from_children(&child_states)
+                                {
+                                    feature.state = derived;
+                                }
+                            }
+                            FeatureTreeNode {
+                                feature,
+                                children,
+                                is_root: false,
+                            }
                         })
                         .collect()
                 })
@@ -740,6 +877,15 @@ impl Database {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+
+        // Derive parent state from children (zero-cost: children already in memory)
+        let mut feature = feature;
+        if !children.is_empty() {
+            let child_states: Vec<FeatureState> = children.iter().map(|c| c.state).collect();
+            if let Some(derived) = FeatureState::derive_from_children(&child_states) {
+                feature.state = derived;
+            }
+        }
 
         Ok(Some(FeatureWithContext {
             feature,

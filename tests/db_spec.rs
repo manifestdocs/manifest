@@ -2379,6 +2379,330 @@ mod version_guard_rails {
 }
 
 // ============================================================
+// Derived Parent State
+// ============================================================
+
+mod derived_parent_state {
+    use super::*;
+
+    #[tokio::test]
+    async fn parent_with_all_proposed_children_returns_proposed() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+        let parent = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: None,
+                    title: "Auth".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .expect("Failed to create parent");
+
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "Login".to_string(),
+                details: None,
+                priority: None,
+                target_version_id: None,
+                state: Some(FeatureState::Proposed),
+            },
+        )
+        .await
+        .expect("Failed to create child");
+
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "OAuth".to_string(),
+                details: None,
+                priority: None,
+                target_version_id: None,
+                state: Some(FeatureState::Proposed),
+            },
+        )
+        .await
+        .expect("Failed to create child");
+
+        let fetched = db
+            .get_feature(parent.id)
+            .await
+            .expect("Query failed")
+            .expect("Feature not found");
+
+        assert_eq!(fetched.state, FeatureState::Proposed);
+    }
+
+    #[tokio::test]
+    async fn parent_with_all_implemented_children_returns_implemented() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+        let parent = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: None,
+                    title: "Auth".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .expect("Failed to create parent");
+
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "Login".to_string(),
+                details: None,
+                priority: None,
+                target_version_id: None,
+                state: Some(FeatureState::Implemented),
+            },
+        )
+        .await
+        .expect("Failed to create child");
+
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "OAuth".to_string(),
+                details: None,
+                priority: None,
+                target_version_id: None,
+                state: Some(FeatureState::Implemented),
+            },
+        )
+        .await
+        .expect("Failed to create child");
+
+        let fetched = db
+            .get_feature(parent.id)
+            .await
+            .expect("Query failed")
+            .expect("Feature not found");
+
+        assert_eq!(fetched.state, FeatureState::Implemented);
+    }
+
+    #[tokio::test]
+    async fn parent_with_mixed_children_returns_in_progress() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+        let parent = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: None,
+                    title: "Auth".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .expect("Failed to create parent");
+
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "Login".to_string(),
+                details: None,
+                priority: None,
+                target_version_id: None,
+                state: Some(FeatureState::Implemented),
+            },
+        )
+        .await
+        .expect("Failed to create child");
+
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "OAuth".to_string(),
+                details: None,
+                priority: None,
+                target_version_id: None,
+                state: Some(FeatureState::Proposed),
+            },
+        )
+        .await
+        .expect("Failed to create child");
+
+        let fetched = db
+            .get_feature(parent.id)
+            .await
+            .expect("Query failed")
+            .expect("Feature not found");
+
+        assert_eq!(fetched.state, FeatureState::InProgress);
+    }
+
+    #[tokio::test]
+    async fn feature_tree_reflects_derived_states() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+        let parent = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: None,
+                    title: "Auth".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .expect("Failed to create parent");
+
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "Login".to_string(),
+                details: None,
+                priority: None,
+                target_version_id: None,
+                state: Some(FeatureState::Implemented),
+            },
+        )
+        .await
+        .expect("Failed to create child");
+
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "OAuth".to_string(),
+                details: None,
+                priority: None,
+                target_version_id: None,
+                state: Some(FeatureState::Implemented),
+            },
+        )
+        .await
+        .expect("Failed to create child");
+
+        let tree = db
+            .get_feature_tree(project.id)
+            .await
+            .expect("Failed to get tree");
+
+        // Find Auth node in tree (should be under root)
+        let root = &tree[0];
+        let auth = root
+            .children
+            .iter()
+            .find(|n| n.feature.title == "Auth")
+            .expect("Auth node not found");
+
+        assert_eq!(auth.feature.state, FeatureState::Implemented);
+    }
+
+    #[tokio::test]
+    async fn get_feature_with_context_reflects_derived_state() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+        let parent = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: None,
+                    title: "Auth".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .expect("Failed to create parent");
+
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "Login".to_string(),
+                details: None,
+                priority: None,
+                target_version_id: None,
+                state: Some(FeatureState::Implemented),
+            },
+        )
+        .await
+        .expect("Failed to create child");
+
+        let ctx = db
+            .get_feature_with_context(parent.id)
+            .await
+            .expect("Query failed")
+            .expect("Feature not found");
+
+        assert_eq!(ctx.feature.state, FeatureState::Implemented);
+    }
+
+    #[tokio::test]
+    async fn leaf_feature_keeps_db_state() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+        let leaf = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: None,
+                    title: "Standalone".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: Some(FeatureState::Proposed),
+                },
+            )
+            .await
+            .expect("Failed to create leaf");
+
+        let fetched = db
+            .get_feature(leaf.id)
+            .await
+            .expect("Query failed")
+            .expect("Feature not found");
+
+        assert_eq!(fetched.state, FeatureState::Proposed);
+    }
+}
+
+// ============================================================
 // Data Resilience
 // ============================================================
 

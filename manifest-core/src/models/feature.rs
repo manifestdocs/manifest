@@ -30,6 +30,67 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
+    fn derive_all_proposed_returns_proposed() {
+        let states = vec![FeatureState::Proposed, FeatureState::Proposed];
+        assert_eq!(
+            FeatureState::derive_from_children(&states),
+            Some(FeatureState::Proposed)
+        );
+    }
+
+    #[test]
+    fn derive_all_implemented_returns_implemented() {
+        let states = vec![FeatureState::Implemented, FeatureState::Implemented];
+        assert_eq!(
+            FeatureState::derive_from_children(&states),
+            Some(FeatureState::Implemented)
+        );
+    }
+
+    #[test]
+    fn derive_mix_proposed_and_implemented_returns_in_progress() {
+        let states = vec![FeatureState::Proposed, FeatureState::Implemented];
+        assert_eq!(
+            FeatureState::derive_from_children(&states),
+            Some(FeatureState::InProgress)
+        );
+    }
+
+    #[test]
+    fn derive_any_in_progress_returns_in_progress() {
+        let states = vec![
+            FeatureState::Proposed,
+            FeatureState::InProgress,
+            FeatureState::Implemented,
+        ];
+        assert_eq!(
+            FeatureState::derive_from_children(&states),
+            Some(FeatureState::InProgress)
+        );
+    }
+
+    #[test]
+    fn derive_all_archived_returns_none() {
+        let states = vec![FeatureState::Archived, FeatureState::Archived];
+        assert_eq!(FeatureState::derive_from_children(&states), None);
+    }
+
+    #[test]
+    fn derive_empty_returns_none() {
+        assert_eq!(FeatureState::derive_from_children(&[]), None);
+    }
+
+    #[test]
+    fn derive_ignores_archived_children() {
+        // One implemented + one archived = all active are implemented
+        let states = vec![FeatureState::Implemented, FeatureState::Archived];
+        assert_eq!(
+            FeatureState::derive_from_children(&states),
+            Some(FeatureState::Implemented)
+        );
+    }
+
+    #[test]
     fn test_update_feature_input_deserialize_with_version() {
         let json = r#"{"target_version_id": "fb5e9bc0-6202-4617-92f0-3eb6d943bc4f"}"#;
         let input: UpdateFeatureInput = serde_json::from_str(json).unwrap();
@@ -177,6 +238,32 @@ impl FeatureState {
             Self::Implemented => "implemented",
             Self::Archived => "archived",
         }
+    }
+
+    /// Derive parent state from children's states.
+    /// Only considers non-archived children. Returns None if no non-archived children exist,
+    /// meaning the caller should keep the DB state as-is.
+    pub fn derive_from_children(children_states: &[FeatureState]) -> Option<FeatureState> {
+        let active: Vec<_> = children_states
+            .iter()
+            .filter(|s| **s != FeatureState::Archived)
+            .collect();
+
+        if active.is_empty() {
+            return None;
+        }
+
+        let all_implemented = active.iter().all(|s| **s == FeatureState::Implemented);
+        let any_in_progress = active.iter().any(|s| **s == FeatureState::InProgress);
+        let any_implemented = active.iter().any(|s| **s == FeatureState::Implemented);
+
+        Some(if all_implemented {
+            FeatureState::Implemented
+        } else if any_in_progress || any_implemented {
+            FeatureState::InProgress // partial progress
+        } else {
+            FeatureState::Proposed
+        })
     }
 }
 
