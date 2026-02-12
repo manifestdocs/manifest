@@ -141,20 +141,6 @@ pub struct UpdateFeatureRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct CreateProjectRequest {
-    #[schemars(description = "The project name (e.g., 'RocketShip', 'MyApp')")]
-    pub name: String,
-    #[schemars(description = "Optional description of the project")]
-    #[serde(default)]
-    pub description: Option<String>,
-    #[schemars(
-        description = "Optional project-wide instructions for AI agents (coding guidelines, conventions)"
-    )]
-    #[serde(default)]
-    pub instructions: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
 pub struct AddProjectDirectoryRequest {
     #[schemars(description = "The UUID of the project to add this directory to")]
     pub project_id: Uuid,
@@ -243,17 +229,6 @@ pub struct FeatureInfo {
     /// Target version for release planning.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_version_id: Option<Uuid>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct FeatureListResponse {
-    pub features: Vec<FeatureInfo>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct FeatureHistoryResponse {
-    pub feature_id: Uuid,
-    pub entries: Vec<HistoryEntryInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

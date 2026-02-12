@@ -158,10 +158,6 @@ impl ManifestError {
         ManifestError::InvalidState(msg.into())
     }
 
-    /// Returns true; all `ManifestError` variants represent client-side errors.
-    pub fn is_client_error(&self) -> bool {
-        true
-    }
 }
 
 const EVENT_CHANNEL_CAPACITY: usize = 16;

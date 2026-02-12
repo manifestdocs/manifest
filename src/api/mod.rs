@@ -141,11 +141,6 @@ pub fn create_router(db: Database) -> Router {
     create_router_with_config(db, SecurityConfig::from_env())
 }
 
-/// Create the API router with shutdown support for graceful restart.
-pub fn create_router_with_shutdown(db: Database) -> Router {
-    create_router_with_config(db, SecurityConfig::from_env())
-}
-
 /// Create the API router with custom security configuration.
 pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router {
     // Public endpoints (unauthenticated)

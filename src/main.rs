@@ -52,10 +52,6 @@ enum Commands {
         /// Bind address (use 0.0.0.0 for remote/container deployment)
         #[arg(short, long, default_value = "127.0.0.1")]
         bind: String,
-
-        /// Run as background daemon (not yet implemented)
-        #[arg(short, long)]
-        daemon: bool,
     },
     /// Start MCP server via stdio (for Claude Code integration)
     Mcp,
@@ -104,7 +100,7 @@ async fn run_server(
     let database = db::Database::open_with_override(db_path).await?;
     database.migrate().await?;
 
-    let app = api::create_router_with_shutdown(database);
+    let app = api::create_router(database);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port)).await?;
     tracing::info!("Manifest server listening on http://{}:{}", bind_addr, port);
@@ -137,11 +133,7 @@ async fn main() -> anyhow::Result<()> {
     init_tracing(use_stderr);
 
     match cli.command {
-        Some(Commands::Serve {
-            port,
-            bind,
-            daemon: _,
-        }) => {
+        Some(Commands::Serve { port, bind }) => {
             // Allow env var override for container deployment
             let bind_addr = std::env::var("MANIFEST_BIND_ADDR").unwrap_or(bind);
 
