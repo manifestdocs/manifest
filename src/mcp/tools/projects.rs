@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::str::FromStr;
 
 use rmcp::{
@@ -8,12 +9,13 @@ use uuid::Uuid;
 
 use crate::mcp::{
     types::{
-        AddProjectDirectoryRequest, DirectoryInfo, GetProjectInstructionsRequest,
-        InitProjectRequest, ListProjectsRequest, ProjectInfo, ProjectListResponse,
+        AddProjectDirectoryRequest, DirectoryInfo, GetProjectHistoryRequest,
+        GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest, ProjectInfo,
+        ProjectListResponse,
     },
     ManifestClient,
 };
-use crate::models::{AddDirectoryInput, CreateProjectInput, ProjectId};
+use crate::models::{AddDirectoryInput, CreateProjectInput, FeatureId, FeatureTreeNode, ProjectId};
 
 use super::client_err;
 use super::format;
@@ -87,7 +89,7 @@ pub async fn list_projects(
         .map(|p| {
             let id: uuid::Uuid = p.id.into();
             vec![
-                format::short_id(&id),
+                id.to_string(),
                 p.name.clone(),
                 p.description.clone().unwrap_or_default(),
             ]
@@ -158,6 +160,7 @@ pub async fn init_project(
                 slug: None,
                 description: analysis.description.clone(),
                 instructions: None,
+                key_prefix: None,
             })
             .await
             .map_err(client_err)?
@@ -260,5 +263,65 @@ pub async fn get_project_instructions(
         None => Ok(CallToolResult::success(vec![Content::text(
             "No project instructions found. Use update_feature on the root feature to add instructions.",
         )])),
+    }
+}
+
+/// Get recent activity across a project or for a specific feature.
+pub async fn get_project_history(
+    client: &ManifestClient,
+    req: GetProjectHistoryRequest,
+) -> Result<CallToolResult, McpError> {
+    let limit = req.limit.unwrap_or(20);
+
+    let mut entries = client
+        .get_project_history(req.project_id, Some(limit))
+        .await
+        .map_err(client_err)?;
+
+    // If feature_id provided, filter to that feature + descendants
+    if let Some(ref feature_id_str) = req.feature_id {
+        let feature_id = client
+            .resolve_feature_id(feature_id_str, Some(req.project_id))
+            .await
+            .map_err(client_err)?;
+
+        let tree = client
+            .get_feature_tree(req.project_id)
+            .await
+            .map_err(client_err)?;
+
+        let mut ids = HashSet::new();
+        ids.insert(FeatureId::from(feature_id));
+        collect_descendant_ids(&tree, &FeatureId::from(feature_id), &mut ids);
+
+        entries.retain(|e| ids.contains(&e.feature_id));
+    }
+
+    let timeline = format::render_activity_timeline(&entries);
+    Ok(CallToolResult::success(vec![Content::text(timeline)]))
+}
+
+/// Recursively collect all descendant feature IDs from a tree.
+fn collect_descendant_ids(
+    nodes: &[FeatureTreeNode],
+    parent_id: &FeatureId,
+    ids: &mut HashSet<FeatureId>,
+) {
+    for node in nodes {
+        if node.feature.id == *parent_id {
+            // Found the target node — collect all children recursively
+            collect_all_ids(&node.children, ids);
+            return;
+        }
+        // Search deeper
+        collect_descendant_ids(&node.children, parent_id, ids);
+    }
+}
+
+/// Collect all feature IDs from a subtree.
+fn collect_all_ids(nodes: &[FeatureTreeNode], ids: &mut HashSet<FeatureId>) {
+    for node in nodes {
+        ids.insert(node.feature.id);
+        collect_all_ids(&node.children, ids);
     }
 }

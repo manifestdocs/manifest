@@ -20,8 +20,8 @@ pub struct StartFeatureRequest {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CompleteFeatureRequest {
-    #[schemars(description = "The UUID of the feature to complete")]
-    pub feature_id: Uuid,
+    #[schemars(description = "Feature ID (UUID, display ID like 'MAN-42', or UUID prefix)")]
+    pub feature_id: String,
     #[schemars(
         description = "Summary of work done (git-style format). First line is a concise headline shown in list views. Add details after a blank line if needed (bullet points, technical notes). Example:\n\nImplemented OAuth login flow\n\n- Added Google OAuth provider using passport.js\n- Chose session-based auth over JWT (simpler for SSR app)\n- Deviated from spec: skipped GitHub OAuth (rate limits too restrictive)\n- Note: refresh token rotation not yet implemented\n\nIMPORTANT: Describe WHAT was built, not that something was committed. Commits are tracked separately and displayed alongside the summary in the UI. Never write summaries like 'Committed as abc1234' or 'Committed X implementation' — the commit SHAs are already shown."
     )]
@@ -84,8 +84,8 @@ pub struct DeleteFeatureRequest {
 /// Replaces narrow tools (archive, restore, specify, reopen, deprecate) with one flexible tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UpdateFeatureRequest {
-    #[schemars(description = "The UUID of the feature to update")]
-    pub feature_id: Uuid,
+    #[schemars(description = "Feature ID (UUID, display ID like 'MAN-42', or UUID prefix)")]
+    pub feature_id: String,
 
     #[schemars(description = "New title for the feature")]
     #[serde(default)]
@@ -272,6 +272,9 @@ pub struct FeatureListSummaryResponse {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FeatureSummaryContextInfo {
     pub id: Uuid,
+    /// Human-friendly display ID (e.g., "MAN-42"). Omitted if not yet assigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_id: Option<String>,
     pub title: String,
     pub state: String,
 }
@@ -281,6 +284,9 @@ pub struct FeatureSummaryContextInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BreadcrumbItemInfo {
     pub id: Uuid,
+    /// Human-friendly display ID (e.g., "MAN-42"). Omitted if not yet assigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_id: Option<String>,
     pub title: String,
     /// Contextual details from this ancestor (architectural decisions, conventions, constraints).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -293,6 +299,9 @@ pub struct BreadcrumbItemInfo {
 pub struct FeatureInfoWithContext {
     /// The feature itself with all details.
     pub id: Uuid,
+    /// Human-friendly display ID (e.g., "MAN-42"). Omitted if not yet assigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_id: Option<String>,
     pub title: String,
     /// Feature details including user stories, implementation notes, and technical context.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -507,8 +516,8 @@ pub struct CreateVersionRequest {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SetFeatureVersionRequest {
-    #[schemars(description = "The UUID of the feature to update")]
-    pub feature_id: Uuid,
+    #[schemars(description = "Feature ID (UUID, display ID like 'MAN-42', or UUID prefix)")]
+    pub feature_id: String,
     #[schemars(
         description = "The UUID of the target version (must be unreleased), or null to unassign"
     )]
@@ -538,6 +547,20 @@ pub struct ActiveFeatureResponse {
     /// The focused feature state.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feature_state: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetProjectHistoryRequest {
+    #[schemars(description = "The UUID of the project to get activity for")]
+    pub project_id: Uuid,
+    #[schemars(
+        description = "Optional feature ID to filter history to a feature and its descendants."
+    )]
+    #[serde(default)]
+    pub feature_id: Option<String>,
+    #[schemars(description = "Max entries to return (default 20).")]
+    #[serde(default)]
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -713,6 +736,7 @@ impl From<&FeatureSummaryContext> for FeatureSummaryContextInfo {
     fn from(f: &FeatureSummaryContext) -> Self {
         Self {
             id: f.id.into(),
+            display_id: None, // Populated by tool handlers with project key_prefix
             title: f.title.clone(),
             state: f.state.as_str().to_string(),
         }
@@ -723,6 +747,7 @@ impl From<&BreadcrumbItem> for BreadcrumbItemInfo {
     fn from(b: &BreadcrumbItem) -> Self {
         Self {
             id: b.id.into(),
+            display_id: None, // Populated by tool handlers with project key_prefix
             title: b.title.clone(),
             details: b.details.clone(),
         }
@@ -733,6 +758,7 @@ impl From<&FeatureWithContext> for FeatureInfoWithContext {
     fn from(ctx: &FeatureWithContext) -> Self {
         Self {
             id: ctx.feature.id.into(),
+            display_id: None, // Populated by tool handlers with project key_prefix
             title: ctx.feature.title.clone(),
             details: ctx.feature.details.clone(),
             desired_details: ctx.feature.desired_details.clone(),

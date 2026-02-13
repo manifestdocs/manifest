@@ -10,9 +10,10 @@ use super::tools;
 use super::types::{
     AddProjectDirectoryRequest, CompleteFeatureRequest, CreateFeatureRequest, CreateVersionRequest,
     DeleteFeatureRequest, FindFeaturesRequest, GenerateFeatureTreeRequest, GetActiveFeatureRequest,
-    GetFeatureRequest, GetNextFeatureRequest, GetProjectInstructionsRequest, InitProjectRequest,
-    ListProjectsRequest, ListVersionsRequest, PlanFeaturesRequest, ReleaseVersionRequest,
-    RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest, UpdateFeatureRequest,
+    GetFeatureRequest, GetNextFeatureRequest, GetProjectHistoryRequest,
+    GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
+    PlanFeaturesRequest, ReleaseVersionRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest,
+    StartFeatureRequest, UpdateFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -107,6 +108,16 @@ impl McpServer {
         params: Parameters<RenderFeatureTreeRequest>,
     ) -> Result<CallToolResult, McpError> {
         tools::features::render_feature_tree(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "ORIENT: Get recent activity across a project or for a specific feature. Returns a timeline of completed work with summaries and commits, grouped by time. Use when the user asks for 'recent activity', 'what happened', or 'show history'."
+    )]
+    async fn get_project_history(
+        &self,
+        params: Parameters<GetProjectHistoryRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::projects::get_project_history(&self.client, params.0).await
     }
 
     // ============================================================

@@ -514,6 +514,24 @@ impl ManifestClient {
     }
 
     // ============================================================
+    // Project History
+    // ============================================================
+
+    /// Get project-wide history across all features.
+    pub async fn get_project_history(
+        &self,
+        project_id: Uuid,
+        limit: Option<u32>,
+    ) -> Result<Vec<ProjectHistoryEntry>, ClientError> {
+        let mut url = format!("/projects/{}/history", project_id);
+        if let Some(l) = limit {
+            url.push_str(&format!("?limit={}", l));
+        }
+        let response = self.request(reqwest::Method::GET, &url).send().await?;
+        self.handle_response(response).await
+    }
+
+    // ============================================================
     // Project Analysis
     // ============================================================
 
