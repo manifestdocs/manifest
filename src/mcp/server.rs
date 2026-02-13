@@ -111,7 +111,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Get recent activity across a project or for a specific feature. Returns a timeline of completed work with summaries and commits, grouped by time. Use when the user asks for 'recent activity', 'what happened', or 'show history'."
+        description = "ORIENT: Get recent activity across a project or for a specific feature. Returns a pre-rendered ASCII timeline of completed work grouped by time — display it directly to the user WITHOUT summarizing, reformatting, or adding commentary. The output mirrors the web app's Activity tab. Use when the user asks for 'recent activity', 'what happened', or 'show history'."
     )]
     async fn get_project_history(
         &self,

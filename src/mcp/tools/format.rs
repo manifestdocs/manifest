@@ -199,8 +199,11 @@ pub fn time_bucket(datetime: &DateTime<Utc>) -> String {
 
 /// Render a list of project history entries as a text timeline.
 ///
-/// Groups entries by time bucket and renders each with state icon,
-/// feature title, summary headline, and commit SHAs.
+/// Mirrors the web app's Activity tab layout:
+/// - Time bucket headers as horizontal rule labels
+/// - Release entries shown as `🏷 Released v0.2.0`
+/// - Regular entries: state icon + feature title + headline + commit SHAs
+/// - Headlines only (body omitted for compact display, matching web's collapsed default)
 pub fn render_activity_timeline(entries: &[ProjectHistoryEntry]) -> String {
     if entries.is_empty() {
         return "No activity recorded yet.".to_string();
@@ -224,16 +227,22 @@ pub fn render_activity_timeline(entries: &[ProjectHistoryEntry]) -> String {
             current_bucket = Some(bucket);
         }
 
+        // Release entries get special formatting (matches web app detection)
+        if entry.summary.starts_with("Released ") {
+            let headline = entry.summary.lines().next().unwrap_or(&entry.summary);
+            out.push_str(&format!("\u{1f3f7}\u{fe0f}  {}\n", headline.trim()));
+            continue;
+        }
+
         let icon = state_symbol(entry.feature_state.as_str());
 
-        // Parse summary: first line is headline, rest is body
-        let (headline, body) = match entry.summary.find('\n') {
-            Some(pos) => (
-                entry.summary[..pos].trim(),
-                Some(entry.summary[pos + 1..].trim()),
-            ),
-            None => (entry.summary.trim(), None),
-        };
+        // First line of summary is the headline
+        let headline = entry
+            .summary
+            .lines()
+            .next()
+            .unwrap_or(&entry.summary)
+            .trim();
 
         // Build commit SHA suffix
         let sha_suffix = if entry.commits.is_empty() {
@@ -257,16 +266,6 @@ pub fn render_activity_timeline(entries: &[ProjectHistoryEntry]) -> String {
             "{} {} — {}{}\n",
             icon, entry.feature_title, headline, sha_suffix
         ));
-
-        // Indent body lines if present
-        if let Some(body_text) = body {
-            let body_text = body_text.trim();
-            if !body_text.is_empty() {
-                for line in body_text.lines() {
-                    out.push_str(&format!("  {}\n", line));
-                }
-            }
-        }
     }
 
     out.push_str("\nNo more history.");
