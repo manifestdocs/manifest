@@ -244,13 +244,16 @@ impl Database {
 
         // Generate slug from name if not provided
         let slug = input.slug.unwrap_or_else(|| slugify(&input.name));
+        let key_prefix = input
+            .key_prefix
+            .unwrap_or_else(|| derive_key_prefix(&slug));
 
         let mut tx = self.pool.begin().await?;
 
         // Create project with owner_id
         sqlx::query(
-            "INSERT INTO projects (id, slug, name, description, instructions, root_feature_id, owner_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            "INSERT INTO projects (id, slug, name, description, instructions, root_feature_id, owner_id, key_prefix, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(project_id.to_string())
         .bind(&slug)
@@ -259,6 +262,7 @@ impl Database {
         .bind(&input.instructions)
         .bind(root_feature_id.to_string())
         .bind(owner_id.to_string())
+        .bind(&key_prefix)
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
         .execute(&mut *tx)
@@ -304,6 +308,7 @@ impl Database {
             detail_level: GuidanceLevel::Standard,
             ac_level: GuidanceLevel::Standard,
             ac_format: AcFormat::Checkbox,
+            key_prefix,
             created_at: now,
             updated_at: now,
         })

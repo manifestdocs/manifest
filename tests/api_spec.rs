@@ -21,6 +21,7 @@ async fn create_test_project(server: &TestServer) -> Project {
             name: "Test Project".to_string(),
             description: None,
             instructions: None,
+            key_prefix: None,
         })
         .await
         .json::<Project>()
@@ -514,6 +515,7 @@ mod security_auth {
                 name: "Test".to_string(),
                 description: None,
                 instructions: None,
+                key_prefix: None,
             })
             .await;
 
@@ -532,6 +534,7 @@ mod security_auth {
                 name: "Test".to_string(),
                 description: None,
                 instructions: None,
+                key_prefix: None,
             })
             .await;
 

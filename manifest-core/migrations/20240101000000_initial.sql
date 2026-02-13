@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS projects (
     detail_level TEXT NOT NULL DEFAULT 'standard',
     ac_level TEXT NOT NULL DEFAULT 'standard',
     ac_format TEXT NOT NULL DEFAULT 'checkbox',
+    key_prefix TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CONSTRAINT chk_projects_visibility CHECK (visibility IN ('private', 'public'))
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS features (
     details_summary TEXT,
     state TEXT NOT NULL DEFAULT 'proposed',
     priority INTEGER NOT NULL DEFAULT 0,
+    feature_number INTEGER,
     target_version_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -88,6 +90,7 @@ CREATE TABLE IF NOT EXISTS features (
 
 CREATE INDEX IF NOT EXISTS idx_features_project ON features(project_id);
 CREATE INDEX IF NOT EXISTS idx_features_parent ON features(parent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_features_number ON features(project_id, feature_number);
 
 CREATE TABLE IF NOT EXISTS feature_history (
     id TEXT PRIMARY KEY,

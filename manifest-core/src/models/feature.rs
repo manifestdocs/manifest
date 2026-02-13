@@ -208,6 +208,8 @@ pub struct Feature {
     /// Priority for ordering features within a parent. Lower values appear first.
     /// Use this to indicate implementation order without polluting feature titles.
     pub priority: i32,
+    /// Per-project sequential number for display IDs (e.g., 42 in MAN-42).
+    pub feature_number: Option<i32>,
     /// Target version for this feature (for release planning).
     /// Null for implemented features or features not yet assigned to a version.
     pub target_version_id: Option<VersionId>,
@@ -377,6 +379,8 @@ pub struct FeatureSummary {
     pub title: String,
     pub state: FeatureState,
     pub priority: i32,
+    /// Per-project sequential number for display IDs (e.g., 42 in MAN-42).
+    pub feature_number: Option<i32>,
     /// Target version for release planning.
     pub target_version_id: Option<VersionId>,
 }
@@ -390,6 +394,7 @@ impl From<Feature> for FeatureSummary {
             title: f.title,
             state: f.state,
             priority: f.priority,
+            feature_number: f.feature_number,
             target_version_id: f.target_version_id,
         }
     }

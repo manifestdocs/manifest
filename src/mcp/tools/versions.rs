@@ -133,13 +133,19 @@ pub async fn set_feature_version(
     client: &ManifestClient,
     req: SetFeatureVersionRequest,
 ) -> Result<CallToolResult, McpError> {
+    // Resolve feature ID (supports UUID, display ID like MAN-42, or UUID prefix)
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
+        .await
+        .map_err(client_err)?;
+
     // Convert Option<Uuid> to Option<Option<VersionId>> for the update input
     // Some(Some(vid)) = set version, Some(None) = explicitly unassign
     let version_id = Some(req.version_id.map(VersionId::from));
 
     let feature = client
         .update_feature(
-            req.feature_id,
+            feature_id,
             &UpdateFeatureInput {
                 parent_id: None,
                 title: None,

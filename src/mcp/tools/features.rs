@@ -16,14 +16,41 @@ use crate::mcp::{
     ManifestClient,
 };
 
+use chrono::Utc;
+
 use super::format;
 use crate::models::{
-    CommitRef, CreateFeatureInput, FeatureId, FeatureState, UpdateFeatureInput, VersionId,
+    CommitRef, CreateFeatureInput, Feature, FeatureId, FeatureState, UpdateFeatureInput, VersionId,
 };
 
 use super::spec::SpecConfig;
 
 use super::client_err;
+
+/// Check if an in_progress feature is stale (no update for >24h).
+/// Returns a warning text block if stale, None otherwise.
+pub(crate) fn stale_warning(feature: &Feature) -> Option<String> {
+    if feature.state != FeatureState::InProgress {
+        return None;
+    }
+    let elapsed = Utc::now() - feature.updated_at;
+    if elapsed > chrono::Duration::hours(24) {
+        let hours = elapsed.num_hours();
+        let display = if hours >= 48 {
+            format!("{} days", hours / 24)
+        } else {
+            format!("{} hours", hours)
+        };
+        Some(format!(
+            "WARNING: This feature has been in_progress for {} with no updates. \
+             If work is complete, call complete_feature to record what was done. \
+             If work was abandoned, update state back to 'proposed'.",
+            display
+        ))
+    } else {
+        None
+    }
+}
 
 /// Find features by project, state, or search query.
 pub async fn find_features(
@@ -55,6 +82,24 @@ pub async fn find_features(
     let total = features.len();
     let was_capped = req.limit.is_none() && total as u32 == default_limit;
 
+    // Look up project key_prefix for display IDs (if scoped to one project)
+    let key_prefix = if let Some(pid) = req.project_id {
+        client
+            .get_project(pid)
+            .await
+            .ok()
+            .map(|p| p.project.key_prefix)
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // Build lookup for parent display IDs
+    let number_lookup: std::collections::HashMap<crate::models::FeatureId, i32> = features
+        .iter()
+        .filter_map(|f| f.feature_number.map(|n| (f.id, n)))
+        .collect();
+
     // Render as markdown table
     let headers = &["ID", "State", "P", "Parent", "Title"];
     let rows: Vec<Vec<String>> = features
@@ -62,13 +107,14 @@ pub async fn find_features(
         .map(|f| {
             let id: uuid::Uuid = f.id.into();
             vec![
-                format::short_id(&id),
+                format::display_id(f.feature_number, &key_prefix, &id),
                 format::state_symbol(f.state.as_str()).to_string(),
                 f.priority.to_string(),
                 f.parent_id
                     .map(|pid| {
                         let pid_uuid: uuid::Uuid = pid.into();
-                        format::short_id(&pid_uuid)
+                        let parent_number = number_lookup.get(&pid).copied();
+                        format::display_id(parent_number, &key_prefix, &pid_uuid)
                     })
                     .unwrap_or_default(),
                 f.title.clone(),
@@ -104,6 +150,16 @@ pub async fn get_feature(
         .map_err(client_err)?;
 
     let mut feature_info: FeatureInfoWithContext = (&feature_with_context).into();
+
+    // Populate display IDs
+    let project_id: uuid::Uuid = feature_with_context.feature.project_id.into();
+    let key_prefix = client
+        .get_project(project_id)
+        .await
+        .ok()
+        .map(|p| p.project.key_prefix)
+        .unwrap_or_default();
+    format::populate_display_ids(&mut feature_info, &feature_with_context, &key_prefix);
 
     // Apply LOD to breadcrumb: direct parent gets full details, more distant ancestors truncated
     feature_info.breadcrumb = format::lod_breadcrumb(&feature_info.breadcrumb, 1);
@@ -165,10 +221,12 @@ pub async fn get_feature(
         feature_with_context.feature.state.as_str(),
         tier.as_str(),
     );
-    Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(yaml),
-    ]))
+    let mut content = vec![Content::text(summary)];
+    if let Some(warning) = stale_warning(&feature_with_context.feature) {
+        content.push(Content::text(warning));
+    }
+    content.push(Content::text(yaml));
+    Ok(CallToolResult::success(content))
 }
 
 /// Render a project's feature tree as ASCII art.
@@ -181,7 +239,15 @@ pub async fn render_feature_tree(
         .await
         .map_err(client_err)?;
 
-    let rendered = tree_render::render_tree_with_depth(&tree, req.max_depth);
+    // Look up project key_prefix for display IDs
+    let key_prefix = client
+        .get_project(req.project_id)
+        .await
+        .ok()
+        .map(|p| p.project.key_prefix)
+        .unwrap_or_default();
+
+    let rendered = tree_render::render_tree_with_depth(&tree, req.max_depth, &key_prefix);
 
     Ok(CallToolResult::success(vec![Content::text(rendered)]))
 }
@@ -272,6 +338,12 @@ pub async fn update_feature(
     client: &ManifestClient,
     req: UpdateFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
+    // Resolve feature ID (supports UUID, display ID like MAN-42, or UUID prefix)
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
+        .await
+        .map_err(client_err)?;
+
     // Parse state if provided
     let state = if let Some(ref state_str) = req.state {
         Some(FeatureState::from_str(state_str).map_err(|_| {
@@ -308,7 +380,7 @@ pub async fn update_feature(
     };
 
     let feature = client
-        .update_feature(req.feature_id, &input)
+        .update_feature(feature_id, &input)
         .await
         .map_err(client_err)?;
 
@@ -446,6 +518,13 @@ pub async fn start_feature(
 
     let mut feature_info: FeatureInfoWithContext = (&feature_with_context).into();
 
+    // Populate display IDs (project_with_dirs already fetched above)
+    format::populate_display_ids(
+        &mut feature_info,
+        &feature_with_context,
+        &project_with_dirs.project.key_prefix,
+    );
+
     // Apply LOD to breadcrumb
     feature_info.breadcrumb = format::lod_breadcrumb(&feature_info.breadcrumb, 1);
 
@@ -488,6 +567,13 @@ pub async fn start_feature(
     }
 
     content.push(Content::text(yaml));
+
+    content.push(Content::text(
+        "COMPLETION CONTRACT: After implementing this feature, you MUST:\n\
+         1. update_feature — set `details` to describe what was actually built\n\
+         2. complete_feature — provide summary of work + commit SHAs\n\
+         Skipping these steps leaves stale documentation that misleads future agents.",
+    ));
 
     Ok(CallToolResult::success(content))
 }
@@ -560,6 +646,12 @@ pub async fn complete_feature(
     client: &ManifestClient,
     req: CompleteFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
+    // Resolve feature ID (supports UUID, display ID like MAN-42, or UUID prefix)
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
+        .await
+        .map_err(client_err)?;
+
     // Convert commits
     let commits: Vec<CommitRef> = req
         .commits
@@ -573,15 +665,12 @@ pub async fn complete_feature(
 
     // Create history entry directly (no session)
     let history = client
-        .create_feature_history(req.feature_id, &req.summary, &commits, req.mark_implemented)
+        .create_feature_history(feature_id, &req.summary, &commits, req.mark_implemented)
         .await
         .map_err(client_err)?;
 
     // Get updated feature
-    let feature = client
-        .get_feature(req.feature_id)
-        .await
-        .map_err(client_err)?;
+    let feature = client.get_feature(feature_id).await.map_err(client_err)?;
 
     let commit_count = history.details.commits.len();
     let feature_info: FeatureInfo = (&feature).into();
@@ -648,6 +737,13 @@ pub async fn get_next_feature(
 
             let mut info: FeatureInfoWithContext = (&feature_ctx).into();
 
+            // Populate display IDs
+            format::populate_display_ids(
+                &mut info,
+                &feature_ctx,
+                &project_with_dirs.project.key_prefix,
+            );
+
             // Apply LOD to breadcrumb
             info.breadcrumb = format::lod_breadcrumb(&info.breadcrumb, 1);
 
@@ -662,10 +758,12 @@ pub async fn get_next_feature(
             };
 
             let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
-            Ok(CallToolResult::success(vec![
-                Content::text(summary),
-                Content::text(yaml),
-            ]))
+            let mut content = vec![Content::text(summary)];
+            if let Some(warning) = stale_warning(&feature_ctx.feature) {
+                content.push(Content::text(warning));
+            }
+            content.push(Content::text(yaml));
+            Ok(CallToolResult::success(content))
         }
         None => Ok(CallToolResult::success(vec![Content::text(
             "No workable features found.",

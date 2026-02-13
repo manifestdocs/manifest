@@ -334,25 +334,57 @@ pub async fn search_features(
 
 #[derive(Debug, Deserialize)]
 pub struct ResolveFeatureQuery {
-    /// UUID prefix to resolve (e.g., first 8 characters).
+    /// ID to resolve: UUID, display ID like "MAN-42", or UUID prefix.
     pub prefix: String,
     /// Optional project UUID to scope the search to.
     pub project_id: Option<Uuid>,
 }
 
-/// Resolve a feature by UUID prefix.
+/// Resolve a feature by UUID, display ID (MAN-42), or UUID prefix.
 /// Returns the matching feature if exactly one match is found.
 pub async fn resolve_feature(
     State(db): State<Database>,
     Query(query): Query<ResolveFeatureQuery>,
 ) -> Result<Json<Feature>, ApiError> {
-    db.resolve_feature_by_prefix(&query.prefix, query.project_id.map(ProjectId::from))
+    let prefix = &query.prefix;
+
+    // 1. Try full UUID
+    if let Ok(uuid) = uuid::Uuid::parse_str(prefix) {
+        if let Some(f) = db.get_feature(uuid.into()).await.map_err(internal_error)? {
+            return Ok(Json(f));
+        }
+    }
+
+    // 2. Try display ID format (LETTERS-DIGITS)
+    if prefix.contains('-') {
+        let has_display_format = prefix
+            .rsplit_once('-')
+            .map(|(p, n)| {
+                !p.is_empty()
+                    && p.chars().all(|c| c.is_ascii_alphabetic())
+                    && !n.is_empty()
+                    && n.chars().all(|c| c.is_ascii_digit())
+            })
+            .unwrap_or(false);
+        if has_display_format {
+            if let Some(f) = db
+                .resolve_feature_by_display_id(prefix)
+                .await
+                .map_err(internal_error)?
+            {
+                return Ok(Json(f));
+            }
+        }
+    }
+
+    // 3. Fall back to UUID prefix match
+    db.resolve_feature_by_prefix(prefix, query.project_id.map(ProjectId::from))
         .await
         .map_err(internal_error)?
         .map(Json)
         .ok_or(ApiError::from((
             StatusCode::NOT_FOUND,
-            format!("No feature found matching prefix '{}'", query.prefix),
+            format!("No feature found matching '{}'", prefix),
         )))
 }
 

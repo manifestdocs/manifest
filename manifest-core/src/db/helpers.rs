@@ -86,6 +86,27 @@ pub(crate) fn slugify(name: &str) -> String {
     slug
 }
 
+/// Derive a key prefix from a project slug for display IDs (e.g., "MAN" from "manifest").
+///
+/// Takes the first word of the slug (split on `-`), uppercases it, and caps at 5 characters.
+/// Falls back to "PRJ" if the slug is empty or produces no alpha characters.
+#[must_use]
+pub(crate) fn derive_key_prefix(slug: &str) -> String {
+    let first_word = slug.split('-').next().unwrap_or("");
+    let prefix: String = first_word
+        .chars()
+        .filter(|c| c.is_ascii_alphabetic())
+        .take(5)
+        .collect::<String>()
+        .to_ascii_uppercase();
+
+    if prefix.is_empty() {
+        "PRJ".to_string()
+    } else {
+        prefix
+    }
+}
+
 /// Validate that a version name is a semantic version: `MAJOR.MINOR.PATCH` with optional `v` prefix.
 /// Examples: `0.1.0`, `v1.0.0`, `v2.3.1`.
 #[must_use]
@@ -162,6 +183,9 @@ pub(crate) fn row_to_project(row: &AnyRow) -> Result<Project> {
             .get::<Option<String>, _>("ac_format")
             .and_then(|s| AcFormat::from_str(&s).ok())
             .unwrap_or(AcFormat::Checkbox),
+        key_prefix: row
+            .get::<Option<String>, _>("key_prefix")
+            .unwrap_or_default(),
         created_at: parse_datetime(row.get("created_at"))?,
         updated_at: parse_datetime(row.get("updated_at"))?,
     })
@@ -212,6 +236,7 @@ pub(crate) fn row_to_feature(row: &AnyRow) -> Result<Feature> {
         state: FeatureState::from_str(&row.get::<String, _>("state"))
             .unwrap_or(FeatureState::Proposed),
         priority: row.get("priority"),
+        feature_number: row.get::<Option<i32>, _>("feature_number"),
         target_version_id: row
             .get::<Option<String>, _>("target_version_id")
             .map(parse_id)
@@ -234,6 +259,7 @@ pub(crate) fn row_to_feature_summary(row: &AnyRow) -> Result<FeatureSummary> {
         state: FeatureState::from_str(&row.get::<String, _>("state"))
             .unwrap_or(FeatureState::Proposed),
         priority: row.get("priority"),
+        feature_number: row.get::<Option<i32>, _>("feature_number"),
         target_version_id: row
             .get::<Option<String>, _>("target_version_id")
             .map(parse_id)

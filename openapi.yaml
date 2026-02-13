@@ -852,7 +852,7 @@ components:
     # ============================================================
     Project:
       type: object
-      required: [id, slug, name, created_at, updated_at]
+      required: [id, slug, name, key_prefix, created_at, updated_at]
       properties:
         id:
           type: string
@@ -861,6 +861,10 @@ components:
           type: string
           description: URL-friendly identifier (lowercase, hyphenated). Unique across all projects.
           example: 'manifest'
+        key_prefix:
+          type: string
+          description: Uppercase prefix for human-friendly feature IDs (e.g., "MAN" produces MAN-1, MAN-2). Auto-derived from slug, max 5 chars.
+          example: 'MAN'
         name:
           type: string
           example: 'Manifest'
@@ -917,6 +921,11 @@ components:
           nullable: true
           description: URL-friendly identifier. If not provided, auto-generated from name.
           example: 'my-project'
+        key_prefix:
+          type: string
+          nullable: true
+          description: Uppercase prefix for feature display IDs (max 5 chars). Auto-derived from slug if not provided.
+          example: 'MYPRJ'
         description:
           type: string
           nullable: true
@@ -934,6 +943,10 @@ components:
           type: string
           description: URL-friendly identifier. Must be unique.
           example: 'my-project'
+        key_prefix:
+          type: string
+          description: Uppercase prefix for feature display IDs (max 5 chars).
+          example: 'MYPRJ'
         description:
           type: string
           nullable: true
@@ -1100,6 +1113,10 @@ components:
           type: integer
           default: 0
           description: Priority for ordering within parent (lower values first)
+        feature_number:
+          type: integer
+          nullable: true
+          description: Per-project sequential number for display IDs (e.g., 42 in MAN-42). Assigned at creation time.
         target_version_id:
           type: string
           format: uuid

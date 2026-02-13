@@ -17,6 +17,7 @@ async fn create_test_project(db: &Database) -> Project {
         name: "Test Project".to_string(),
         description: None,
         instructions: None,
+        key_prefix: None,
     })
     .await
     .expect("Failed to create project")
@@ -41,6 +42,7 @@ mod projects {
                     name: "My Project".to_string(),
                     description: None,
                     instructions: None,
+                    key_prefix: None,
                 })
                 .await
                 .expect("Failed to create project");
@@ -58,6 +60,7 @@ mod projects {
                     name: "Full Project".to_string(),
                     description: Some("A complete project".to_string()),
                     instructions: Some("Use cargo test to run tests".to_string()),
+                    key_prefix: None,
                 })
                 .await
                 .expect("Failed to create project");
@@ -93,6 +96,7 @@ mod projects {
                     name: "Test".to_string(),
                     description: None,
                     instructions: None,
+                    key_prefix: None,
                 })
                 .await
                 .expect("Failed to create");
@@ -121,6 +125,7 @@ mod projects {
                 name: "Zebra".to_string(),
                 description: None,
                 instructions: None,
+                key_prefix: None,
             })
             .await
             .expect("Failed to create");
@@ -130,6 +135,7 @@ mod projects {
                 name: "Alpha".to_string(),
                 description: None,
                 instructions: None,
+                key_prefix: None,
             })
             .await
             .expect("Failed to create");
@@ -880,6 +886,7 @@ mod features {
                     name: "Project 1".to_string(),
                     description: None,
                     instructions: None,
+                    key_prefix: None,
                 })
                 .await
                 .expect("Failed to create project");
@@ -890,6 +897,7 @@ mod features {
                     name: "Project 2".to_string(),
                     description: None,
                     instructions: None,
+                    key_prefix: None,
                 })
                 .await
                 .expect("Failed to create project");
@@ -2013,6 +2021,7 @@ mod feature_history {
                     name: "Project 1".to_string(),
                     description: None,
                     instructions: None,
+                    key_prefix: None,
                 })
                 .await
                 .expect("Failed to create");
@@ -2023,6 +2032,7 @@ mod feature_history {
                     name: "Project 2".to_string(),
                     description: None,
                     instructions: None,
+                    key_prefix: None,
                 })
                 .await
                 .expect("Failed to create");

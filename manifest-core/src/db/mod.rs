@@ -350,6 +350,8 @@ impl Database {
         self.migrate_add_project_focus().await?;
         // Migration: add 'copilot' to tasks.agent_type CHECK constraint
         self.migrate_add_copilot_agent_type().await?;
+        // Migration: add key_prefix to projects, feature_number to features
+        self.migrate_add_feature_numbers().await?;
         Ok(())
     }
 
@@ -782,6 +784,121 @@ impl Database {
             .await?;
 
         tracing::info!("spec_level → ac_level migration complete");
+        Ok(())
+    }
+
+    /// Add key_prefix column to projects and feature_number column to features.
+    /// Backfills existing data: key_prefix from slug, feature_number in created_at order.
+    async fn migrate_add_feature_numbers(&self) -> Result<()> {
+        // Check if key_prefix column already exists on projects
+        let has_key_prefix = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("key_prefix"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'projects' AND column_name = 'key_prefix'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if !has_key_prefix {
+            tracing::info!("Adding key_prefix column to projects table");
+            sqlx::query("ALTER TABLE projects ADD COLUMN key_prefix TEXT NOT NULL DEFAULT ''")
+                .execute(&self.pool)
+                .await?;
+
+            // Backfill key_prefix from slug
+            use helpers::derive_key_prefix;
+            let rows = sqlx::query("SELECT id, slug FROM projects")
+                .fetch_all(&self.pool)
+                .await?;
+            for row in &rows {
+                let id: String = sqlx::Row::get(row, "id");
+                let slug: String = sqlx::Row::get(row, "slug");
+                let prefix = derive_key_prefix(&slug);
+                sqlx::query("UPDATE projects SET key_prefix = $1 WHERE id = $2")
+                    .bind(&prefix)
+                    .bind(&id)
+                    .execute(&self.pool)
+                    .await?;
+            }
+            tracing::info!("Backfilled key_prefix for {} projects", rows.len());
+        }
+
+        // Check if feature_number column already exists on features
+        let has_feature_number = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("feature_number"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'features' AND column_name = 'feature_number'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if !has_feature_number {
+            tracing::info!("Adding feature_number column to features table");
+            sqlx::query("ALTER TABLE features ADD COLUMN feature_number INTEGER")
+                .execute(&self.pool)
+                .await?;
+
+            // Backfill feature_number per project using ROW_NUMBER
+            if self.dialect.is_sqlite() {
+                sqlx::query(
+                    "UPDATE features SET feature_number = (
+                        SELECT rn FROM (
+                            SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at) as rn
+                            FROM features
+                        ) numbered WHERE numbered.id = features.id
+                    )",
+                )
+                .execute(&self.pool)
+                .await?;
+            } else {
+                sqlx::query(
+                    "UPDATE features SET feature_number = sub.rn FROM (
+                        SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at) as rn
+                        FROM features
+                    ) sub WHERE features.id = sub.id",
+                )
+                .execute(&self.pool)
+                .await?;
+            }
+
+            // Add unique index
+            sqlx::query(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_features_number ON features(project_id, feature_number)",
+            )
+            .execute(&self.pool)
+            .await?;
+
+            tracing::info!("Backfilled feature_number and created unique index");
+        }
+
         Ok(())
     }
 

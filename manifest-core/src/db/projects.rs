@@ -7,7 +7,7 @@ use super::{Database, ManifestError};
 use crate::models::*;
 
 /// SELECT columns for the projects table.
-const PROJECT_COLS: &str = "id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, created_at, updated_at";
+const PROJECT_COLS: &str = "id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, key_prefix, created_at, updated_at";
 
 impl Database {
     /// Get all projects ordered by name.
@@ -48,13 +48,16 @@ impl Database {
 
         // Generate slug from name if not provided
         let slug = input.slug.unwrap_or_else(|| slugify(&input.name));
+        let key_prefix = input
+            .key_prefix
+            .unwrap_or_else(|| derive_key_prefix(&slug));
 
         let mut tx = self.pool.begin().await?;
 
         // Create project with root_feature_id
         sqlx::query(
-            "INSERT INTO projects (id, slug, name, description, instructions, root_feature_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "INSERT INTO projects (id, slug, name, description, instructions, root_feature_id, key_prefix, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(project_id.to_string())
         .bind(&slug)
@@ -62,6 +65,7 @@ impl Database {
         .bind(&input.description)
         .bind(&input.instructions)
         .bind(root_feature_id.to_string())
+        .bind(&key_prefix)
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
         .execute(&mut *tx)
@@ -95,6 +99,7 @@ impl Database {
             detail_level: GuidanceLevel::Standard,
             ac_level: GuidanceLevel::Standard,
             ac_format: AcFormat::Checkbox,
+            key_prefix,
             created_at: now,
             updated_at: now,
         })
@@ -125,9 +130,10 @@ impl Database {
         let detail_level = input.detail_level.unwrap_or(existing.detail_level);
         let ac_level = input.ac_level.unwrap_or(existing.ac_level);
         let ac_format = input.ac_format.unwrap_or(existing.ac_format);
+        let key_prefix = input.key_prefix.unwrap_or(existing.key_prefix);
 
         sqlx::query(
-            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, detail_level = $7, ac_level = $8, ac_format = $9, updated_at = $10 WHERE id = $11",
+            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, detail_level = $7, ac_level = $8, ac_format = $9, key_prefix = $10, updated_at = $11 WHERE id = $12",
         )
         .bind(&slug)
         .bind(&name)
@@ -138,6 +144,7 @@ impl Database {
         .bind(detail_level.as_str())
         .bind(ac_level.as_str())
         .bind(ac_format.as_str())
+        .bind(&key_prefix)
         .bind(now.to_rfc3339())
         .bind(id.to_string())
         .execute(&self.pool)
@@ -167,6 +174,7 @@ impl Database {
             detail_level,
             ac_level,
             ac_format,
+            key_prefix,
             created_at: existing.created_at,
             updated_at: now,
         }))

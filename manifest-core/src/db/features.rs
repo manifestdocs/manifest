@@ -11,10 +11,10 @@ use super::{
 use crate::models::*;
 
 /// SELECT columns for the features table (bare names).
-const FEATURE_COLS: &str = "id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, target_version_id, created_at, updated_at";
+const FEATURE_COLS: &str = "id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, feature_number, target_version_id, created_at, updated_at";
 
 /// SELECT columns for the features table with `f.` table alias.
-const FEATURE_COLS_F: &str = "f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.target_version_id, f.created_at, f.updated_at";
+const FEATURE_COLS_F: &str = "f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.feature_number, f.target_version_id, f.created_at, f.updated_at";
 
 impl Database {
     /// Get all features across all projects with optional pagination.
@@ -140,6 +140,54 @@ impl Database {
         }
     }
 
+    /// Resolve a feature by display ID (e.g., "MAN-42").
+    ///
+    /// Parses the display ID into a key prefix and feature number, then looks up
+    /// the project by key_prefix and the feature by project_id + feature_number.
+    pub async fn resolve_feature_by_display_id(
+        &self,
+        display_id: &str,
+    ) -> Result<Option<Feature>> {
+        // Parse "PREFIX-NUMBER" format
+        let Some((prefix, number_str)) = display_id.rsplit_once('-') else {
+            return Ok(None);
+        };
+        let Ok(feature_number) = number_str.parse::<i32>() else {
+            return Ok(None);
+        };
+        let prefix_upper = prefix.to_ascii_uppercase();
+
+        // Look up project by key_prefix (case-insensitive via UPPER)
+        let project_id: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM projects WHERE UPPER(key_prefix) = $1",
+        )
+        .bind(&prefix_upper)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(project_id) = project_id else {
+            return Ok(None);
+        };
+
+        // Look up feature by project_id + feature_number
+        let sql = format!(
+            "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 AND feature_number = $2"
+        );
+        let row = sqlx::query(&sql)
+            .bind(&project_id)
+            .bind(feature_number)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        match row.as_ref().map(row_to_feature).transpose()? {
+            Some(mut feature) => {
+                self.resolve_derived_state_single(&mut feature).await?;
+                Ok(Some(feature))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Get the diff between a feature's current and desired details.
     pub async fn get_feature_diff(&self, id: FeatureId) -> Result<Option<FeatureDiff>> {
         let feature = match self.get_feature(id).await? {
@@ -205,9 +253,17 @@ impl Database {
                 }
             };
 
+        // Assign next sequential feature_number
+        let feature_number: i32 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = $1",
+        )
+        .bind(project_id.to_string())
+        .fetch_one(&self.pool)
+        .await?;
+
         sqlx::query(
-            "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, feature_number, target_version_id, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(id.to_string())
         .bind(project_id.to_string())
@@ -216,6 +272,7 @@ impl Database {
         .bind(&input.details)
         .bind(state.as_str())
         .bind(priority)
+        .bind(feature_number)
         .bind(target_version_id.map(|u| u.to_string()))
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
@@ -234,6 +291,7 @@ impl Database {
             details_summary: None,
             state,
             priority,
+            feature_number: Some(feature_number),
             target_version_id,
             created_at: now,
             updated_at: now,
@@ -274,6 +332,14 @@ impl Database {
 
         let mut tx = self.pool.begin().await?;
 
+        // Get the starting feature_number for this batch
+        let mut next_number: i32 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = $1",
+        )
+        .bind(project_id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+
         for input in inputs {
             let id = input.id.unwrap_or_default();
             let state = input.state.unwrap_or(FeatureState::Proposed);
@@ -293,9 +359,12 @@ impl Database {
                     input.target_version_id.or(default_version_id)
                 };
 
+            let feature_number = next_number;
+            next_number += 1;
+
             sqlx::query(
-                "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, target_version_id, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, feature_number, target_version_id, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
             )
             .bind(id.to_string())
             .bind(project_id.to_string())
@@ -304,6 +373,7 @@ impl Database {
             .bind(&input.details)
             .bind(state.as_str())
             .bind(priority)
+            .bind(feature_number)
             .bind(target_version_id.map(|u| u.to_string()))
             .bind(now.to_rfc3339())
             .bind(now.to_rfc3339())
@@ -320,6 +390,7 @@ impl Database {
                 details_summary: None,
                 state,
                 priority,
+                feature_number: Some(feature_number),
                 target_version_id,
                 created_at: now,
                 updated_at: now,
@@ -441,6 +512,7 @@ impl Database {
             details_summary,
             state,
             priority,
+            feature_number: existing.feature_number,
             target_version_id,
             created_at: existing.created_at,
             updated_at: now,
@@ -671,7 +743,7 @@ impl Database {
         let rows = match project_id {
             Some(pid) => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, state, priority, target_version_id
+                    "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
                      FROM features
                      WHERE project_id = $1 AND (title LIKE $2 ESCAPE '\\' OR details LIKE $2 ESCAPE '\\')
                      ORDER BY
@@ -688,7 +760,7 @@ impl Database {
             }
             None => {
                 sqlx::query(
-                    "SELECT id, project_id, parent_id, title, state, priority, target_version_id
+                    "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
                      FROM features
                      WHERE title LIKE $1 ESCAPE '\\' OR details LIKE $1 ESCAPE '\\'
                      ORDER BY

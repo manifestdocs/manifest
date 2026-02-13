@@ -136,6 +136,8 @@ pub struct Project {
     pub ac_level: GuidanceLevel,
     /// Controls the output format of acceptance criteria (`checkbox` or `gherkin`).
     pub ac_format: AcFormat,
+    /// Prefix for display IDs (e.g., "MAN" for MAN-42). Auto-derived from slug.
+    pub key_prefix: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -174,6 +176,9 @@ pub struct CreateProjectInput {
     /// Project-wide instructions for AI agents (coding guidelines, conventions, etc.).
     #[validate(length(max = 100_000))]
     pub instructions: Option<String>,
+    /// Override the auto-derived key prefix for display IDs (e.g., "MAN").
+    #[validate(length(max = 5))]
+    pub key_prefix: Option<String>,
 }
 
 /// Input for updating an existing project. All fields are optional for partial updates.
@@ -201,6 +206,8 @@ pub struct UpdateProjectInput {
     pub ac_level: Option<GuidanceLevel>,
     /// Controls the output format of acceptance criteria (`checkbox` or `gherkin`).
     pub ac_format: Option<AcFormat>,
+    /// Override the key prefix for display IDs (e.g., "MAN"). 2-5 uppercase letters.
+    pub key_prefix: Option<String>,
 }
 
 /// Input for adding a directory to a project.
