@@ -336,8 +336,9 @@ When the user asks you to work on something, use these tools to find the right f
 - get_feature — full details and history for a known feature ID
 - get_project_instructions — full project instructions when the breadcrumb summary isn't enough
 - render_feature_tree — display the full tree as ASCII art
+- get_project_history — recent activity timeline. Use when the user says "activity", "recent activity", "what happened", "show history", or "changelog". Returns completed work with summaries and commits grouped by time.
 
-RULE: The word "next" triggers get_next_feature. Everything else triggers get_active_feature.
+RULE: The word "next" triggers get_next_feature. The word "activity" or "history" triggers get_project_history. Everything else triggers get_active_feature.
 </tool_selection>
 
 <features_as_docs>
