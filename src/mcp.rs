@@ -1,6 +1,7 @@
 //! MCP server for AI-assisted feature development.
 
 pub mod client;
+pub mod git;
 mod server;
 mod tools;
 mod tree_render;

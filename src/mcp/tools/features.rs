@@ -510,6 +510,29 @@ pub async fn start_feature(
     // Cascade: also start all proposed children (max 5 levels deep)
     start_children_recursive(client, &feature_with_context.children, 0, 5).await?;
 
+    // Git: create and checkout feature branch (best-effort)
+    let mut branch_message: Option<String> = None;
+    let primary_dir = project_with_dirs
+        .directories
+        .iter()
+        .find(|d| d.is_primary)
+        .or_else(|| project_with_dirs.directories.first());
+    if let Some(dir) = primary_dir {
+        if crate::mcp::git::is_git_repo(&dir.path) {
+            let slug = crate::mcp::git::slugify(&feature_with_context.feature.title);
+            let branch_name = format!("feature/{slug}");
+            match crate::mcp::git::create_and_checkout(&dir.path, &branch_name) {
+                Ok(()) => {
+                    branch_message =
+                        Some(format!("Branch: created and switched to `{branch_name}`"));
+                }
+                Err(e) => {
+                    branch_message = Some(format!("warning: could not create branch — {e}"));
+                }
+            }
+        }
+    }
+
     // Re-fetch context to get updated states
     let feature_with_context = client
         .get_feature_with_context(feature_id)
@@ -548,6 +571,11 @@ pub async fn start_feature(
         "Started '{}' — now in_progress",
         feature_with_context.feature.title,
     )));
+
+    // Git branch info (if applicable)
+    if let Some(msg) = branch_message {
+        content.push(Content::text(msg));
+    }
 
     // If this is a change request, prepend guidance
     if has_change_request {
@@ -672,6 +700,56 @@ pub async fn complete_feature(
     // Get updated feature
     let feature = client.get_feature(feature_id).await.map_err(client_err)?;
 
+    // Git: merge feature branch back into default branch (best-effort)
+    let mut merge_message: Option<String> = None;
+    let project_id: uuid::Uuid = feature.project_id.into();
+    if let Ok(project_with_dirs) = client.get_project(project_id).await {
+        let primary_dir = project_with_dirs
+            .directories
+            .iter()
+            .find(|d| d.is_primary)
+            .or_else(|| project_with_dirs.directories.first());
+        if let Some(dir) = primary_dir {
+            if crate::mcp::git::is_git_repo(&dir.path) {
+                if let Ok(current) = crate::mcp::git::current_branch(&dir.path) {
+                    if current.starts_with("feature/") {
+                        if let Ok(default) = crate::mcp::git::default_branch(&dir.path) {
+                            if current != default {
+                                match crate::mcp::git::checkout(&dir.path, &default) {
+                                    Ok(()) => {
+                                        match crate::mcp::git::merge_branch(&dir.path, &current) {
+                                            Ok(()) => {
+                                                let _ = crate::mcp::git::delete_branch(
+                                                    &dir.path, &current,
+                                                );
+                                                merge_message = Some(format!(
+                                                    "Merged `{current}` into `{default}` and deleted branch"
+                                                ));
+                                            }
+                                            Err(e) => {
+                                                // Merge failed — go back to feature branch
+                                                let _ =
+                                                    crate::mcp::git::checkout(&dir.path, &current);
+                                                merge_message = Some(format!(
+                                                    "warning: merge failed — {e}. Still on `{current}`"
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        merge_message = Some(format!(
+                                            "warning: could not checkout {default} — {e}. Still on `{current}`"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let commit_count = history.details.commits.len();
     let feature_info: FeatureInfo = (&feature).into();
     let history_id: uuid::Uuid = history.id.into();
@@ -693,10 +771,12 @@ pub async fn complete_feature(
         commit_count,
         if commit_count == 1 { "" } else { "s" },
     );
-    Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(json),
-    ]))
+    let mut content = vec![Content::text(summary)];
+    if let Some(msg) = merge_message {
+        content.push(Content::text(msg));
+    }
+    content.push(Content::text(json));
+    Ok(CallToolResult::success(content))
 }
 
 /// Get the next workable feature for a project.
