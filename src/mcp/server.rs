@@ -81,7 +81,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Find features by project, state, or search query. Returns summaries only. Use get_feature for full details."
+        description = "ORIENT: Find features by project, state, or search query. Returns summaries only. Use get_feature for full details. Call this BEFORE create_feature to check if a similar feature already exists."
     )]
     async fn find_features(
         &self,
@@ -155,7 +155,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Decompose a PRD or vision into a feature tree. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have concise specifications. Always provide target_version_id so features land in a release — call list_versions first or create_version if none exist. Omitting it sends features to the Backlog. With confirm=false, returns a proposal. With confirm=true, creates the features. IMPORTANT: After confirming, use update_feature to distill the root feature — replace the full PRD with high-level project context (tech stack, conventions, architecture) since detailed content now lives in child features."
+        description = "SETUP: Decompose a PRD or vision into a feature tree. BEFORE calling, use render_feature_tree to see existing structure — extend it rather than replacing. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have concise specifications. Always provide target_version_id so features land in a release — call list_versions first or create_version if none exist. Omitting it sends features to the Backlog. With confirm=false, returns a proposal. With confirm=true, creates the features. IMPORTANT: After confirming, use update_feature to distill the root feature — replace the full PRD with high-level project context (tech stack, conventions, architecture) since detailed content now lives in child features."
     )]
     async fn plan(
         &self,
@@ -165,7 +165,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Create a single feature. Name by capability (e.g., 'Router') not task. Use parent_id for grouping. For leaf features, add a concise specification in details. For parent features, add shared context that applies to all children. Use `plan` for bulk creation."
+        description = "SETUP: Create a single feature. BEFORE creating, call find_features to check for duplicates and render_feature_tree to find the right parent group. Name by capability (e.g., 'Router') not task. Use parent_id to place under an existing group. For leaf features, add a concise specification in details. For parent features, add shared context that applies to all children. Use `plan` for bulk creation."
     )]
     async fn create_feature(
         &self,
@@ -199,7 +199,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "UPDATE: Modify any feature field. This is the Swiss Army knife for feature updates—use it to change title, details, state, priority, parent, version assignment, or propose changes for human review via desired_details. Replaces narrow tools with one flexible tool + guidance."
+        description = "UPDATE: Modify any feature field. Use it to change title, details, state, priority, parent, version assignment, or propose changes for human review via desired_details. Prefer updating existing features over creating duplicates. Use parent_id to reorganize scattered features under the right group."
     )]
     async fn update_feature(
         &self,
@@ -363,12 +363,30 @@ delete_feature permanently removes a feature and all its descendants. Use only f
 <planning>
 When asked to break down, plan, or decompose a project into features:
 1. Call get_project_instructions to read the root feature content
-2. If the root has content (PRD, spec, or description), use that as input — do NOT explore the filesystem or ask the user what the project is about
-3. Call list_versions to find the target version (use the "next" unreleased version)
-4. Design the feature tree, then call plan with confirm=false to propose
-5. After user confirms, call plan with confirm=true
-6. Distill the root — replace the verbatim PRD with high-level project context using update_feature
+2. Call render_feature_tree to see existing features — plan ADDITIONS to the tree, not a replacement
+3. If the root has content (PRD, spec, or description), use that as input — do NOT explore the filesystem or ask the user what the project is about
+4. Call list_versions to find the target version (use the "next" unreleased version)
+5. Design the feature tree, merging into existing groups where possible
+6. Call plan with confirm=false to propose
+7. After user confirms, call plan with confirm=true
+8. Distill the root — replace the verbatim PRD with high-level project context using update_feature
 </planning>
+
+<organization>
+Before creating features, survey what exists:
+1. render_feature_tree — see the full hierarchy and identify where new capabilities belong
+2. find_features with a search query — check if a similar feature already exists
+
+When a matching feature exists:
+- Update it (update_feature) instead of creating a duplicate
+- If it needs restructuring, use parent_id to move it under the right group
+- If it's archived but relevant again, set state back to 'proposed'
+
+When creating new features:
+- Place them under existing parent groups where they fit
+- Only create new parent groups when no existing group covers the domain
+- Prefer fewer, well-organized features over many scattered ones
+</organization>
 
 <workflow>
 1. ORIENT — understand what exists and what's needed:

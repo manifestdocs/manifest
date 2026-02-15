@@ -165,7 +165,9 @@ pub struct AddProjectDirectoryRequest {
 pub struct CreateFeatureRequest {
     #[schemars(description = "The UUID of the project this feature belongs to")]
     pub project_id: Uuid,
-    #[schemars(description = "Optional parent feature UUID for hierarchical features")]
+    #[schemars(
+        description = "Parent feature UUID. Check render_feature_tree to find the right group — most features belong under an existing parent rather than at the root."
+    )]
     #[serde(default)]
     pub parent_id: Option<Uuid>,
     #[schemars(description = "Short title for the feature (e.g., 'User Authentication')")]
