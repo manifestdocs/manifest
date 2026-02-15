@@ -219,7 +219,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Get the highest-priority workable feature. Returns the top 'proposed' or 'in_progress' feature from the next unreleased version. Use ONLY when the user explicitly asks for \"the next feature\", \"what's next\", or \"what should I work on\". Do NOT use this when the user references a specific feature—use get_active_feature instead."
+        description = "ORIENT: Get the highest-priority workable feature. Returns the top 'proposed' or 'in_progress' feature from the next unreleased version. Use ONLY when the user explicitly asks for \"the next feature\", \"what's next\", or \"what should I work on\". Do NOT use this when the user references a specific feature—use get_active_feature instead.\n\nIf the returned feature is 'in_progress', another agent is likely already working on it. Ask the user before claiming it, and suggest the next 'proposed' feature as an alternative (use find_features with state='proposed')."
     )]
     async fn get_next_feature(
         &self,
@@ -399,6 +399,7 @@ When creating new features:
 2. CLAIM — MANDATORY before implementing:
    - ALWAYS call start_feature when asked to implement, work on, or build a feature
    - start_feature checks specification completeness and transitions proposed → in_progress
+   - If the feature is ALREADY in_progress, another agent is likely working on it — ask the user before proceeding, and offer the next proposed feature as an alternative
    - If the feature has no details, start_feature will refuse — write a spec first using update_feature
    - If details are very sparse, you will see a warning — flesh out the spec before implementing
 
@@ -422,6 +423,7 @@ ALWAYS call update_feature after implementing — details must reflect what was 
 ALWAYS call complete_feature with summary and commit SHAs — this records history and marks the feature done.
 NEVER change a feature's target version during implementation.
 NEVER call start_feature or complete_feature on a feature set (▪ symbol, has children). These tools reject non-leaf features. Work on leaf children instead.
+If a feature is already in_progress, ASK the user before working on it — another agent likely claimed it. Offer the next proposed feature as an alternative.
 The word "next" triggers get_next_feature. All other references trigger get_active_feature.
 </critical_rules>
 </manifest_instructions>"#;
