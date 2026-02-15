@@ -203,53 +203,6 @@ jobs:
           git commit -m "Update manifest to ${{ github.ref_name }}"
           git push
 
-  deploy-site:
-    name: Deploy to Cloudflare Pages
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout manifest-site
-        uses: actions/checkout@v4
-        with:
-          repository: manifestdocs/manifest-site
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: manifest-site
-
-      - name: Checkout manifest-svelte
-        uses: actions/checkout@v4
-        with:
-          repository: manifestdocs/manifest-svelte
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: manifest-svelte
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Build manifest-site
-        run: |
-          # Set up pnpm workspace so manifest-svelte resolves
-          cat > pnpm-workspace.yaml << 'EOF'
-          packages:
-            - manifest-site
-            - manifest-svelte
-          EOF
-          pnpm install --no-frozen-lockfile
-          pnpm --filter @manifest/svelte build
-          pnpm --filter manifest-site build
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          packageManager: npm
-          command: pages deploy manifest-site/build --project-name=manifest-site
-
   update-plugin:
     name: Update Claude Plugin
     needs: release
