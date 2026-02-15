@@ -151,6 +151,7 @@ pub fn populate_display_ids(
 pub fn state_symbol(state: &str) -> &'static str {
     match state {
         "proposed" => "\u{25c7}",    // ◇
+        "blocked" => "\u{2298}",     // ⊘
         "in_progress" => "\u{25cb}", // ○
         "implemented" => "\u{25cf}", // ●
         "archived" => "\u{2717}",    // ✗

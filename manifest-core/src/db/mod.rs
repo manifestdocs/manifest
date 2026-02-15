@@ -352,6 +352,8 @@ impl Database {
         self.migrate_add_copilot_agent_type().await?;
         // Migration: add key_prefix to projects, feature_number to features
         self.migrate_add_feature_numbers().await?;
+        // Migration: add 'blocked' state and feature_blockers table
+        self.migrate_add_blocked_state().await?;
         Ok(())
     }
 
@@ -899,6 +901,113 @@ impl Database {
             tracing::info!("Backfilled feature_number and created unique index");
         }
 
+        Ok(())
+    }
+
+    /// Add 'blocked' to features state CHECK constraint and create feature_blockers table.
+    async fn migrate_add_blocked_state(&self) -> Result<()> {
+        // Check if feature_blockers table already exists (indicates migration was applied)
+        let has_blockers_table = {
+            let count: i64 =
+                sqlx::query_scalar(&self.dialect.table_exists_sql("feature_blockers"))
+                    .fetch_one(&self.pool)
+                    .await
+                    .unwrap_or(0);
+            count > 0
+        };
+
+        if has_blockers_table {
+            tracing::debug!("Blocked state migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Adding blocked state and feature_blockers table");
+
+        if self.dialect.is_sqlite() {
+            let mut conn = self.pool.acquire().await?;
+
+            sqlx::query("PRAGMA foreign_keys = OFF")
+                .execute(&mut *conn)
+                .await?;
+
+            let statements = [
+                "DROP TABLE IF EXISTS features_new",
+                "CREATE TABLE features_new (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    parent_id TEXT,
+                    title TEXT NOT NULL,
+                    details TEXT,
+                    desired_details TEXT,
+                    details_summary TEXT,
+                    state TEXT NOT NULL DEFAULT 'proposed',
+                    priority INTEGER NOT NULL DEFAULT 0,
+                    feature_number INTEGER,
+                    target_version_id TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CONSTRAINT fk_features_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_features_parent FOREIGN KEY (parent_id) REFERENCES features_new(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_features_version FOREIGN KEY (target_version_id) REFERENCES versions(id) ON DELETE SET NULL,
+                    CONSTRAINT chk_features_state CHECK (state IN ('proposed', 'blocked', 'in_progress', 'implemented', 'archived'))
+                )",
+                "INSERT INTO features_new SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, feature_number, target_version_id, created_at, updated_at FROM features",
+                "DROP TABLE features",
+                "ALTER TABLE features_new RENAME TO features",
+                "CREATE INDEX idx_features_project ON features(project_id)",
+                "CREATE INDEX idx_features_parent ON features(parent_id)",
+                "CREATE UNIQUE INDEX idx_features_number ON features(project_id, feature_number)",
+            ];
+
+            for sql in statements {
+                sqlx::query(sql).execute(&mut *conn).await?;
+            }
+
+            // Create feature_blockers table
+            sqlx::query(
+                "CREATE TABLE feature_blockers (
+                    feature_id TEXT NOT NULL,
+                    blocker_feature_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (feature_id, blocker_feature_id),
+                    FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
+                    FOREIGN KEY (blocker_feature_id) REFERENCES features(id) ON DELETE CASCADE
+                )",
+            )
+            .execute(&mut *conn)
+            .await?;
+
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&mut *conn)
+                .await?;
+        } else {
+            // PostgreSQL
+            sqlx::query("ALTER TABLE features DROP CONSTRAINT IF EXISTS chk_features_state")
+                .execute(&self.pool)
+                .await?;
+
+            sqlx::query(
+                "ALTER TABLE features ADD CONSTRAINT chk_features_state
+                 CHECK (state IN ('proposed', 'blocked', 'in_progress', 'implemented', 'archived'))",
+            )
+            .execute(&self.pool)
+            .await?;
+
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS feature_blockers (
+                    feature_id TEXT NOT NULL,
+                    blocker_feature_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (feature_id, blocker_feature_id),
+                    FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
+                    FOREIGN KEY (blocker_feature_id) REFERENCES features(id) ON DELETE CASCADE
+                )",
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+
+        tracing::info!("Blocked state migration complete");
         Ok(())
     }
 

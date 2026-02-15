@@ -3,6 +3,7 @@
 use crate::models::{FeatureState, FeatureTreeNode};
 
 const PROPOSED: char = '◇';
+const BLOCKED: char = '⊘';
 const IN_PROGRESS: char = '○';
 const IMPLEMENTED: char = '●';
 const ARCHIVED: char = '✗';
@@ -12,6 +13,7 @@ const PROJECT_ROOT: char = '▣'; // Square for project root feature
 fn state_symbol(state: FeatureState) -> char {
     match state {
         FeatureState::Proposed => PROPOSED,
+        FeatureState::Blocked => BLOCKED,
         FeatureState::InProgress => IN_PROGRESS,
         FeatureState::Implemented => IMPLEMENTED,
         FeatureState::Archived => ARCHIVED,

@@ -21,6 +21,13 @@ use crate::models::*;
 /// Default URL for local development.
 const DEFAULT_URL: &str = "http://localhost:17010/api/v1";
 
+/// Response from the blocked-ancestor endpoint.
+#[derive(Debug, serde::Deserialize)]
+struct BlockedAncestorResponse {
+    id: Uuid,
+    title: String,
+}
+
 /// HTTP client errors.
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -297,6 +304,31 @@ impl ManifestClient {
 
         let feature: crate::models::Feature = self.handle_response(response).await?;
         Ok(feature.id.into())
+    }
+
+    /// Get the features that are blocking a given feature.
+    pub async fn get_feature_blockers(&self, id: Uuid) -> Result<Vec<FeatureSummary>, ClientError> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/features/{}/blockers", id))
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+
+    /// Find a blocked ancestor feature set in the parent chain.
+    pub async fn find_blocked_ancestor(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<(Uuid, String)>, ClientError> {
+        let response = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/features/{}/blocked-ancestor", id),
+            )
+            .send()
+            .await?;
+        let result: Option<BlockedAncestorResponse> = self.handle_response(response).await?;
+        Ok(result.map(|r| (r.id, r.title)))
     }
 
     /// Delete a feature and its descendants.

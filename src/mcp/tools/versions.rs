@@ -155,6 +155,7 @@ pub async fn set_feature_version(
                 state: None,
                 priority: None,
                 target_version_id: version_id,
+                blocked_by: None,
             },
         )
         .await

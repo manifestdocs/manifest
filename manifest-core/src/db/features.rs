@@ -444,12 +444,77 @@ impl Database {
             (desired_details, is_proposing)
         };
         // Guard rail: feature sets (parents with children) do not have mutable state.
-        // Reject explicit state changes on non-leaf features so agents get clear feedback.
-        // Only check is_leaf when a state change is actually requested (avoids extra query).
+        // Exception: proposed <-> blocked transitions ARE allowed on feature sets
+        // (blocking a set prevents starting any of its children).
         if input.state.is_some() && !self.is_leaf(id).await? {
-            return Err(ManifestError::invalid_state(
-                "Cannot change state on a feature set. Feature sets group related capabilities — only leaf features have mutable state. To work on this area, start one of its child features instead."
-            ).into());
+            let is_blocked_transition = matches!(
+                (existing.state, input.state),
+                (FeatureState::Proposed, Some(FeatureState::Blocked))
+                    | (FeatureState::Blocked, Some(FeatureState::Proposed))
+            );
+            if !is_blocked_transition {
+                return Err(ManifestError::invalid_state(
+                    "Cannot change state on a feature set. Feature sets group related capabilities — only leaf features have mutable state. To work on this area, start one of its child features instead."
+                ).into());
+            }
+        }
+
+        // Guard rail: blocked state transitions
+        if let Some(new_state) = input.state {
+            if new_state == FeatureState::Blocked {
+                // Only proposed features can be blocked
+                if existing.state != FeatureState::Proposed {
+                    return Err(ManifestError::invalid_state(
+                        "Only proposed features can be blocked. Current state must be 'proposed'.",
+                    )
+                    .into());
+                }
+                // Must provide blocker IDs
+                let blocker_ids = input.blocked_by.as_deref().unwrap_or(&[]);
+                if blocker_ids.is_empty() {
+                    return Err(ManifestError::validation(
+                        "blocked_by must contain at least one feature ID when transitioning to blocked.",
+                    )
+                    .into());
+                }
+                // Validate: no self-references, all in same project
+                for bid in blocker_ids {
+                    if *bid == id {
+                        return Err(ManifestError::validation(
+                            "A feature cannot block itself.",
+                        )
+                        .into());
+                    }
+                }
+                let blocker_id_strs: Vec<String> =
+                    blocker_ids.iter().map(|b| b.to_string()).collect();
+                let placeholders: String = blocker_id_strs
+                    .iter()
+                    .map(|id| format!("'{}'", id))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let count: i64 = sqlx::query_scalar(&format!(
+                    "SELECT COUNT(*) FROM features WHERE id IN ({placeholders}) AND project_id = $1"
+                ))
+                .bind(existing.project_id.to_string())
+                .fetch_one(&self.pool)
+                .await?;
+                if count != blocker_ids.len() as i64 {
+                    return Err(ManifestError::validation(
+                        "All blocker features must exist in the same project.",
+                    )
+                    .into());
+                }
+            }
+            if existing.state == FeatureState::Blocked && new_state != FeatureState::Blocked {
+                // Unblocking: only allowed transition is blocked -> proposed
+                if new_state != FeatureState::Proposed {
+                    return Err(ManifestError::invalid_state(
+                        "Blocked features can only transition to 'proposed'. Unblock first, then change state.",
+                    )
+                    .into());
+                }
+            }
         }
         let state = if is_proposing_changes {
             existing.state
@@ -497,6 +562,22 @@ impl Database {
         .bind(id.to_string())
         .execute(&self.pool)
         .await?;
+
+        // Handle blocker storage
+        if state == FeatureState::Blocked {
+            if let Some(ref blocker_ids) = input.blocked_by {
+                self.set_feature_blockers(id, blocker_ids).await?;
+            }
+        }
+        // Clear blockers when unblocking
+        if existing.state == FeatureState::Blocked && state == FeatureState::Proposed {
+            self.clear_feature_blockers(id).await?;
+        }
+
+        // Auto-resolve: when a feature becomes implemented, check if any blocked features can be unblocked
+        if state == FeatureState::Implemented && existing.state != FeatureState::Implemented {
+            self.auto_resolve_blocked_features(id).await?;
+        }
 
         let _ = self.events.send(FeatureEvent::Updated {
             project_id: existing.project_id,
@@ -671,6 +752,11 @@ impl Database {
 
     /// Enrich a single feature with derived state if it has children.
     async fn resolve_derived_state_single(&self, feature: &mut Feature) -> Result<()> {
+        // Blocked feature sets preserve their explicit blocked state — do not derive.
+        if feature.state == FeatureState::Blocked {
+            return Ok(());
+        }
+
         let rows = sqlx::query("SELECT state FROM features WHERE parent_id = $1")
             .bind(feature.id.to_string())
             .fetch_all(&self.pool)
@@ -1021,6 +1107,144 @@ impl Database {
         };
 
         row.as_ref().map(row_to_feature).transpose()
+    }
+
+    // ============================================================
+    // Feature Blockers
+    // ============================================================
+
+    /// Set the blocker features for a blocked feature (replaces existing blockers).
+    pub async fn set_feature_blockers(
+        &self,
+        feature_id: FeatureId,
+        blocker_ids: &[FeatureId],
+    ) -> Result<()> {
+        // Clear existing
+        sqlx::query("DELETE FROM feature_blockers WHERE feature_id = $1")
+            .bind(feature_id.to_string())
+            .execute(&self.pool)
+            .await?;
+
+        let now = Utc::now().to_rfc3339();
+        for blocker_id in blocker_ids {
+            sqlx::query(
+                "INSERT INTO feature_blockers (feature_id, blocker_feature_id, created_at) VALUES ($1, $2, $3)",
+            )
+            .bind(feature_id.to_string())
+            .bind(blocker_id.to_string())
+            .bind(&now)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Clear all blocker entries for a feature.
+    pub async fn clear_feature_blockers(&self, feature_id: FeatureId) -> Result<()> {
+        sqlx::query("DELETE FROM feature_blockers WHERE feature_id = $1")
+            .bind(feature_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Get the IDs of features that are blocking the given feature.
+    pub async fn get_feature_blockers(&self, feature_id: FeatureId) -> Result<Vec<FeatureSummary>> {
+        let sql = "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
+                   FROM feature_blockers fb
+                   JOIN features f ON f.id = fb.blocker_feature_id
+                   WHERE fb.feature_id = $1
+                   ORDER BY f.priority, f.title";
+        let rows = sqlx::query(sql)
+            .bind(feature_id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
+
+        rows.iter().map(row_to_feature_summary).collect()
+    }
+
+    /// When a feature transitions to `implemented`, check if any features blocked by it
+    /// can now be auto-resolved (all their blockers are implemented).
+    /// Returns the IDs of features that were unblocked.
+    pub async fn auto_resolve_blocked_features(
+        &self,
+        implemented_id: FeatureId,
+    ) -> Result<Vec<FeatureId>> {
+        // Find all features that are blocked by the newly-implemented feature
+        let blocked_feature_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT feature_id FROM feature_blockers WHERE blocker_feature_id = $1",
+        )
+        .bind(implemented_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut unblocked = Vec::new();
+        let now = Utc::now().to_rfc3339();
+
+        for blocked_id_str in blocked_feature_ids {
+            // Check if ALL blockers of this feature are now implemented
+            let remaining: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM feature_blockers fb
+                 JOIN features f ON f.id = fb.blocker_feature_id
+                 WHERE fb.feature_id = $1 AND f.state != 'implemented'",
+            )
+            .bind(&blocked_id_str)
+            .fetch_one(&self.pool)
+            .await?;
+
+            if remaining == 0 {
+                // All blockers implemented — transition to proposed
+                sqlx::query("UPDATE features SET state = 'proposed', updated_at = $1 WHERE id = $2 AND state = 'blocked'")
+                    .bind(&now)
+                    .bind(&blocked_id_str)
+                    .execute(&self.pool)
+                    .await?;
+
+                // Clear blocker entries
+                sqlx::query("DELETE FROM feature_blockers WHERE feature_id = $1")
+                    .bind(&blocked_id_str)
+                    .execute(&self.pool)
+                    .await?;
+
+                let feature_id: FeatureId = parse_id(blocked_id_str)?;
+                unblocked.push(feature_id);
+            }
+        }
+
+        Ok(unblocked)
+    }
+
+    /// Walk up the parent chain to find the first blocked ancestor (feature set).
+    /// Returns `Some((id, title))` if a blocked ancestor is found.
+    pub async fn find_blocked_ancestor(
+        &self,
+        feature_id: FeatureId,
+    ) -> Result<Option<(FeatureId, String)>> {
+        let row = sqlx::query(
+            "WITH RECURSIVE ancestors AS (
+                SELECT parent_id FROM features WHERE id = $1
+                UNION ALL
+                SELECT f.parent_id FROM features f
+                INNER JOIN ancestors a ON f.id = a.parent_id
+            )
+            SELECT f.id, f.title FROM features f
+            INNER JOIN ancestors a ON f.id = a.parent_id
+            WHERE f.state = 'blocked'
+            LIMIT 1",
+        )
+        .bind(feature_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match row {
+            Some(row) => {
+                let id: FeatureId = parse_id(row.get::<String, _>("id"))?;
+                let title: String = row.get("title");
+                Ok(Some((id, title)))
+            }
+            None => Ok(None),
+        }
     }
 
     // ============================================================

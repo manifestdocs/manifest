@@ -773,6 +773,28 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /features/{id}/blockers:
+    parameters:
+      - $ref: '#/components/parameters/FeatureId'
+    get:
+      tags: [Features]
+      summary: Get feature blockers
+      description: |
+        Returns the features that are blocking this feature.
+        Only returns results for features in the 'blocked' state.
+      operationId: getFeatureBlockers
+      responses:
+        '200':
+          description: List of blocking features
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FeatureSummary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   parameters:
     ProjectId:
@@ -1131,9 +1153,10 @@ components:
 
     FeatureState:
       type: string
-      enum: [proposed, in_progress, implemented, archived]
+      enum: [proposed, blocked, in_progress, implemented, archived]
       description: |
         - proposed: Initial state, in backlog
+        - blocked: Cannot proceed until blocker features are implemented
         - in_progress: Actively being worked on
         - implemented: Feature is live in codebase
         - archived: Feature archived (soft-deleted)
@@ -1219,6 +1242,12 @@ components:
           format: uuid
           nullable: true
           description: Move feature under a different parent. Set null to make root-level.
+        blocked_by:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Feature IDs that block this feature. Required when transitioning to 'blocked' state. The feature auto-transitions to 'proposed' when all blockers reach 'implemented'.
 
     BulkCreateFeaturesInput:
       type: object

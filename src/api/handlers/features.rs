@@ -220,6 +220,7 @@ pub async fn create_feature_history(
                 },
                 priority: None,
                 target_version_id: None,
+                blocked_by: None,
             },
         )
         .await
@@ -291,6 +292,46 @@ pub async fn update_feature(
         .map_err(internal_error)?
         .map(Json)
         .ok_or(ApiError::not_found("Feature"))
+}
+
+/// Get the features that are blocking a given feature.
+pub async fn get_feature_blockers(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
+    // Verify feature exists
+    db.get_feature(id.into())
+        .await
+        .map_err(internal_error)?
+        .ok_or(ApiError::not_found("Feature"))?;
+
+    db.get_feature_blockers(id.into())
+        .await
+        .map(Json)
+        .map_err(internal_error)
+}
+
+/// Find a blocked ancestor feature set in the parent chain.
+/// Returns the first blocked ancestor, or 204 if none found.
+pub async fn find_blocked_ancestor(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Option<BlockedAncestor>>, ApiError> {
+    db.find_blocked_ancestor(id.into())
+        .await
+        .map(|opt| {
+            Json(opt.map(|(id, title)| BlockedAncestor {
+                id: id.into(),
+                title,
+            }))
+        })
+        .map_err(internal_error)
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct BlockedAncestor {
+    pub id: Uuid,
+    pub title: String,
 }
 
 /// Delete a feature and its descendants.

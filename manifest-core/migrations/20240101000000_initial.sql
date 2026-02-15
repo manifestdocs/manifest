@@ -85,12 +85,21 @@ CREATE TABLE IF NOT EXISTS features (
     CONSTRAINT fk_features_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     CONSTRAINT fk_features_parent FOREIGN KEY (parent_id) REFERENCES features(id) ON DELETE CASCADE,
     CONSTRAINT fk_features_version FOREIGN KEY (target_version_id) REFERENCES versions(id) ON DELETE SET NULL,
-    CONSTRAINT chk_features_state CHECK (state IN ('proposed', 'in_progress', 'implemented', 'archived'))
+    CONSTRAINT chk_features_state CHECK (state IN ('proposed', 'blocked', 'in_progress', 'implemented', 'archived'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_features_project ON features(project_id);
 CREATE INDEX IF NOT EXISTS idx_features_parent ON features(parent_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_features_number ON features(project_id, feature_number);
+
+CREATE TABLE IF NOT EXISTS feature_blockers (
+    feature_id TEXT NOT NULL,
+    blocker_feature_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (feature_id, blocker_feature_id),
+    CONSTRAINT fk_feature_blockers_feature FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
+    CONSTRAINT fk_feature_blockers_blocker FOREIGN KEY (blocker_feature_id) REFERENCES features(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS feature_history (
     id TEXT PRIMARY KEY,

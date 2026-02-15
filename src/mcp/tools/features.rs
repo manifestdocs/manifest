@@ -249,7 +249,10 @@ pub async fn render_feature_tree(
 
     let rendered = tree_render::render_tree_with_depth(&tree, req.max_depth, &key_prefix);
 
-    Ok(CallToolResult::success(vec![Content::text(rendered)]))
+    // Wrap in code fences so IDEs that render markdown preserve whitespace and indentation
+    let formatted = format!("```\n{}```", rendered);
+
+    Ok(CallToolResult::success(vec![Content::text(formatted)]))
 }
 
 /// Turn a PRD, spec, or product vision into a feature tree.
@@ -349,7 +352,7 @@ pub async fn update_feature(
         Some(FeatureState::from_str(state_str).map_err(|_| {
             McpError::invalid_params(
                 format!(
-                    "Invalid state '{}'. Must be: proposed, in_progress, implemented, or archived",
+                    "Invalid state '{}'. Must be: proposed, blocked, in_progress, implemented, or archived",
                     state_str
                 ),
                 None,
@@ -377,6 +380,9 @@ pub async fn update_feature(
         state,
         priority: req.priority,
         target_version_id,
+        blocked_by: req
+            .blocked_by
+            .map(|ids| ids.into_iter().map(FeatureId::from).collect()),
     };
 
     let feature = client
@@ -438,6 +444,37 @@ pub async fn start_feature(
         .get_feature_with_context(feature_id)
         .await
         .map_err(client_err)?;
+
+    // Guard: blocked features cannot be started
+    if feature_with_context.feature.state == FeatureState::Blocked {
+        let blockers = client
+            .get_feature_blockers(feature_id)
+            .await
+            .map_err(client_err)?;
+        let blocker_names: Vec<String> = blockers
+            .iter()
+            .map(|b| format!("  - {} ({})", b.title, b.state.as_str()))
+            .collect();
+        return Ok(CallToolResult::error(vec![Content::text(format!(
+            "Cannot start '{}' — it is blocked by:\n{}\n\nThese features must reach 'implemented' before this feature can be started.",
+            feature_with_context.feature.title,
+            blocker_names.join("\n")
+        ))]));
+    }
+
+    // Guard: blocked ancestor feature set prevents starting descendants
+    if let Some((blocked_id, blocked_title)) = client
+        .find_blocked_ancestor(feature_id)
+        .await
+        .map_err(client_err)?
+    {
+        return Ok(CallToolResult::error(vec![Content::text(format!(
+            "Cannot start '{}' — ancestor feature set '{}' ({}) is blocked. Unblock the ancestor first.",
+            feature_with_context.feature.title,
+            blocked_title,
+            blocked_id,
+        ))]));
+    }
 
     // Guard: feature sets cannot be started — only leaf features
     if !feature_with_context.children.is_empty() {
@@ -501,6 +538,7 @@ pub async fn start_feature(
                     state: Some(FeatureState::InProgress),
                     priority: None,
                     target_version_id: None,
+                    blocked_by: None,
                 },
             )
             .await
@@ -648,6 +686,7 @@ async fn start_children_recursive(
                             state: Some(FeatureState::InProgress),
                             priority: None,
                             target_version_id: None,
+                            blocked_by: None,
                         },
                     )
                     .await

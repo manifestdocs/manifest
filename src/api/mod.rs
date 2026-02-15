@@ -235,6 +235,14 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
         )
         .route("/features/{id}/diff", get(handlers::get_feature_diff))
         .route(
+            "/features/{id}/blockers",
+            get(handlers::get_feature_blockers),
+        )
+        .route(
+            "/features/{id}/blocked-ancestor",
+            get(handlers::find_blocked_ancestor),
+        )
+        .route(
             "/features/{id}/history",
             get(handlers::get_feature_history).post(handlers::create_feature_history),
         )

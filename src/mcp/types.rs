@@ -110,7 +110,7 @@ pub struct UpdateFeatureRequest {
     pub details_summary: Option<String>,
 
     #[schemars(
-        description = "New state. Valid values: 'proposed', 'in_progress', 'implemented', 'archived'. Use your judgment: working on it? 'in_progress'. Found a bug in 'implemented'? Set back to 'in_progress'. Want to hide but preserve history? 'archived'. To mark work as DONE, use complete_feature instead — it records history. Only set 'implemented' directly here for corrections or bulk updates."
+        description = "New state. Valid values: 'proposed', 'blocked', 'in_progress', 'implemented', 'archived'. Use your judgment: working on it? 'in_progress'. Found a bug in 'implemented'? Set back to 'in_progress'. Want to hide but preserve history? 'archived'. To mark work as DONE, use complete_feature instead — it records history. Only set 'implemented' directly here for corrections or bulk updates."
     )]
     #[serde(default)]
     pub state: Option<String>,
@@ -138,6 +138,12 @@ pub struct UpdateFeatureRequest {
     )]
     #[serde(default)]
     pub clear_version: bool,
+
+    #[schemars(
+        description = "Feature IDs (UUIDs) that block this feature. Required when setting state to 'blocked'. All blockers must be in the same project. The feature auto-transitions to 'proposed' when all blockers reach 'implemented'."
+    )]
+    #[serde(default)]
+    pub blocked_by: Option<Vec<Uuid>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

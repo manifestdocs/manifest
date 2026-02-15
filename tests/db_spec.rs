@@ -430,6 +430,7 @@ mod features {
                 priority: None,
                 target_version_id: None,
                 state: None,
+                blocked_by: None,
             };
 
             let result = db
@@ -471,6 +472,7 @@ mod features {
                         priority: None,
                         target_version_id: None,
                         state: None,
+                        blocked_by: None,
                     },
                 )
                 .await
@@ -513,6 +515,7 @@ mod features {
                         priority: None,
                         target_version_id: None,
                         state: Some(FeatureState::Implemented),
+                        blocked_by: None,
                     },
                 )
                 .await
@@ -628,6 +631,7 @@ mod features {
                     priority: None,
                     target_version_id: None,
                     state: None,
+                    blocked_by: None,
                 },
             )
             .await
@@ -689,6 +693,7 @@ mod features {
                         priority: None,
                         target_version_id: None,
                         state: None,
+                        blocked_by: None,
                     },
                 )
                 .await
@@ -731,6 +736,7 @@ mod features {
                         priority: None,
                         target_version_id: None,
                         state: None,
+                        blocked_by: None,
                     },
                 )
                 .await
@@ -2273,6 +2279,7 @@ mod version_guard_rails {
                     priority: None,
                     target_version_id: Some(Some(released.id)),
                     state: None,
+                    blocked_by: None,
                 },
             )
             .await;
@@ -2378,6 +2385,7 @@ mod version_guard_rails {
                     priority: None,
                     target_version_id: Some(Some(version.id)),
                     state: None,
+                    blocked_by: None,
                 },
             )
             .await
@@ -2710,6 +2718,182 @@ mod derived_parent_state {
 
         assert_eq!(fetched.state, FeatureState::Proposed);
     }
+
+    #[tokio::test]
+    async fn parent_with_blocked_children_treated_as_proposed() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+        let parent = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: None,
+                    title: "Parent".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let child_a = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(parent.id),
+                    title: "Child A".to_string(),
+                    details: Some("Spec A".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(parent.id),
+                title: "Child B".to_string(),
+                details: Some("Spec B".to_string()),
+                priority: None,
+                target_version_id: None,
+                state: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Block child_a — parent should remain proposed (blocked treated as proposed)
+        db.update_feature(
+            child_a.id,
+            UpdateFeatureInput {
+                parent_id: None,
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some(FeatureState::Blocked),
+                priority: None,
+                target_version_id: None,
+                blocked_by: Some(vec![parent.id]), // block by parent for testing
+            },
+        )
+        .await
+        .unwrap();
+
+        let fetched = db.get_feature(parent.id).await.unwrap().unwrap();
+
+        // Blocked children are treated like proposed for derivation
+        assert_eq!(fetched.state, FeatureState::Proposed);
+    }
+
+    #[tokio::test]
+    async fn parent_with_blocked_and_implemented_children() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+        let root = db
+            .get_feature(project.root_feature_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let parent = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root.id),
+                    title: "Parent".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let blocker = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root.id),
+                    title: "Blocker".to_string(),
+                    details: Some("Spec".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let child_a = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(parent.id),
+                    title: "Child A".to_string(),
+                    details: Some("Spec A".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: Some(FeatureState::Implemented),
+                },
+            )
+            .await
+            .unwrap();
+        let child_b = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(parent.id),
+                    title: "Child B".to_string(),
+                    details: Some("Spec B".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Block child_b by blocker
+        db.update_feature(
+            child_b.id,
+            UpdateFeatureInput {
+                parent_id: None,
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some(FeatureState::Blocked),
+                priority: None,
+                target_version_id: None,
+                blocked_by: Some(vec![blocker.id]),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Parent has one implemented + one blocked → should be in_progress
+        // (blocked is neither Implemented nor InProgress, but there's an implemented child)
+        let fetched = db.get_feature(parent.id).await.unwrap().unwrap();
+
+        // Blocked = not implemented, so with implemented + blocked:
+        // any_implemented = true, all_implemented = false → InProgress
+        assert_eq!(fetched.state, FeatureState::InProgress);
+
+        let _ = child_a;
+    }
 }
 
 // ============================================================
@@ -2780,5 +2964,500 @@ mod data_resilience {
         .await;
 
         assert!(result.is_err(), "Expected FK violation error, got Ok");
+    }
+}
+
+// ============================================================
+// Blocked Features
+// ============================================================
+
+mod blocked_features {
+    use super::*;
+
+    /// Helper: create a project with two leaf features under a parent.
+    async fn setup_two_features(db: &Database) -> (Project, Feature, Feature, Feature) {
+        let project = create_test_project(db).await;
+        let root = db
+            .get_feature(project.root_feature_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let feature_a = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root.id),
+                    title: "Feature A".to_string(),
+                    details: Some("Spec for A".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+        let feature_b = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root.id),
+                    title: "Feature B".to_string(),
+                    details: Some("Spec for B".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+        (project, root, feature_a, feature_b)
+    }
+
+    #[tokio::test]
+    async fn block_proposed_feature_with_blocker() {
+        let db = setup().await;
+        let (_project, _root, feature_a, feature_b) = setup_two_features(&db).await;
+
+        // Block B by A
+        let updated = db
+            .update_feature(
+                feature_b.id,
+                UpdateFeatureInput {
+                    parent_id: None,
+                    title: None,
+                    details: None,
+                    desired_details: None,
+                    details_summary: None,
+                    state: Some(FeatureState::Blocked),
+                    priority: None,
+                    target_version_id: None,
+                    blocked_by: Some(vec![feature_a.id]),
+                },
+            )
+            .await
+            .expect("Failed to block feature")
+            .expect("Feature not found");
+
+        assert_eq!(updated.state, FeatureState::Blocked);
+
+        // Verify blockers stored
+        let blockers = db.get_feature_blockers(feature_b.id).await.unwrap();
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0].id, feature_a.id);
+    }
+
+    #[tokio::test]
+    async fn reject_blocking_non_proposed_feature() {
+        let db = setup().await;
+        let (_project, _root, feature_a, feature_b) = setup_two_features(&db).await;
+
+        // Set B to in_progress first
+        db.update_feature(
+            feature_b.id,
+            UpdateFeatureInput {
+                parent_id: None,
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some(FeatureState::InProgress),
+                priority: None,
+                target_version_id: None,
+                blocked_by: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Try to block an in_progress feature — should fail
+        let result = db
+            .update_feature(
+                feature_b.id,
+                UpdateFeatureInput {
+                    parent_id: None,
+                    title: None,
+                    details: None,
+                    desired_details: None,
+                    details_summary: None,
+                    state: Some(FeatureState::Blocked),
+                    priority: None,
+                    target_version_id: None,
+                    blocked_by: Some(vec![feature_a.id]),
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("proposed"));
+    }
+
+    #[tokio::test]
+    async fn reject_blocking_without_blocker_ids() {
+        let db = setup().await;
+        let (_project, _root, _feature_a, feature_b) = setup_two_features(&db).await;
+
+        let result = db
+            .update_feature(
+                feature_b.id,
+                UpdateFeatureInput {
+                    parent_id: None,
+                    title: None,
+                    details: None,
+                    desired_details: None,
+                    details_summary: None,
+                    state: Some(FeatureState::Blocked),
+                    priority: None,
+                    target_version_id: None,
+                    blocked_by: None,
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn reject_blockers_from_different_project() {
+        let db = setup().await;
+        let (_project1, _root1, feature_a, _feature_b) = setup_two_features(&db).await;
+
+        // Create a second project with a feature
+        let project2 = db
+            .create_project(CreateProjectInput {
+                slug: None,
+                name: "Other Project".to_string(),
+                description: None,
+                instructions: None,
+                key_prefix: None,
+            })
+            .await
+            .unwrap();
+        let root2 = db
+            .get_feature(project2.root_feature_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let other_feature = db
+            .create_feature(
+                project2.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root2.id),
+                    title: "Other Feature".to_string(),
+                    details: Some("Spec".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Try to block a feature using a blocker from another project
+        let result = db
+            .update_feature(
+                feature_a.id,
+                UpdateFeatureInput {
+                    parent_id: None,
+                    title: None,
+                    details: None,
+                    desired_details: None,
+                    details_summary: None,
+                    state: Some(FeatureState::Blocked),
+                    priority: None,
+                    target_version_id: None,
+                    blocked_by: Some(vec![other_feature.id]),
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("same project"));
+    }
+
+    #[tokio::test]
+    async fn unblock_clears_blockers() {
+        let db = setup().await;
+        let (_project, _root, feature_a, feature_b) = setup_two_features(&db).await;
+
+        // Block B by A
+        db.update_feature(
+            feature_b.id,
+            UpdateFeatureInput {
+                parent_id: None,
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some(FeatureState::Blocked),
+                priority: None,
+                target_version_id: None,
+                blocked_by: Some(vec![feature_a.id]),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Unblock: blocked -> proposed
+        let updated = db
+            .update_feature(
+                feature_b.id,
+                UpdateFeatureInput {
+                    parent_id: None,
+                    title: None,
+                    details: None,
+                    desired_details: None,
+                    details_summary: None,
+                    state: Some(FeatureState::Proposed),
+                    priority: None,
+                    target_version_id: None,
+                    blocked_by: None,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(updated.state, FeatureState::Proposed);
+
+        // Blockers should be cleared
+        let blockers = db.get_feature_blockers(feature_b.id).await.unwrap();
+        assert!(blockers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn auto_resolve_when_all_blockers_implemented() {
+        let db = setup().await;
+        let (_project, _root, feature_a, feature_b) = setup_two_features(&db).await;
+
+        // Block B by A
+        db.update_feature(
+            feature_b.id,
+            UpdateFeatureInput {
+                parent_id: None,
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some(FeatureState::Blocked),
+                priority: None,
+                target_version_id: None,
+                blocked_by: Some(vec![feature_a.id]),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Implement A — should auto-resolve B
+        db.update_feature(
+            feature_a.id,
+            UpdateFeatureInput {
+                parent_id: None,
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some(FeatureState::Implemented),
+                priority: None,
+                target_version_id: None,
+                blocked_by: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // B should now be proposed
+        let b = db.get_feature(feature_b.id).await.unwrap().unwrap();
+        assert_eq!(b.state, FeatureState::Proposed);
+    }
+
+    #[tokio::test]
+    async fn no_auto_resolve_when_some_blockers_remain() {
+        let db = setup().await;
+        let (project, root, feature_a, feature_b) = setup_two_features(&db).await;
+
+        // Create a third feature
+        let feature_c = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root.id),
+                    title: "Feature C".to_string(),
+                    details: Some("Spec for C".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Block C by both A and B
+        db.update_feature(
+            feature_c.id,
+            UpdateFeatureInput {
+                parent_id: None,
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some(FeatureState::Blocked),
+                priority: None,
+                target_version_id: None,
+                blocked_by: Some(vec![feature_a.id, feature_b.id]),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Implement only A — C should remain blocked (B is still proposed)
+        db.update_feature(
+            feature_a.id,
+            UpdateFeatureInput {
+                parent_id: None,
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some(FeatureState::Implemented),
+                priority: None,
+                target_version_id: None,
+                blocked_by: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let c = db.get_feature(feature_c.id).await.unwrap().unwrap();
+        assert_eq!(c.state, FeatureState::Blocked);
+    }
+
+    #[tokio::test]
+    async fn block_feature_set() {
+        let db = setup().await;
+        let (project, root, feature_a, _feature_b) = setup_two_features(&db).await;
+
+        // Create a feature set (parent with children)
+        let group = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root.id),
+                    title: "Auth Group".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+        db.create_feature(
+            project.id,
+            CreateFeatureInput {
+                id: None,
+                parent_id: Some(group.id),
+                title: "Login".to_string(),
+                details: Some("Login spec".to_string()),
+                priority: None,
+                target_version_id: None,
+                state: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Block the feature set by feature_a
+        let updated = db
+            .update_feature(
+                group.id,
+                UpdateFeatureInput {
+                    parent_id: None,
+                    title: None,
+                    details: None,
+                    desired_details: None,
+                    details_summary: None,
+                    state: Some(FeatureState::Blocked),
+                    priority: None,
+                    target_version_id: None,
+                    blocked_by: Some(vec![feature_a.id]),
+                },
+            )
+            .await
+            .expect("Should allow blocking feature sets")
+            .expect("Feature not found");
+
+        assert_eq!(updated.state, FeatureState::Blocked);
+    }
+
+    #[tokio::test]
+    async fn find_blocked_ancestor() {
+        let db = setup().await;
+        let (project, root, feature_a, _feature_b) = setup_two_features(&db).await;
+
+        // Create a group and a child
+        let group = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root.id),
+                    title: "Blocked Group".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+        let child = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(group.id),
+                    title: "Child Feature".to_string(),
+                    details: Some("Spec".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Block the group
+        db.update_feature(
+            group.id,
+            UpdateFeatureInput {
+                parent_id: None,
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some(FeatureState::Blocked),
+                priority: None,
+                target_version_id: None,
+                blocked_by: Some(vec![feature_a.id]),
+            },
+        )
+        .await
+        .unwrap();
+
+        // find_blocked_ancestor from child should find the group
+        let ancestor = db.find_blocked_ancestor(child.id).await.unwrap();
+        assert!(ancestor.is_some());
+        let (ancestor_id, ancestor_title) = ancestor.unwrap();
+        assert_eq!(ancestor_id, group.id);
+        assert_eq!(ancestor_title, "Blocked Group");
+
+        // find_blocked_ancestor from feature_a (not blocked) should return None
+        let no_ancestor = db.find_blocked_ancestor(feature_a.id).await.unwrap();
+        assert!(no_ancestor.is_none());
     }
 }

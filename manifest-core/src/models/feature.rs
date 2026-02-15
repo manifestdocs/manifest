@@ -125,6 +125,7 @@ mod tests {
             state: Some(FeatureState::InProgress),
             priority: None,
             target_version_id: None,
+            blocked_by: None,
         };
         let json = serde_json::to_string(&input).unwrap();
         assert!(
@@ -146,6 +147,7 @@ mod tests {
             state: None,
             priority: None,
             target_version_id: Some(None),
+            blocked_by: None,
         };
         let json = serde_json::to_string(&input).unwrap();
         assert!(
@@ -168,12 +170,33 @@ mod tests {
             state: None,
             priority: None,
             target_version_id: Some(Some(VersionId::from(uuid))),
+            blocked_by: None,
         };
         let json = serde_json::to_string(&input).unwrap();
         assert!(
             json.contains(r#""target_version_id":"fb5e9bc0-6202-4617-92f0-3eb6d943bc4f""#),
             "JSON should contain the UUID, got: {}",
             json
+        );
+    }
+
+    #[test]
+    fn derive_blocked_children_treated_as_proposed() {
+        // All blocked children → no implemented/in_progress → Proposed
+        let states = vec![FeatureState::Blocked, FeatureState::Blocked];
+        assert_eq!(
+            FeatureState::derive_from_children(&states),
+            Some(FeatureState::Proposed)
+        );
+    }
+
+    #[test]
+    fn derive_mix_blocked_and_implemented() {
+        // Blocked + implemented → any_implemented = true, not all_implemented → InProgress
+        let states = vec![FeatureState::Blocked, FeatureState::Implemented];
+        assert_eq!(
+            FeatureState::derive_from_children(&states),
+            Some(FeatureState::InProgress)
         );
     }
 }
@@ -227,6 +250,7 @@ pub struct Feature {
 #[serde(rename_all = "snake_case")]
 pub enum FeatureState {
     Proposed,
+    Blocked,
     InProgress,
     Implemented,
     Archived,
@@ -236,6 +260,7 @@ impl FeatureState {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Proposed => "proposed",
+            Self::Blocked => "blocked",
             Self::InProgress => "in_progress",
             Self::Implemented => "implemented",
             Self::Archived => "archived",
@@ -275,6 +300,7 @@ impl FromStr for FeatureState {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "proposed" => Ok(Self::Proposed),
+            "blocked" => Ok(Self::Blocked),
             "in_progress" => Ok(Self::InProgress),
             "implemented" => Ok(Self::Implemented),
             "archived" => Ok(Self::Archived),
@@ -341,6 +367,10 @@ pub struct UpdateFeatureInput {
         skip_serializing_if = "Option::is_none"
     )]
     pub target_version_id: Option<Option<VersionId>>,
+    /// Feature IDs that block this feature. Required when transitioning to `blocked` state.
+    /// The feature will auto-transition back to `proposed` when all blockers are `implemented`.
+    #[serde(default)]
+    pub blocked_by: Option<Vec<FeatureId>>,
 }
 
 /// A feature with its nested children, used for tree responses.
