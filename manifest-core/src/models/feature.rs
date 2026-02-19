@@ -209,9 +209,10 @@ mod tests {
 /// can have content, but only leaf nodes can have active sessions.
 ///
 /// # Lifecycle
-/// Features progress through states: Proposed → Specified → Implemented → (Living).
-/// The "living" phase is implicit—implemented features remain active documentation
-/// until deprecated.
+/// Features progress through states: Proposed → InProgress → Implemented → (Living).
+/// Features can also be Blocked (waiting on dependencies) which auto-resolves to Proposed
+/// when all blockers are implemented. The "living" phase is implicit—implemented features
+/// remain active documentation until archived.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Feature {
     pub id: FeatureId,
@@ -243,6 +244,9 @@ pub struct Feature {
 /// The lifecycle state of a feature.
 ///
 /// - `Proposed`: Initial idea, in backlog
+/// - `Blocked`: Cannot proceed until blocker features are implemented. Only proposed features
+///   can transition to blocked, and `blocked_by` must contain at least one feature ID.
+///   Auto-transitions back to `proposed` when all blockers reach `implemented`.
 /// - `InProgress`: Actively being worked on
 /// - `Implemented`: Built and deployed (enters "living" phase)
 /// - `Archived`: Soft-deleted, kept for historical reference

@@ -126,7 +126,7 @@ Authentication/                 <- feature node with context
 
 **Permanent entities:**
 
-- **Feature**: Self-referential tree via `parent_id`. States: Proposed → InProgress → Implemented → Archived. Only leaf nodes can have sessions.
+- **Feature**: Self-referential tree via `parent_id`. States: Proposed → Blocked → InProgress → Implemented → Archived. Only leaf nodes can have sessions. Features can be `blocked` by other features via the `feature_blockers` junction table — they auto-transition to `proposed` when all blockers reach `implemented`.
 - **FeatureHistory**: Append-only log of work sessions + commit references.
 - **Project**: Container with directories, guidance settings (`ac_level`, `ac_format`).
 - **Version**: Release milestones with semantic versioning. Lifecycle: next → planned → released.
@@ -155,7 +155,7 @@ Authentication/                 <- feature node with context
 All routes prefixed with `/api/v1`:
 
 - **Projects**: CRUD at `/projects`, `/projects/{id}` + directories, features (list/create/bulk/roots/tree/next), versions, history, focus, SSE subscribe
-- **Features**: CRUD at `/features`, `/features/{id}` + children, context, diff, history
+- **Features**: CRUD at `/features`, `/features/{id}` + children, context, diff, history, blockers, blocked-ancestor
 - **Versions**: CRUD at `/versions`, `/versions/{id}` + assignment
 - **Settings**: `GET/PUT /settings`, MCP status/configure
 - **Analysis**: `GET /codebase/analyze`, filesystem browse/mkdir
