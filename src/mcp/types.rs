@@ -475,7 +475,7 @@ pub struct ProposedFeature {
 }
 
 fn default_max_depth() -> u32 {
-    3
+    0
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -483,7 +483,7 @@ pub struct RenderFeatureTreeRequest {
     #[schemars(description = "The UUID of the project to render the feature tree for")]
     pub project_id: Uuid,
     #[schemars(
-        description = "Maximum depth of the tree to render. Default is 3. Use 0 for unlimited depth."
+        description = "Maximum depth of the tree to render. Default is 0 (unlimited). Set to a positive number to limit depth."
     )]
     #[serde(default = "default_max_depth")]
     pub max_depth: u32,
