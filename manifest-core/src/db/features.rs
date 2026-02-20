@@ -23,8 +23,7 @@ impl Database {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Feature>> {
-        let mut sql =
-            format!("SELECT {FEATURE_COLS} FROM features ORDER BY priority, title");
+        let mut sql = format!("SELECT {FEATURE_COLS} FROM features ORDER BY priority, title");
         append_pagination(&mut sql, limit, offset, 1, &self.dialect);
 
         let mut q = sqlx::query(&sql);
@@ -117,8 +116,7 @@ impl Database {
                     .await?
             }
             None => {
-                let sql =
-                    format!("SELECT {FEATURE_COLS} FROM features WHERE id LIKE $1 LIMIT 2");
+                let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id LIKE $1 LIMIT 2");
                 sqlx::query(&sql)
                     .bind(&pattern)
                     .fetch_all(&self.pool)
@@ -144,10 +142,7 @@ impl Database {
     ///
     /// Parses the display ID into a key prefix and feature number, then looks up
     /// the project by key_prefix and the feature by project_id + feature_number.
-    pub async fn resolve_feature_by_display_id(
-        &self,
-        display_id: &str,
-    ) -> Result<Option<Feature>> {
+    pub async fn resolve_feature_by_display_id(&self, display_id: &str) -> Result<Option<Feature>> {
         // Parse "PREFIX-NUMBER" format
         let Some((prefix, number_str)) = display_id.rsplit_once('-') else {
             return Ok(None);
@@ -158,12 +153,11 @@ impl Database {
         let prefix_upper = prefix.to_ascii_uppercase();
 
         // Look up project by key_prefix (case-insensitive via UPPER)
-        let project_id: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM projects WHERE UPPER(key_prefix) = $1",
-        )
-        .bind(&prefix_upper)
-        .fetch_optional(&self.pool)
-        .await?;
+        let project_id: Option<String> =
+            sqlx::query_scalar("SELECT id FROM projects WHERE UPPER(key_prefix) = $1")
+                .bind(&prefix_upper)
+                .fetch_optional(&self.pool)
+                .await?;
 
         let Some(project_id) = project_id else {
             return Ok(None);
@@ -480,10 +474,9 @@ impl Database {
                 // Validate: no self-references, all in same project
                 for bid in blocker_ids {
                     if *bid == id {
-                        return Err(ManifestError::validation(
-                            "A feature cannot block itself.",
-                        )
-                        .into());
+                        return Err(
+                            ManifestError::validation("A feature cannot block itself.").into()
+                        );
                     }
                 }
                 let blocker_id_strs: Vec<String> =
@@ -721,10 +714,13 @@ impl Database {
 
         // Collect all feature IDs and query for children states in one batch
         let ids: Vec<String> = features.iter().map(|f| f.id.to_string()).collect();
-        let placeholders: String = ids.iter().map(|id| format!("'{}'", id)).collect::<Vec<_>>().join(", ");
-        let sql = format!(
-            "SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})"
-        );
+        let placeholders: String = ids
+            .iter()
+            .map(|id| format!("'{}'", id))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql =
+            format!("SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})");
 
         let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
 
@@ -788,10 +784,13 @@ impl Database {
         }
 
         let ids: Vec<String> = features.iter().map(|f| f.id.to_string()).collect();
-        let placeholders: String = ids.iter().map(|id| format!("'{}'", id)).collect::<Vec<_>>().join(", ");
-        let sql = format!(
-            "SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})"
-        );
+        let placeholders: String = ids
+            .iter()
+            .map(|id| format!("'{}'", id))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql =
+            format!("SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})");
 
         let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
 
@@ -862,8 +861,10 @@ impl Database {
             }
         };
 
-        let mut summaries: Vec<FeatureSummary> =
-            rows.iter().map(row_to_feature_summary).collect::<Result<_>>()?;
+        let mut summaries: Vec<FeatureSummary> = rows
+            .iter()
+            .map(row_to_feature_summary)
+            .collect::<Result<_>>()?;
         self.resolve_derived_states_summary(&mut summaries).await?;
         Ok(summaries)
     }

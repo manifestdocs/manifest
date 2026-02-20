@@ -48,9 +48,7 @@ impl Database {
 
         // Generate slug from name if not provided
         let slug = input.slug.unwrap_or_else(|| slugify(&input.name));
-        let key_prefix = input
-            .key_prefix
-            .unwrap_or_else(|| derive_key_prefix(&slug));
+        let key_prefix = input.key_prefix.unwrap_or_else(|| derive_key_prefix(&slug));
 
         let mut tx = self.pool.begin().await?;
 

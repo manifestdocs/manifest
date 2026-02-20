@@ -22,7 +22,9 @@ impl Database {
 
     /// Get all versions for a project, ordered by creation date.
     pub async fn get_versions_by_project(&self, project_id: ProjectId) -> Result<Vec<Version>> {
-        let sql = format!("SELECT {VERSION_COLS} FROM versions WHERE project_id = $1 ORDER BY created_at");
+        let sql = format!(
+            "SELECT {VERSION_COLS} FROM versions WHERE project_id = $1 ORDER BY created_at"
+        );
         let rows = sqlx::query(&sql)
             .bind(project_id.to_string())
             .fetch_all(&self.pool)

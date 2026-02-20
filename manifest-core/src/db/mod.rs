@@ -157,7 +157,6 @@ impl ManifestError {
     pub fn invalid_state(msg: impl Into<String>) -> Self {
         ManifestError::InvalidState(msg.into())
     }
-
 }
 
 const EVENT_CHANNEL_CAPACITY: usize = 16;
@@ -908,11 +907,10 @@ impl Database {
     async fn migrate_add_blocked_state(&self) -> Result<()> {
         // Check if feature_blockers table already exists (indicates migration was applied)
         let has_blockers_table = {
-            let count: i64 =
-                sqlx::query_scalar(&self.dialect.table_exists_sql("feature_blockers"))
-                    .fetch_one(&self.pool)
-                    .await
-                    .unwrap_or(0);
+            let count: i64 = sqlx::query_scalar(&self.dialect.table_exists_sql("feature_blockers"))
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
             count > 0
         };
 
