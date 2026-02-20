@@ -6,10 +6,13 @@
 
 use axum::http::StatusCode;
 use axum_test::{TestServer, TestServerConfig, Transport};
-use manifest::api::{create_router, create_router_with_config, SecurityConfig};
+use manifest::api::{
+    create_router, create_router_with_config, create_router_with_config_and_terminal,
+    create_router_with_terminal, SecurityConfig,
+};
 use manifest::db::Database;
 
-/// Standard setup — no API key, mock transport (fine for REST endpoints).
+/// Standard setup — no API key, mock transport, terminal disabled (production default).
 async fn setup() -> TestServer {
     let db = Database::open_memory()
         .await
@@ -19,13 +22,23 @@ async fn setup() -> TestServer {
     TestServer::new(app).expect("Failed to create test server")
 }
 
-/// Setup with real HTTP transport — required for WebSocket upgrade tests.
+/// Standard setup with terminal enabled — for testing terminal-specific endpoints.
+async fn setup_terminal() -> TestServer {
+    let db = Database::open_memory()
+        .await
+        .expect("Failed to create database");
+    db.migrate().await.expect("Failed to migrate");
+    let app = create_router_with_terminal(db);
+    TestServer::new(app).expect("Failed to create test server")
+}
+
+/// Setup with real HTTP transport and terminal enabled — required for WebSocket upgrade tests.
 async fn setup_http() -> TestServer {
     let db = Database::open_memory()
         .await
         .expect("Failed to create database");
     db.migrate().await.expect("Failed to migrate");
-    let app = create_router(db);
+    let app = create_router_with_terminal(db);
     let config = TestServerConfig {
         transport: Some(Transport::HttpRandomPort),
         ..Default::default()
@@ -33,25 +46,25 @@ async fn setup_http() -> TestServer {
     TestServer::new_with_config(app, config).expect("Failed to create test server")
 }
 
-/// Setup with API key auth, mock transport.
+/// Setup with API key auth and terminal enabled, mock transport.
 async fn setup_with_auth(api_key: &str) -> TestServer {
     let db = Database::open_memory()
         .await
         .expect("Failed to create database");
     db.migrate().await.expect("Failed to migrate");
     let config = SecurityConfig::with_api_key(api_key);
-    let app = create_router_with_config(db, config);
+    let app = create_router_with_config_and_terminal(db, config);
     TestServer::new(app).expect("Failed to create test server")
 }
 
-/// Setup with API key auth and real HTTP transport.
+/// Setup with API key auth, terminal enabled, and real HTTP transport.
 async fn setup_http_with_auth(api_key: &str) -> TestServer {
     let db = Database::open_memory()
         .await
         .expect("Failed to create database");
     db.migrate().await.expect("Failed to migrate");
     let config = SecurityConfig::with_api_key(api_key);
-    let app = create_router_with_config(db, config);
+    let app = create_router_with_config_and_terminal(db, config);
     let test_config = TestServerConfig {
         transport: Some(Transport::HttpRandomPort),
         ..Default::default()
@@ -59,7 +72,7 @@ async fn setup_http_with_auth(api_key: &str) -> TestServer {
     TestServer::new_with_config(app, test_config).expect("Failed to create test server")
 }
 
-/// Fetch the connection token from the token endpoint.
+/// Fetch the connection token from the token endpoint (terminal must be enabled).
 async fn fetch_token(server: &TestServer) -> String {
     let response = server.get("/api/v1/terminal/token").await;
     response.assert_status_ok();
@@ -71,7 +84,24 @@ async fn fetch_token(server: &TestServer) -> String {
 }
 
 // ============================================================
-// Token endpoint
+// Terminal disabled by default
+// ============================================================
+
+mod terminal_disabled {
+    use super::*;
+
+    #[tokio::test]
+    async fn token_endpoint_returns_404_when_disabled() {
+        let server = setup().await;
+
+        let response = server.get("/api/v1/terminal/token").expect_failure().await;
+
+        response.assert_status(StatusCode::NOT_FOUND);
+    }
+}
+
+// ============================================================
+// Token endpoint (terminal enabled)
 // ============================================================
 
 mod token_endpoint {
@@ -79,7 +109,7 @@ mod token_endpoint {
 
     #[tokio::test]
     async fn returns_token_as_json() {
-        let server = setup().await;
+        let server = setup_terminal().await;
 
         let response = server.get("/api/v1/terminal/token").await;
 
@@ -91,7 +121,7 @@ mod token_endpoint {
 
     #[tokio::test]
     async fn returns_stable_token_across_calls() {
-        let server = setup().await;
+        let server = setup_terminal().await;
 
         let token1 = fetch_token(&server).await;
         let token2 = fetch_token(&server).await;

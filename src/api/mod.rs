@@ -21,6 +21,7 @@ use tower_http::{cors::CorsLayer, set_header::SetResponseHeaderLayer, trace::Tra
 use crate::assets::static_handler;
 use crate::db::Database;
 use crate::mcp;
+use manifest_core::config::ServerConfig;
 
 pub use auth::{AuthContext, AuthError, AuthMethod};
 pub use middleware::SecurityConfig;
@@ -141,8 +142,24 @@ pub fn create_router(db: Database) -> Router {
     create_router_with_config(db, SecurityConfig::from_env())
 }
 
+/// Create the API router with terminal explicitly enabled (for tests).
+pub fn create_router_with_terminal(db: Database) -> Router {
+    create_router_inner(db, SecurityConfig::from_env(), true)
+}
+
+/// Create the API router with terminal enabled and custom security config (for tests).
+pub fn create_router_with_config_and_terminal(db: Database, config: SecurityConfig) -> Router {
+    create_router_inner(db, config, true)
+}
+
 /// Create the API router with custom security configuration.
 pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router {
+    let server_config = ServerConfig::load().unwrap_or_default();
+    create_router_inner(db, config, server_config.is_terminal_enabled())
+}
+
+fn create_router_inner(db: Database, config: SecurityConfig, terminal_enabled: bool) -> Router {
+    let app_state = AppState::new(db.clone(), terminal_enabled);
     // Public endpoints (unauthenticated)
     let public_router = Router::new()
         .route("/health", get(handlers::health))
@@ -290,7 +307,7 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
 
     let router = Router::new()
         .nest("/api/v1", api)
-        .with_state(db)
+        .with_state(app_state)
         .nest("/mcp", mcp_router)
         // Inject resolved origins for terminal WS handler (must be after with_state)
         .layer(axum::Extension(handlers::terminal::AllowedOrigins(

@@ -15,7 +15,7 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query,
+        Query, State,
     },
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
@@ -25,6 +25,7 @@ use futures_util::{SinkExt, StreamExt};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Deserialize;
 use std::io::{Read, Write};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -106,8 +107,14 @@ pub(crate) fn is_origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool
 ///
 /// This endpoint is protected by CORS (only allowed origins can fetch it)
 /// and by auth middleware when `MANIFEST_API_KEY` is set.
-pub async fn terminal_token_handler() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "token": connection_token() }))
+/// Returns 404 when the terminal is disabled.
+pub async fn terminal_token_handler(
+    State(state): State<crate::api::AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !state.terminal_enabled.load(Ordering::Relaxed) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(Json(serde_json::json!({ "token": connection_token() })))
 }
 
 /// Newtype for injecting resolved allowed origins via Extension layer.
@@ -117,12 +124,18 @@ pub struct AllowedOrigins(pub Arc<Vec<String>>);
 /// WebSocket endpoint: `/api/v1/terminal/ws?cwd=/path/to/dir&token=<token>`
 ///
 /// Validates the connection token and Origin header before upgrading.
+/// Returns 404 when the terminal is disabled.
 pub async fn ws_terminal_handler(
+    State(state): State<crate::api::AppState>,
     headers: HeaderMap,
     axum::Extension(origins): axum::Extension<AllowedOrigins>,
     ws: WebSocketUpgrade,
     Query(params): Query<TerminalParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !state.terminal_enabled.load(Ordering::Relaxed) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
     // Validate connection token
     match &params.token {
         Some(t) if t == connection_token() => {}

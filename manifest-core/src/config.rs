@@ -17,6 +17,10 @@ pub struct ServerConfig {
     /// CLI agent to use for chat (claude, gemini, copilot). Defaults to "claude".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_agent: Option<String>,
+
+    /// Whether the web terminal is enabled. Defaults to false (disabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_enabled: Option<bool>,
 }
 
 impl ServerConfig {
@@ -42,6 +46,11 @@ impl ServerConfig {
         Ok(())
     }
 
+    /// Returns whether the terminal is enabled (defaults to false).
+    pub fn is_terminal_enabled(&self) -> bool {
+        self.terminal_enabled.unwrap_or(false)
+    }
+
     /// Returns the path to the config file.
     pub fn config_path() -> Result<PathBuf> {
         let dirs = directories::ProjectDirs::from("", "", "manifest")
@@ -59,6 +68,22 @@ mod tests {
         let config = ServerConfig::default();
         assert!(config.database_path.is_none());
         assert!(config.default_agent.is_none());
+        assert!(config.terminal_enabled.is_none());
+    }
+
+    #[test]
+    fn terminal_disabled_by_default() {
+        let config = ServerConfig::default();
+        assert!(!config.is_terminal_enabled());
+    }
+
+    #[test]
+    fn terminal_enabled_when_set() {
+        let config = ServerConfig {
+            terminal_enabled: Some(true),
+            ..Default::default()
+        };
+        assert!(config.is_terminal_enabled());
     }
 
     #[test]
@@ -66,6 +91,7 @@ mod tests {
         let config = ServerConfig {
             database_path: Some("/tmp/test.db".into()),
             default_agent: Some("claude".into()),
+            terminal_enabled: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         let parsed: ServerConfig = serde_json::from_str(&json).unwrap();
@@ -78,6 +104,7 @@ mod tests {
         let config = ServerConfig {
             database_path: None,
             default_agent: Some("gemini".into()),
+            terminal_enabled: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         // database_path should be omitted, default_agent present
