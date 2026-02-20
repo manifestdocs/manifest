@@ -222,24 +222,26 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: claude-plugins
 
-      - name: Update plugin version and copy
+      - name: Update plugin version
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION_NUM="${VERSION#v}"
 
-          # Update plugin.json version
+          # Update version in manifest-plugin repo
           cd manifest-plugin
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION_NUM}\"/" plugin.json
-          cd ..
-
-          # Copy plugin to claude-plugins repo
-          cd claude-plugins
-          rm -rf manifest
-          cp -r ../manifest-plugin manifest
-
-          # Commit and push
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION_NUM}\"/" .claude-plugin/plugin.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add manifest
-          git commit -m "Update manifest plugin to ${VERSION}" || echo "No changes to commit"
+          git add .claude-plugin/plugin.json
+          git commit -m "Bump version to ${VERSION_NUM}" || echo "No changes to commit"
+          git push
+          cd ..
+
+          # Update version in claude-plugins marketplace
+          cd claude-plugins
+          sed -i '/"name": "manifest"/,/}/ s/"version": "[^"]*"/"version": "'"${VERSION_NUM}"'"/' .claude-plugin/marketplace.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .claude-plugin/marketplace.json
+          git commit -m "Update manifest to ${VERSION_NUM}" || echo "No changes to commit"
           git push
