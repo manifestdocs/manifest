@@ -17,10 +17,15 @@ use super::types::{
 };
 use super::ManifestClient;
 use rmcp::{
-    handler::server::{tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, ServerInfo},
-    tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
+    handler::server::{
+        tool::{ToolCallContext, ToolRouter},
+        wrapper::Parameters,
+    },
+    model::{CallToolResult, Content, ListToolsResult, ServerInfo},
+    service::RequestContext,
+    tool, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
+use std::sync::{Arc, OnceLock};
 
 // ============================================================
 // Server Implementation
@@ -29,13 +34,27 @@ use rmcp::{
 pub struct McpServer {
     client: ManifestClient,
     tool_router: ToolRouter<Self>,
+    /// Populated by a background task with an update notice if a newer
+    /// version is available, or `None` if the server is up-to-date.
+    update_notice: Arc<OnceLock<Option<String>>>,
 }
 
 impl McpServer {
     pub fn new(client: ManifestClient) -> Self {
+        let update_notice = Arc::new(OnceLock::new());
+
+        // Spawn a background task to check for updates. The notice is
+        // appended to tool responses once the check completes.
+        let cell = Arc::clone(&update_notice);
+        tokio::spawn(async move {
+            let notice = super::version_check::check_for_update().await;
+            let _ = cell.set(notice);
+        });
+
         Self {
             client,
             tool_router: Self::tool_router(),
+            update_notice,
         }
     }
 
@@ -273,7 +292,6 @@ impl McpServer {
     }
 }
 
-#[tool_handler]
 impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
@@ -290,6 +308,34 @@ impl ServerHandler for McpServer {
             instructions: Some(INSTRUCTIONS.into()),
             ..Default::default()
         }
+    }
+
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParam,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let tcc = ToolCallContext::new(self, request, context);
+        let mut result = self.tool_router.call(tcc).await?;
+
+        // Append update notice once the background check has completed
+        if let Some(Some(notice)) = self.update_notice.get() {
+            result.content.push(Content::text(notice));
+        }
+
+        Ok(result)
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        Ok(ListToolsResult {
+            tools: self.tool_router.list_all(),
+            meta: None,
+            next_cursor: None,
+        })
     }
 }
 

@@ -6,6 +6,7 @@ mod server;
 mod tools;
 mod tree_render;
 mod types;
+pub mod version_check;
 
 pub use client::ManifestClient;
 pub use server::McpServer;
