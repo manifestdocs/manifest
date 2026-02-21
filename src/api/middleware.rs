@@ -81,13 +81,19 @@ impl SecurityConfig {
     /// Return the resolved list of allowed origins.
     ///
     /// If `MANIFEST_CORS_ORIGINS` was set, uses those. Otherwise falls back
-    /// to the default production + dev origins from terminal config.
+    /// to the default localhost origins.
     pub fn resolved_origins(&self) -> Vec<String> {
         if let Some(ref custom) = self.cors_origins {
             custom.clone()
         } else {
-            use crate::api::handlers::terminal::allowed_origins;
-            allowed_origins().iter().map(|s| s.to_string()).collect()
+            vec![
+                "http://localhost:5173".to_string(),
+                "http://localhost:5174".to_string(),
+                "http://localhost:17010".to_string(),
+                "http://127.0.0.1:5173".to_string(),
+                "http://127.0.0.1:5174".to_string(),
+                "http://127.0.0.1:17010".to_string(),
+            ]
         }
     }
 

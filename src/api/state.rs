@@ -5,8 +5,7 @@
 //! - `CurrentUser`: A synthetic local user (authentication is optional in self-hosted mode)
 
 use axum::extract::FromRef;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 use uuid::Uuid;
 
 use crate::db::Database;
@@ -24,17 +23,12 @@ static LOCAL_USER_ID: LazyLock<UserId> = LazyLock::new(|| {
 pub struct AppState {
     /// Database connection pool.
     pub db: Database,
-    /// Whether the web terminal is enabled (runtime toggle).
-    pub terminal_enabled: Arc<AtomicBool>,
 }
 
 impl AppState {
     /// Create application state.
-    pub fn new(db: Database, terminal_enabled: bool) -> Self {
-        Self {
-            db,
-            terminal_enabled: Arc::new(AtomicBool::new(terminal_enabled)),
-        }
+    pub fn new(db: Database) -> Self {
+        Self { db }
     }
 }
 

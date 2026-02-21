@@ -4,7 +4,6 @@ mod filesystem;
 mod health;
 mod projects;
 mod settings;
-pub mod terminal;
 mod versions;
 
 pub use analysis::*;

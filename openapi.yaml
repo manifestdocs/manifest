@@ -280,6 +280,59 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /projects/{id}/focus:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Projects]
+      summary: Get focused feature for project
+      description: Returns the currently focused feature for the project (used by MCP agents to know what the user is looking at).
+      operationId: getProjectFocus
+      responses:
+        '200':
+          description: Focused feature info
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [feature_id, feature_title, feature_state]
+                properties:
+                  feature_id:
+                    type: string
+                    format: uuid
+                  feature_title:
+                    type: string
+                  feature_state:
+                    type: string
+        '404':
+          description: No feature is focused
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+    put:
+      tags: [Projects]
+      summary: Set or clear focused feature for project
+      operationId: setProjectFocus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                feature_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Feature ID to focus on, or null to clear focus.
+      responses:
+        '204':
+          description: Focus updated
+
   /projects/{id}/history:
     parameters:
       - $ref: '#/components/parameters/ProjectId'

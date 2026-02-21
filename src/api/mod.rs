@@ -5,7 +5,7 @@ mod middleware;
 pub mod state;
 pub mod validation;
 
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use axum::{
     extract::DefaultBodyLimit,
@@ -21,7 +21,6 @@ use tower_http::{cors::CorsLayer, set_header::SetResponseHeaderLayer, trace::Tra
 use crate::assets::static_handler;
 use crate::db::Database;
 use crate::mcp;
-use manifest_core::config::ServerConfig;
 
 pub use auth::{AuthContext, AuthError, AuthMethod};
 pub use middleware::SecurityConfig;
@@ -142,24 +141,13 @@ pub fn create_router(db: Database) -> Router {
     create_router_with_config(db, SecurityConfig::from_env())
 }
 
-/// Create the API router with terminal explicitly enabled (for tests).
-pub fn create_router_with_terminal(db: Database) -> Router {
-    create_router_inner(db, SecurityConfig::from_env(), true)
-}
-
-/// Create the API router with terminal enabled and custom security config (for tests).
-pub fn create_router_with_config_and_terminal(db: Database, config: SecurityConfig) -> Router {
-    create_router_inner(db, config, true)
-}
-
 /// Create the API router with custom security configuration.
 pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router {
-    let server_config = ServerConfig::load().unwrap_or_default();
-    create_router_inner(db, config, server_config.is_terminal_enabled())
+    create_router_inner(db, config)
 }
 
-fn create_router_inner(db: Database, config: SecurityConfig, terminal_enabled: bool) -> Router {
-    let app_state = AppState::new(db.clone(), terminal_enabled);
+fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
+    let app_state = AppState::new(db.clone());
     // Public endpoints (unauthenticated)
     let public_router = Router::new()
         .route("/health", get(handlers::health))
@@ -269,13 +257,7 @@ fn create_router_inner(db: Database, config: SecurityConfig, terminal_enabled: b
             get(handlers::get_settings).put(handlers::update_settings),
         )
         .route("/settings/mcp-status", get(handlers::check_mcp_status))
-        .route("/settings/configure-mcp", post(handlers::configure_mcp))
-        // Terminal — connection token + WebSocket (behind auth when API key is set)
-        .route(
-            "/terminal/token",
-            get(handlers::terminal::terminal_token_handler),
-        )
-        .route("/terminal/ws", get(handlers::terminal::ws_terminal_handler));
+        .route("/settings/configure-mcp", post(handlers::configure_mcp));
 
     // Apply auth middleware to protected routes if API key is configured
     let protected_api = apply_auth_layer(protected_api, &config);
@@ -302,17 +284,10 @@ fn create_router_inner(db: Database, config: SecurityConfig, terminal_enabled: b
     // Apply auth middleware to MCP router if API key is configured
     let mcp_router = apply_auth_layer(mcp_router, &config);
 
-    // Resolve allowed origins once for CORS + terminal origin check
-    let resolved_origins = Arc::new(config.resolved_origins());
-
     let router = Router::new()
         .nest("/api/v1", api)
         .with_state(app_state)
-        .nest("/mcp", mcp_router)
-        // Inject resolved origins for terminal WS handler (must be after with_state)
-        .layer(axum::Extension(handlers::terminal::AllowedOrigins(
-            resolved_origins,
-        )));
+        .nest("/mcp", mcp_router);
 
     #[cfg(feature = "embed-web")]
     let router = router.fallback(static_handler);

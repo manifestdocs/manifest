@@ -1,12 +1,10 @@
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{http::StatusCode, response::IntoResponse, Json};
 use manifest_core::config::ServerConfig;
 
 use super::ApiError;
 use crate::api::config::PathRestrictions;
-use crate::api::AppState;
 
 /// GET /api/v1/settings — returns current server configuration.
 pub async fn get_settings() -> impl IntoResponse {
@@ -26,14 +24,12 @@ pub async fn get_settings() -> impl IntoResponse {
         "database_path_resolved": resolved,
         "config_file": config_file,
         "default_agent": default_agent,
-        "terminal_enabled": config.is_terminal_enabled(),
     }))
 }
 
 /// PUT /api/v1/settings — updates server configuration.
 /// If the database path changes, triggers a server restart.
 pub async fn update_settings(
-    State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, ApiError> {
     let new_db_path = body
@@ -68,22 +64,6 @@ pub async fn update_settings(
             return Err(ApiError::from((
                 StatusCode::BAD_REQUEST,
                 "default_agent must be a string".to_string(),
-            )));
-        }
-    } else {
-        None // Not provided in request, leave unchanged
-    };
-
-    // Parse terminal_enabled if provided
-    let new_terminal_enabled = if let Some(val) = body.get("terminal_enabled") {
-        if val.is_null() {
-            Some(None) // Reset to default (disabled)
-        } else if let Some(enabled) = val.as_bool() {
-            Some(Some(enabled))
-        } else {
-            return Err(ApiError::from((
-                StatusCode::BAD_REQUEST,
-                "terminal_enabled must be a boolean".to_string(),
             )));
         }
     } else {
@@ -131,15 +111,6 @@ pub async fn update_settings(
         config.default_agent = agent;
     }
 
-    // Update terminal_enabled if provided in the request
-    if let Some(enabled) = new_terminal_enabled {
-        config.terminal_enabled = enabled;
-        // Flip the runtime flag so it takes effect immediately (no restart needed)
-        state
-            .terminal_enabled
-            .store(config.is_terminal_enabled(), Ordering::Relaxed);
-    }
-
     config.save().map_err(|e| {
         tracing::error!("Failed to save config: {:?}", e);
         ApiError::from((
@@ -161,7 +132,6 @@ pub async fn update_settings(
         "database_path_resolved": resolved,
         "config_file": config_file,
         "default_agent": default_agent,
-        "terminal_enabled": config.is_terminal_enabled(),
         "restart_required": path_changed,
     });
 
