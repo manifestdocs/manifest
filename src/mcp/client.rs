@@ -186,7 +186,6 @@ impl ManifestClient {
         feature_id: Uuid,
         summary: &str,
         commits: &[CommitRef],
-        mark_implemented: bool,
     ) -> Result<FeatureHistory, ClientError> {
         let response = self
             .request(
@@ -196,7 +195,6 @@ impl ManifestClient {
             .json(&serde_json::json!({
                 "summary": summary,
                 "commits": commits,
-                "mark_implemented": mark_implemented
             }))
             .send()
             .await?;

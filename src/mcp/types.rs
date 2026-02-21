@@ -29,9 +29,6 @@ pub struct CompleteFeatureRequest {
     #[schemars(description = "Git commits created during this work")]
     #[serde(default)]
     pub commits: Vec<CommitRefInput>,
-    #[schemars(description = "Whether to mark the feature as 'implemented'. Defaults to true.")]
-    #[serde(default = "default_true")]
-    pub mark_implemented: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -1441,10 +1441,6 @@ components:
           format: uuid
           nullable: true
           description: Version this work was done for (defaults to feature's target_version_id if not specified)
-        mark_implemented:
-          type: boolean
-          default: false
-          description: If true, also transitions the feature to 'implemented' state
 
     CommitRef:
       type: object

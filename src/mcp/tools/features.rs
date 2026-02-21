@@ -732,7 +732,7 @@ pub async fn complete_feature(
 
     // Create history entry directly (no session)
     let history = client
-        .create_feature_history(feature_id, &req.summary, &commits, req.mark_implemented)
+        .create_feature_history(feature_id, &req.summary, &commits)
         .await
         .map_err(client_err)?;
 

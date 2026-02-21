@@ -20,7 +20,6 @@ use crate::models::{
 
 use super::{internal_error, ApiError};
 use crate::api::validation::{ValidatedJson, MAX_BULK_FEATURES};
-use crate::serde_helpers::default_true;
 
 // ============================================================
 // Features
@@ -150,9 +149,6 @@ pub struct CreateFeatureHistoryInput {
     /// Version this work was done for.
     /// If not specified, defaults to the feature's target_version_id.
     pub version_id: Option<Uuid>,
-    /// If true, also update feature state to 'implemented'. Defaults to true.
-    #[serde(default = "default_true")]
-    pub mark_implemented: bool,
 }
 
 /// Create a history entry directly on a feature.
@@ -196,11 +192,11 @@ pub async fn create_feature_history(
         .await
         .map_err(internal_error)?;
 
-    // Optionally update feature state to implemented and clear desired_details
-    let needs_state_change = input.mark_implemented && feature.state != FeatureState::Implemented;
+    // Update feature state to implemented and clear desired_details
+    let needs_state_change = feature.state != FeatureState::Implemented;
     let has_pending_changes = feature.desired_details.is_some();
 
-    if needs_state_change || (input.mark_implemented && has_pending_changes) {
+    if needs_state_change || has_pending_changes {
         db.update_feature(
             feature_id.into(),
             UpdateFeatureInput {
