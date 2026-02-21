@@ -155,7 +155,8 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
         .route(
             "/projects/{id}/subscribe",
             get(handlers::subscribe_project_features),
-        );
+        )
+        .route("/portfolio/events", get(handlers::subscribe_portfolio));
 
     // Protected API routes
     let protected_api = Router::new()
@@ -251,6 +252,8 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
             "/features/{id}/history",
             get(handlers::get_feature_history).post(handlers::create_feature_history),
         )
+        // Portfolio
+        .route("/portfolio", get(handlers::get_portfolio))
         // Server settings
         .route(
             "/settings",

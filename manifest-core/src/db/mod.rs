@@ -10,6 +10,7 @@ use crate::models::ProjectId;
 mod features;
 mod helpers;
 mod history;
+mod portfolio;
 mod projects;
 mod users;
 mod versions;

@@ -38,8 +38,48 @@ tags:
     description: Local filesystem browsing for directory selection
   - name: Health
     description: Server health checks
+  - name: Portfolio
+    description: Multi-project dashboard — aggregated health snapshots for all projects
 
 paths:
+  /portfolio:
+    get:
+      tags: [Portfolio]
+      summary: Get portfolio snapshot
+      description: |
+        Returns an aggregated health snapshot for all projects in a single call.
+        Designed for the Portfolio View — shows next version progress, next proposed
+        feature, in-progress features (capped at 5), blocked features, and recent
+        completions (last 7 days) for each project.
+      operationId: getPortfolio
+      responses:
+        '200':
+          description: Portfolio snapshot for all projects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Portfolio'
+
+  /portfolio/events:
+    get:
+      tags: [Portfolio]
+      summary: Subscribe to portfolio change events (SSE)
+      description: |
+        Server-sent event stream that fires a `change` event whenever any feature
+        in any project is modified. The client should re-fetch `GET /portfolio` on
+        each event. No payload is included — the data endpoint does the work.
+
+        Reuses the same global broadcast channel as the per-project SSE streams.
+        One connection covers all projects regardless of how many exist.
+      operationId: subscribePortfolio
+      responses:
+        '200':
+          description: SSE stream of portfolio change events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
   /health:
     get:
       tags: [Health]
@@ -1643,3 +1683,119 @@ components:
           type: string
           description: Error message
           example: 'Path must be absolute'
+
+    # ============================================================
+    # Portfolio schemas
+    # ============================================================
+
+    PortfolioFeatureRef:
+      type: object
+      required: [id, title]
+      description: A minimal feature reference used in portfolio lanes.
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+
+    PortfolioVersionSummary:
+      type: object
+      required: [id, name, feature_count, implemented_count]
+      description: Version progress summary for the portfolio lane header.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: 'v0.2.0'
+        feature_count:
+          type: integer
+          description: Total leaf features assigned to this version.
+        implemented_count:
+          type: integer
+          description: Leaf features in this version with state `implemented`.
+
+    PortfolioNextFeature:
+      type: object
+      required: [id, title, in_version]
+      description: The single next actionable feature for a project.
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        in_version:
+          type: boolean
+          description: Whether this feature is assigned to the next version (vs backlog).
+
+    PortfolioCompletion:
+      type: object
+      required: [id, title, completed_at]
+      description: A recent feature completion for the activity section.
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        completed_at:
+          type: string
+          format: date-time
+
+    PortfolioProject:
+      type: object
+      required: [id, name, slug, in_progress, in_progress_total, blocked, blocked_count, recent_completions]
+      description: Aggregated health snapshot for a single project in the portfolio view.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        next_version:
+          $ref: '#/components/schemas/PortfolioVersionSummary'
+          nullable: true
+        next_feature:
+          $ref: '#/components/schemas/PortfolioNextFeature'
+          nullable: true
+        in_progress:
+          type: array
+          description: Up to 5 in-progress leaf features.
+          items:
+            $ref: '#/components/schemas/PortfolioFeatureRef'
+        in_progress_total:
+          type: integer
+          description: Total count of in-progress leaf features (may exceed in_progress.length).
+        blocked:
+          type: array
+          description: All blocked leaf features.
+          items:
+            $ref: '#/components/schemas/PortfolioFeatureRef'
+        blocked_count:
+          type: integer
+          description: Total count of blocked leaf features.
+        recent_completions:
+          type: array
+          description: Up to 5 features completed in the last 7 days, newest-first.
+          items:
+            $ref: '#/components/schemas/PortfolioCompletion'
+        last_activity_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of the most recent completion (for stalled detection).
+
+    Portfolio:
+      type: object
+      required: [projects]
+      description: Full portfolio response — health snapshots for all projects.
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortfolioProject'
