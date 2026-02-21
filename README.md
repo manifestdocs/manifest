@@ -109,6 +109,41 @@ Restart Windsurf after saving.
 
 ---
 
+#### Codex CLI
+
+Add via CLI:
+
+```bash
+codex mcp add manifest -- manifest mcp
+```
+
+Or edit `~/.codex/config.toml` manually:
+
+```toml
+[mcp_servers.manifest]
+command = "manifest"
+args = ["mcp"]
+```
+
+---
+
+#### Gemini CLI
+
+Edit `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "manifest": {
+      "command": "manifest",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+---
+
 ### Verify Installation
 
 After configuring your coding agent, verify the MCP server is working:
@@ -171,7 +206,7 @@ Run this inside Claude Code for slash commands:
 
 | Concept     | Description                                                                                                                                             |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Feature** | A capability of the system, organized in a hierarchical tree. Features progress through states: `proposed` → `specified` → `implemented` → `deprecated` |
+| **Feature** | A capability of the system, organized in a hierarchical tree. Features progress through states: `proposed` → `in_progress` → `implemented` → `archived`. Features can also be `blocked` when they depend on other features. |
 | **Session** | A work session on a leaf feature. Only one active session per feature at a time. When completed, creates a history entry.                               |
 | **Task**    | A unit of work within a session, assigned to an AI agent. Small enough for one agent (1-3 story points).                                                |
 | **History** | Append-only log of implementation sessions—like `git log` for a feature                                                                                 |
@@ -220,6 +255,18 @@ Add Manifest as an MCP server to your CLI agent:
 
 ```bash
 claude mcp add manifest -- manifest mcp
+```
+
+### Gemini CLI
+
+```bash
+gemini mcp add manifest manifest mcp --scope user
+```
+
+### Codex CLI
+
+```bash
+codex mcp add manifest -- manifest mcp
 ```
 
 ### Goose
@@ -515,12 +562,15 @@ Features are living documentation. Unlike issues that are "closed and forgotten,
 
 ### Feature States
 
-| State         | Description                                     |
-| ------------- | ----------------------------------------------- |
-| `proposed`    | Initial idea, not yet fully specified           |
-| `specified`   | Requirements defined, ready for implementation  |
-| `implemented` | Built and deployed (enters "living" phase)      |
-| `deprecated`  | No longer active, kept for historical reference |
+| State           | Description                                                        |
+| --------------- | ------------------------------------------------------------------ |
+| `proposed`      | Idea in the backlog, not yet started                               |
+| `blocked`       | Waiting on other features to be implemented first                  |
+| `in_progress`   | Currently being worked on                                          |
+| `implemented`   | Complete and documented (enters "living" phase)                    |
+| `archived`      | No longer active, can be restored                                  |
+
+Blocked features specify their dependencies via `blocked_by`. When all blocking features reach `implemented`, the blocked feature automatically transitions back to `proposed`.
 
 ### Task States
 
