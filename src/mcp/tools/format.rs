@@ -203,8 +203,9 @@ pub fn time_bucket(datetime: &DateTime<Utc>) -> String {
 /// Mirrors the web app's Activity tab layout:
 /// - Time bucket headers as horizontal rule labels
 /// - Release entries shown as `🏷 Released v0.2.0`
-/// - Regular entries: state icon + feature title + headline + commit SHAs
-/// - Headlines only (body omitted for compact display, matching web's collapsed default)
+/// - Regular entries: state icon + feature title + separator + headline + commit SHAs
+/// - Body (decisions, tradeoffs) shown indented below headline — always expanded in CLI
+///   since there is no interactive expand/collapse
 pub fn render_activity_timeline(entries: &[ProjectHistoryEntry]) -> String {
     if entries.is_empty() {
         return "No activity recorded yet.".to_string();
@@ -237,40 +238,55 @@ pub fn render_activity_timeline(entries: &[ProjectHistoryEntry]) -> String {
 
         let icon = state_symbol(entry.feature_state.as_str());
 
-        // First line of summary is the headline
-        let headline = entry
-            .summary
-            .lines()
-            .next()
-            .unwrap_or(&entry.summary)
-            .trim();
+        // Parse summary into headline + optional body (git-style: blank line separator)
+        let (headline, body) = match entry.summary.find('\n') {
+            Some(idx) => {
+                let h = entry.summary[..idx].trim();
+                let rest = entry.summary[idx + 1..].trim_start_matches('\n').trim();
+                let b = if rest.is_empty() { None } else { Some(rest) };
+                (h, b)
+            }
+            None => (entry.summary.trim(), None),
+        };
 
-        // Build commit SHA suffix
+        // Separator: — if no body (web), ▸ if has body (web's twirl indicator)
+        let separator = if body.is_some() { "▸" } else { "—" };
+
+        // Build commit SHA suffix (comma-separated, matching web)
         let sha_suffix = if entry.commits.is_empty() {
             String::new()
         } else {
-            let shas: Vec<&str> = entry
+            let shas: Vec<String> = entry
                 .commits
                 .iter()
                 .map(|c| {
-                    if c.sha.len() > 7 {
+                    let short = if c.sha.len() > 7 {
                         &c.sha[..7]
                     } else {
                         c.sha.as_str()
-                    }
+                    };
+                    short.to_string()
                 })
                 .collect();
             format!("  {}", shas.join(", "))
         };
 
         out.push_str(&format!(
-            "{} {} — {}{}\n",
-            icon, entry.feature_title, headline, sha_suffix
+            "{} {} {} {}{}\n",
+            icon, entry.feature_title, separator, headline, sha_suffix
         ));
+
+        // Show body indented below headline (always shown in CLI; web requires click to expand)
+        if let Some(body_text) = body {
+            out.push('\n');
+            for line in body_text.lines() {
+                out.push_str(&format!("  {}\n", line));
+            }
+            out.push('\n');
+        }
     }
 
-    out.push_str("\nNo more history.");
-    out
+    out.trim_end().to_string()
 }
 
 #[cfg(test)]
