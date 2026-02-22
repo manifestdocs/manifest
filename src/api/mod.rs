@@ -252,6 +252,11 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
             "/features/{id}/history",
             get(handlers::get_feature_history).post(handlers::create_feature_history),
         )
+        .route("/features/{id}/verify", post(handlers::get_verify_context))
+        .route(
+            "/features/{id}/verification",
+            put(handlers::record_feature_verification),
+        )
         // Portfolio
         .route("/portfolio", get(handlers::get_portfolio))
         // Server settings

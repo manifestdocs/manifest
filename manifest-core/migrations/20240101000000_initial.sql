@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS features (
     priority INTEGER NOT NULL DEFAULT 0,
     feature_number INTEGER,
     target_version_id TEXT,
+    verification_result TEXT,
+    verified_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CONSTRAINT fk_features_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,

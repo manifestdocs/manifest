@@ -354,6 +354,8 @@ impl Database {
         self.migrate_add_feature_numbers().await?;
         // Migration: add 'blocked' state and feature_blockers table
         self.migrate_add_blocked_state().await?;
+        // Migration: add verification_result and verified_at to features
+        self.migrate_add_verification_columns().await?;
         Ok(())
     }
 
@@ -1116,6 +1118,46 @@ impl Database {
         }
 
         tracing::info!("Added 'copilot' to tasks.agent_type CHECK constraint");
+        Ok(())
+    }
+
+    /// Add verification_result and verified_at columns to features table.
+    async fn migrate_add_verification_columns(&self) -> Result<()> {
+        let has_column = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("verification_result"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'features' AND column_name = 'verification_result'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_column {
+            tracing::debug!("verification columns migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Adding verification_result and verified_at columns to features table");
+        sqlx::query("ALTER TABLE features ADD COLUMN verification_result TEXT")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("ALTER TABLE features ADD COLUMN verified_at TEXT")
+            .execute(&self.pool)
+            .await?;
+
         Ok(())
     }
 

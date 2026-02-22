@@ -10,8 +10,8 @@ use crate::mcp::{
     types::{
         CommitInfo, CompleteFeatureRequest, CreateFeatureRequest, DeleteFeatureRequest,
         FeatureInfo, FeatureInfoWithContext, FindFeaturesRequest, GetFeatureRequest,
-        GetNextFeatureRequest, HistoryEntryInfo, PlanFeaturesRequest, RenderFeatureTreeRequest,
-        StartFeatureRequest, UpdateFeatureRequest,
+        GetNextFeatureRequest, HistoryEntryInfo, PlanFeaturesRequest, RecordVerificationRequest,
+        RenderFeatureTreeRequest, StartFeatureRequest, UpdateFeatureRequest, VerifyFeatureRequest,
     },
     ManifestClient,
 };
@@ -888,4 +888,153 @@ pub async fn get_next_feature(
             "No workable features found.",
         )])),
     }
+}
+
+/// Assemble the feature spec + implementation diff for the calling agent to analyze.
+///
+/// This tool does NOT call an LLM — the calling agent IS the LLM. It:
+/// 1. Resolves the feature and assembles its spec + ancestor breadcrumb
+/// 2. Gets a git diff (from commit_range, or uncommitted changes from the project directory)
+/// 3. Returns assembled context with instructions for the agent to analyze and call record_verification
+pub async fn verify_feature(
+    client: &ManifestClient,
+    req: VerifyFeatureRequest,
+) -> Result<CallToolResult, McpError> {
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
+        .await
+        .map_err(client_err)?;
+
+    // Get the feature to find its project for the git directory
+    let feature = client.get_feature(feature_id).await.map_err(client_err)?;
+    let project_id: uuid::Uuid = feature.project_id.into();
+
+    // Attempt to get a diff from the project's primary directory
+    let diff = if let Ok(project_with_dirs) = client.get_project(project_id).await {
+        let primary_dir = project_with_dirs
+            .directories
+            .iter()
+            .find(|d| d.is_primary)
+            .or_else(|| project_with_dirs.directories.first());
+
+        if let Some(dir) = primary_dir {
+            if crate::mcp::git::is_git_repo(&dir.path) {
+                let commit_range = req.commit_range.as_deref();
+                match crate::mcp::git::get_diff(&dir.path, commit_range) {
+                    Ok(d) if !d.is_empty() => Some(d),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Call the API to assemble spec context + filter diff
+    let ctx = client
+        .get_verify_context(feature_id, diff)
+        .await
+        .map_err(client_err)?;
+
+    let mut content = vec![Content::text(format!(
+        "Verification context assembled for '{}'. Analyze the spec against the diff and call record_verification with your findings.",
+        feature.title,
+    ))];
+
+    content.push(Content::text(format!("## Spec\n\n{}", ctx.spec)));
+
+    match &ctx.diff {
+        Some(diff) => {
+            let truncation_note = if ctx.diff_truncated {
+                " (truncated at 50K characters)"
+            } else {
+                ""
+            };
+            content.push(Content::text(format!(
+                "## Diff{}\n\n```diff\n{}\n```",
+                truncation_note, diff
+            )));
+        }
+        None => {
+            content.push(Content::text(
+                "## Diff\n\nNo diff available (no uncommitted changes or commit range found).",
+            ));
+        }
+    }
+
+    content.push(Content::text(ctx.instructions));
+
+    Ok(CallToolResult::success(content))
+}
+
+/// Store verification comments produced by your analysis of `verify_feature` output.
+///
+/// Call this after analyzing the spec + diff context returned by `verify_feature`.
+/// Pass an empty `comments` array if the implementation fully satisfies the spec.
+pub async fn record_verification(
+    client: &ManifestClient,
+    req: RecordVerificationRequest,
+) -> Result<CallToolResult, McpError> {
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
+        .await
+        .map_err(client_err)?;
+
+    // Convert comment inputs to JSON values for the API
+    let comments: Vec<serde_json::Value> = req
+        .comments
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "severity": c.severity,
+                "title": c.title,
+                "body": c.body,
+                "file": c.file,
+            })
+        })
+        .collect();
+
+    let feature = client
+        .record_verification(feature_id, comments)
+        .await
+        .map_err(client_err)?;
+
+    let count = req.comments.len();
+    let summary = if count == 0 {
+        format!(
+            "Verification recorded for '{}' — implementation satisfies the spec.",
+            feature.title
+        )
+    } else {
+        let critical = req
+            .comments
+            .iter()
+            .filter(|c| c.severity == "critical")
+            .count();
+        let major = req
+            .comments
+            .iter()
+            .filter(|c| c.severity == "major")
+            .count();
+        let minor = req
+            .comments
+            .iter()
+            .filter(|c| c.severity == "minor")
+            .count();
+        format!(
+            "Verification recorded for '{}' — {} comment{} ({} critical, {} major, {} minor).",
+            feature.title,
+            count,
+            if count == 1 { "" } else { "s" },
+            critical,
+            major,
+            minor,
+        )
+    };
+
+    Ok(CallToolResult::success(vec![Content::text(summary)]))
 }

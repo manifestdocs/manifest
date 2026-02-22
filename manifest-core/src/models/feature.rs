@@ -237,6 +237,13 @@ pub struct Feature {
     /// Target version for this feature (for release planning).
     /// Null for implemented features or features not yet assigned to a version.
     pub target_version_id: Option<VersionId>,
+    /// Structured comments from the most recent `record_verification` call.
+    /// None if this feature has never been verified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_result: Option<Vec<VerificationComment>>,
+    /// Timestamp of the most recent verification run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -462,6 +469,67 @@ pub struct BreadcrumbItem {
     /// Contextual details from this ancestor (architectural decisions, conventions, constraints).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
+}
+
+/// Severity level for a verification comment.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationSeverity {
+    /// Core spec requirement not implemented; blocks honest completion.
+    Critical,
+    /// Significant gap or behavioural deviation; should be fixed before shipping.
+    Major,
+    /// Polish, naming, or style drift from spec intent.
+    Minor,
+}
+
+impl VerificationSeverity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Critical => "critical",
+            Self::Major => "major",
+            Self::Minor => "minor",
+        }
+    }
+}
+
+impl std::str::FromStr for VerificationSeverity {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "critical" => Ok(Self::Critical),
+            "major" => Ok(Self::Major),
+            "minor" => Ok(Self::Minor),
+            other => Err(format!("Unknown severity: {other}")),
+        }
+    }
+}
+
+/// A single comment produced by implementation verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationComment {
+    pub severity: VerificationSeverity,
+    /// One-line summary of the gap.
+    pub title: String,
+    /// Actionable explanation with suggested fix.
+    pub body: String,
+    /// Affected file path if the gap is localized to a single file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+/// Response from `POST /features/:id/verify` — assembled context for the calling agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyFeatureContextResponse {
+    /// Feature specification + breadcrumb context formatted as markdown.
+    pub spec: String,
+    /// Filtered implementation diff (None if no diff was provided or no uncommitted changes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<String>,
+    /// True if the diff was truncated due to size limit.
+    pub diff_truncated: bool,
+    /// Instruction text for the calling agent on how to proceed.
+    pub instructions: String,
 }
 
 /// A feature with its hierarchical context (parent, siblings, children, breadcrumb).

@@ -12,8 +12,9 @@ use super::types::{
     DeleteFeatureRequest, FindFeaturesRequest, GenerateFeatureTreeRequest, GetActiveFeatureRequest,
     GetFeatureRequest, GetNextFeatureRequest, GetProjectHistoryRequest,
     GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
-    PlanFeaturesRequest, ReleaseVersionRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest,
-    StartFeatureRequest, UpdateFeatureRequest,
+    PlanFeaturesRequest, RecordVerificationRequest, ReleaseVersionRequest,
+    RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest, UpdateFeatureRequest,
+    VerifyFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -245,6 +246,30 @@ impl McpServer {
         params: Parameters<GetNextFeatureRequest>,
     ) -> Result<CallToolResult, McpError> {
         tools::features::get_next_feature(&self.client, params.0).await
+    }
+
+    // ============================================================
+    // Verification Tools
+    // ============================================================
+
+    #[tool(
+        description = "VERIFY: Assemble the feature spec + implementation diff so you can check the implementation against the spec. Returns spec context + filtered diff with instructions. After analyzing, call record_verification with your findings. No LLM is called server-side — you are the LLM."
+    )]
+    async fn verify_feature(
+        &self,
+        params: Parameters<VerifyFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::verify_feature(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "VERIFY: Store verification comments produced by your analysis of verify_feature output. Pass an empty comments array if the implementation fully satisfies the spec. Severity levels: 'critical' (core requirement missing), 'major' (significant gap), 'minor' (style or polish drift)."
+    )]
+    async fn record_verification(
+        &self,
+        params: Parameters<RecordVerificationRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::record_verification(&self.client, params.0).await
     }
 
     // ============================================================

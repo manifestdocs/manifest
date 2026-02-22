@@ -109,8 +109,23 @@ pub fn slugify(title: &str) -> String {
     result.trim_matches('-').to_string()
 }
 
+/// Get a unified diff for the given commit range, or uncommitted changes if no range.
+///
+/// Returns the raw diff string. Callers should treat an empty string as "no changes".
+pub fn get_diff(dir: &str, commit_range: Option<&str>) -> Result<String, String> {
+    match commit_range {
+        Some(range) => run_git_raw(dir, &["diff", range]),
+        None => run_git_raw(dir, &["diff", "HEAD"]),
+    }
+}
+
 /// Run a git command and return trimmed stdout on success.
 fn run_git(dir: &str, args: &[&str]) -> Result<String, String> {
+    run_git_raw(dir, args).map(|s| s.trim().to_string())
+}
+
+/// Run a git command and return raw stdout on success (preserving whitespace for diffs).
+fn run_git_raw(dir: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -118,7 +133,7 @@ fn run_git(dir: &str, args: &[&str]) -> Result<String, String> {
         .map_err(|e| format!("failed to run git: {e}"))?;
 
     if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         Err(stderr)

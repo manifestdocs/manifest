@@ -13,9 +13,10 @@ use uuid::Uuid;
 use crate::db::Database;
 use crate::mcp::{PlanFeaturesResponse, ProposedFeature};
 use crate::models::{
-    CommitRef, CreateFeatureInput, CreateHistoryInput, Feature, FeatureDiff, FeatureHistory,
-    FeatureId, FeatureState, FeatureSummary, FeatureTreeNode, HistoryDetails, ListFeaturesQuery,
-    ProjectId, UpdateFeatureInput, VersionId,
+    BreadcrumbItem, CommitRef, CreateFeatureInput, CreateHistoryInput, Feature, FeatureDiff,
+    FeatureHistory, FeatureId, FeatureState, FeatureSummary, FeatureTreeNode, FeatureWithContext,
+    HistoryDetails, ListFeaturesQuery, ProjectId, UpdateFeatureInput, VerificationComment,
+    VerifyFeatureContextResponse, VersionId,
 };
 
 use super::{internal_error, ApiError};
@@ -537,6 +538,200 @@ fn count_proposed_features(features: &[ProposedFeature]) -> usize {
         .iter()
         .map(|f| 1 + count_proposed_features(&f.children))
         .sum()
+}
+
+// ============================================================
+// Verification
+// ============================================================
+
+/// Maximum diff size in characters before truncation.
+const MAX_DIFF_CHARS: usize = 50_000;
+
+/// File path patterns that should be stripped from diffs.
+const SKIP_DIFF_PATTERNS: &[&str] = &[
+    "Cargo.lock",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "node_modules/",
+    ".min.js",
+    ".min.css",
+];
+
+#[derive(Deserialize)]
+pub struct VerifyFeatureBody {
+    pub diff: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct RecordVerificationBody {
+    pub comments: Vec<VerificationComment>,
+}
+
+/// POST /features/:id/verify
+///
+/// Assembles the feature spec + breadcrumb context and optionally filters the provided diff.
+/// Returns a structured context for the calling agent to analyze — no LLM call server-side.
+pub async fn get_verify_context(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<VerifyFeatureBody>,
+) -> Result<Json<VerifyFeatureContextResponse>, ApiError> {
+    let ctx = db
+        .get_feature_with_context(id.into())
+        .await
+        .map_err(internal_error)?
+        .ok_or(ApiError::not_found("Feature"))?;
+
+    let spec = format_spec_context(&ctx);
+    let (diff, diff_truncated) = match body.diff {
+        Some(raw) => filter_and_truncate_diff(raw),
+        None => (None, false),
+    };
+
+    let instructions = concat!(
+        "Analyze the diff against the specification above. ",
+        "Identify requirements in the spec that are NOT satisfied by the implementation. ",
+        "For each gap, call record_verification with severity (critical/major/minor), ",
+        "title (one-line summary), body (actionable explanation with suggested fix), ",
+        "and file (affected path if known). ",
+        "If the implementation fully satisfies the spec, call record_verification ",
+        "with an empty comments array."
+    )
+    .to_string();
+
+    Ok(Json(VerifyFeatureContextResponse {
+        spec,
+        diff,
+        diff_truncated,
+        instructions,
+    }))
+}
+
+/// PUT /features/:id/verification
+///
+/// Stores agent-generated verification comments on the feature record.
+/// Overwrites any previous verification result.
+pub async fn record_feature_verification(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<RecordVerificationBody>,
+) -> Result<Json<Feature>, ApiError> {
+    // Verify feature exists
+    db.get_feature(id.into())
+        .await
+        .map_err(internal_error)?
+        .ok_or(ApiError::not_found("Feature"))?;
+
+    let feature = db
+        .record_verification(id.into(), &body.comments)
+        .await
+        .map_err(internal_error)?;
+
+    Ok(Json(feature))
+}
+
+/// Format feature spec + breadcrumb ancestors into a markdown string for verification context.
+fn format_spec_context(ctx: &FeatureWithContext) -> String {
+    let mut spec = String::new();
+
+    // Breadcrumb ancestors (everything except the feature itself, which is last)
+    let ancestors: &[BreadcrumbItem] = if ctx.breadcrumb.len() > 1 {
+        &ctx.breadcrumb[..ctx.breadcrumb.len() - 1]
+    } else {
+        &[]
+    };
+
+    if !ancestors.is_empty() {
+        spec.push_str("## Project Context\n\n");
+        for item in ancestors {
+            spec.push_str(&format!("### {}\n\n", item.title));
+            if let Some(details) = &item.details {
+                spec.push_str(details);
+                spec.push_str("\n\n");
+            }
+        }
+    }
+
+    spec.push_str(&format!(
+        "## Feature Specification: {}\n\n",
+        ctx.feature.title
+    ));
+    match &ctx.feature.details {
+        Some(details) => spec.push_str(details),
+        None => spec.push_str("*No specification provided.*"),
+    }
+
+    spec
+}
+
+/// Filter out noise files from a diff and truncate to size limit.
+/// Returns (filtered_diff, was_truncated).
+fn filter_and_truncate_diff(diff: String) -> (Option<String>, bool) {
+    if diff.is_empty() {
+        return (None, false);
+    }
+
+    let filtered = filter_diff_files(&diff);
+    if filtered.is_empty() {
+        return (None, false);
+    }
+
+    if filtered.len() <= MAX_DIFF_CHARS {
+        (Some(filtered), false)
+    } else {
+        (
+            Some(truncate_at_file_boundary(&filtered, MAX_DIFF_CHARS)),
+            true,
+        )
+    }
+}
+
+/// Remove lock files and other noise from a unified diff.
+fn filter_diff_files(diff: &str) -> String {
+    let mut result = String::new();
+    let mut current_file = String::new();
+    let mut skip_current = false;
+
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") {
+            if !skip_current {
+                result.push_str(&current_file);
+            }
+            current_file = format!("{line}\n");
+            skip_current = SKIP_DIFF_PATTERNS.iter().any(|p| line.contains(p));
+        } else {
+            current_file.push_str(line);
+            current_file.push('\n');
+        }
+    }
+    if !skip_current {
+        result.push_str(&current_file);
+    }
+    result
+}
+
+/// Truncate a diff at a file boundary to stay within the character limit.
+fn truncate_at_file_boundary(diff: &str, max_chars: usize) -> String {
+    let mut result = String::new();
+    let mut current_file = String::new();
+
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") {
+            if result.len() + current_file.len() > max_chars {
+                break;
+            }
+            result.push_str(&current_file);
+            current_file = format!("{line}\n");
+        } else {
+            current_file.push_str(line);
+            current_file.push('\n');
+        }
+    }
+    if result.len() + current_file.len() <= max_chars {
+        result.push_str(&current_file);
+    }
+    result
 }
 
 /// Subscribe to real-time feature change notifications via SSE.

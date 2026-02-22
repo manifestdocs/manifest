@@ -497,6 +497,47 @@ pub struct GetNextFeatureRequest {
 }
 
 // ============================================================
+// Verification Request Types
+// ============================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VerifyFeatureRequest {
+    #[schemars(description = "Feature ID (UUID, display ID like 'MAN-42', or UUID prefix)")]
+    pub feature_id: String,
+    #[schemars(
+        description = "Optional git commit range to diff, e.g. 'abc123..HEAD'. If not provided, the tool attempts to get the uncommitted diff via git."
+    )]
+    #[serde(default)]
+    pub commit_range: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RecordVerificationRequest {
+    #[schemars(description = "Feature ID (UUID, display ID like 'MAN-42', or UUID prefix)")]
+    pub feature_id: String,
+    #[schemars(
+        description = "Verification comments from your analysis. Pass an empty array if the implementation fully satisfies the spec."
+    )]
+    pub comments: Vec<VerificationCommentInput>,
+}
+
+/// A single verification comment from the agent's analysis.
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct VerificationCommentInput {
+    #[schemars(
+        description = "Severity level: 'critical' (core requirement missing), 'major' (significant gap), 'minor' (style or polish drift)"
+    )]
+    pub severity: String,
+    #[schemars(description = "One-line summary of the gap")]
+    pub title: String,
+    #[schemars(description = "Actionable explanation with suggested fix")]
+    pub body: String,
+    #[schemars(description = "Affected file path if the gap is localized to a single file")]
+    #[serde(default)]
+    pub file: Option<String>,
+}
+
+// ============================================================
 // Version Request Types
 // ============================================================
 

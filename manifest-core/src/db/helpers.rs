@@ -241,6 +241,12 @@ pub(crate) fn row_to_feature(row: &AnyRow) -> Result<Feature> {
             .get::<Option<String>, _>("target_version_id")
             .map(parse_id)
             .transpose()?,
+        verification_result: row
+            .get::<Option<String>, _>("verification_result")
+            .and_then(|s| serde_json::from_str(&s).ok()),
+        verified_at: row
+            .get::<Option<String>, _>("verified_at")
+            .and_then(|s| parse_datetime(s).ok()),
         created_at: parse_datetime(row.get("created_at"))?,
         updated_at: parse_datetime(row.get("updated_at"))?,
     })

@@ -165,6 +165,8 @@ mod tests {
                 priority: 0,
                 feature_number: None,
                 target_version_id: None,
+                verification_result: None,
+                verified_at: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             },

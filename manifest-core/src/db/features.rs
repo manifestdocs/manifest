@@ -11,10 +11,10 @@ use super::{
 use crate::models::*;
 
 /// SELECT columns for the features table (bare names).
-const FEATURE_COLS: &str = "id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, feature_number, target_version_id, created_at, updated_at";
+const FEATURE_COLS: &str = "id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, feature_number, target_version_id, verification_result, verified_at, created_at, updated_at";
 
 /// SELECT columns for the features table with `f.` table alias.
-const FEATURE_COLS_F: &str = "f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.feature_number, f.target_version_id, f.created_at, f.updated_at";
+const FEATURE_COLS_F: &str = "f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.feature_number, f.target_version_id, f.verification_result, f.verified_at, f.created_at, f.updated_at";
 
 impl Database {
     /// Get all features across all projects with optional pagination.
@@ -287,6 +287,8 @@ impl Database {
             priority,
             feature_number: Some(feature_number),
             target_version_id,
+            verification_result: None,
+            verified_at: None,
             created_at: now,
             updated_at: now,
         })
@@ -386,6 +388,8 @@ impl Database {
                 priority,
                 feature_number: Some(feature_number),
                 target_version_id,
+                verification_result: None,
+                verified_at: None,
                 created_at: now,
                 updated_at: now,
             });
@@ -588,6 +592,8 @@ impl Database {
             priority,
             feature_number: existing.feature_number,
             target_version_id,
+            verification_result: existing.verification_result,
+            verified_at: existing.verified_at,
             created_at: existing.created_at,
             updated_at: now,
         };
@@ -1246,6 +1252,40 @@ impl Database {
             }
             None => Ok(None),
         }
+    }
+
+    // ============================================================
+    // Verification
+    // ============================================================
+
+    /// Store agent-generated verification comments on a feature.
+    /// Overwrites any previous verification result.
+    pub async fn record_verification(
+        &self,
+        feature_id: FeatureId,
+        comments: &[VerificationComment],
+    ) -> Result<Feature> {
+        let now = Utc::now().to_rfc3339();
+        let json = serde_json::to_string(comments)?;
+
+        let rows_affected = sqlx::query(
+            "UPDATE features SET verification_result = $1, verified_at = $2, updated_at = $3 WHERE id = $4",
+        )
+        .bind(&json)
+        .bind(&now)
+        .bind(&now)
+        .bind(feature_id.to_string())
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        if rows_affected == 0 {
+            return Err(anyhow::anyhow!("Feature not found: {}", feature_id));
+        }
+
+        self.get_feature(feature_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Feature not found after update: {}", feature_id))
     }
 
     // ============================================================

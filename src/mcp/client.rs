@@ -657,4 +657,41 @@ impl ManifestClient {
             },
         })
     }
+
+    // ============================================================
+    // Verification
+    // ============================================================
+
+    /// Get assembled spec + diff context for verification (no LLM call).
+    pub async fn get_verify_context(
+        &self,
+        id: Uuid,
+        diff: Option<String>,
+    ) -> Result<VerifyFeatureContextResponse, ClientError> {
+        let body = serde_json::json!({ "diff": diff });
+        let response = self
+            .request(reqwest::Method::POST, &format!("/features/{}/verify", id))
+            .json(&body)
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+
+    /// Store agent-generated verification comments on a feature.
+    pub async fn record_verification(
+        &self,
+        id: Uuid,
+        comments: Vec<serde_json::Value>,
+    ) -> Result<Feature, ClientError> {
+        let body = serde_json::json!({ "comments": comments });
+        let response = self
+            .request(
+                reqwest::Method::PUT,
+                &format!("/features/{}/verification", id),
+            )
+            .json(&body)
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
 }
