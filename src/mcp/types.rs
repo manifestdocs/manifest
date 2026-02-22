@@ -538,6 +538,52 @@ pub struct VerificationCommentInput {
 }
 
 // ============================================================
+// Memory Request Types
+// ============================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RememberRequest {
+    #[schemars(description = "The UUID of the project this memory belongs to")]
+    pub project_id: Uuid,
+    #[schemars(
+        description = "Plain text or markdown content to remember. Be concise and factual."
+    )]
+    pub content: String,
+    #[schemars(
+        description = "Optional tags for categorisation (e.g. [\"auth\", \"sqlite\", \"performance\"])"
+    )]
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[schemars(
+        description = "Optional feature ID this memory is associated with (e.g. the feature being implemented)"
+    )]
+    #[serde(default)]
+    pub source_feature_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RecallRequest {
+    #[schemars(description = "The UUID of the project to search memories for")]
+    pub project_id: Uuid,
+    #[schemars(
+        description = "Optional search query — full-text search on SQLite, LIKE fallback on PostgreSQL. Omit to list all memories."
+    )]
+    #[serde(default)]
+    pub query: Option<String>,
+    #[schemars(description = "Maximum memories to return (default 10, max 50)")]
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ForgetRequest {
+    #[schemars(description = "The UUID of the project")]
+    pub project_id: Uuid,
+    #[schemars(description = "The UUID of the memory to delete")]
+    pub memory_id: Uuid,
+}
+
+// ============================================================
 // Version Request Types
 // ============================================================
 

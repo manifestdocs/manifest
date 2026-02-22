@@ -257,6 +257,15 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
             "/features/{id}/verification",
             put(handlers::record_feature_verification),
         )
+        // Memories
+        .route(
+            "/projects/{id}/memories",
+            get(handlers::list_memories).post(handlers::create_memory),
+        )
+        .route(
+            "/projects/{id}/memories/{memory_id}",
+            delete(handlers::delete_memory),
+        )
         // Portfolio
         .route("/portfolio", get(handlers::get_portfolio))
         // Server settings

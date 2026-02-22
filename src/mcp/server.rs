@@ -9,12 +9,12 @@
 use super::tools;
 use super::types::{
     AddProjectDirectoryRequest, CompleteFeatureRequest, CreateFeatureRequest, CreateVersionRequest,
-    DeleteFeatureRequest, FindFeaturesRequest, GenerateFeatureTreeRequest, GetActiveFeatureRequest,
-    GetFeatureRequest, GetNextFeatureRequest, GetProjectHistoryRequest,
+    DeleteFeatureRequest, FindFeaturesRequest, ForgetRequest, GenerateFeatureTreeRequest,
+    GetActiveFeatureRequest, GetFeatureRequest, GetNextFeatureRequest, GetProjectHistoryRequest,
     GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
-    PlanFeaturesRequest, RecordVerificationRequest, ReleaseVersionRequest,
-    RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest, UpdateFeatureRequest,
-    VerifyFeatureRequest,
+    PlanFeaturesRequest, RecallRequest, RecordVerificationRequest, ReleaseVersionRequest,
+    RememberRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest,
+    UpdateFeatureRequest, VerifyFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -270,6 +270,34 @@ impl McpServer {
         params: Parameters<RecordVerificationRequest>,
     ) -> Result<CallToolResult, McpError> {
         tools::features::record_verification(&self.client, params.0).await
+    }
+
+    // ============================================================
+    // Memory Tools
+    // ============================================================
+
+    #[tool(
+        description = "LEARN: Store a project memory — a fact, decision, or architectural observation that should persist across sessions. Use this to record things the agent would otherwise forget when the context window resets: key constraints, architectural decisions, environment quirks, and cross-cutting patterns. Memories are searchable via recall."
+    )]
+    async fn remember(
+        &self,
+        params: Parameters<RememberRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::memories::remember(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "LEARN: Search or list project memories. Use this at the start of a session to recover context from previous work. Returns memories ranked by relevance (FTS5 on SQLite, LIKE fallback on PostgreSQL). Omit query to list all memories."
+    )]
+    async fn recall(&self, params: Parameters<RecallRequest>) -> Result<CallToolResult, McpError> {
+        tools::memories::recall(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "LEARN: Delete a project memory that is no longer accurate or relevant. Use recall first to find the memory_id."
+    )]
+    async fn forget(&self, params: Parameters<ForgetRequest>) -> Result<CallToolResult, McpError> {
+        tools::memories::forget(&self.client, params.0).await
     }
 
     // ============================================================

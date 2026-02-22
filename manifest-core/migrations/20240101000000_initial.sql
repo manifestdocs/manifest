@@ -259,6 +259,26 @@ CREATE INDEX IF NOT EXISTS idx_audit_user_time ON audit_log(user_id, created_at)
 CREATE INDEX IF NOT EXISTS idx_audit_project_time ON audit_log(project_id, created_at);
 
 -- ============================================================
+-- Project Memory
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS project_memories (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '[]',
+    source_feature_id TEXT,
+    created_by TEXT NOT NULL DEFAULT 'agent',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CONSTRAINT fk_memories_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_memories_feature FOREIGN KEY (source_feature_id) REFERENCES features(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memories_project ON project_memories(project_id);
+CREATE INDEX IF NOT EXISTS idx_memories_created ON project_memories(created_at DESC);
+
+-- ============================================================
 -- Schema Migrations Tracking (for compatibility with existing DBs)
 -- ============================================================
 

@@ -19,6 +19,7 @@
 mod feature;
 mod history;
 mod id;
+mod memory;
 mod portfolio;
 mod project;
 mod session;
@@ -34,6 +35,7 @@ pub struct ParseEnumError(pub String);
 pub use feature::*;
 pub use history::*;
 pub use id::*;
+pub use memory::*;
 pub use portfolio::*;
 pub use project::*;
 pub use session::*;
