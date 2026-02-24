@@ -29,10 +29,13 @@ use axum::Json;
 
 /// Structured JSON error response.
 ///
-/// Returns `{"error": "message"}` instead of plain text.
+/// Returns `{"error": "message"}` by default, or a richer structured body
+/// for specific error types (e.g. claim conflicts).
 pub struct ApiError {
     status: StatusCode,
     message: String,
+    /// Optional structured body that replaces the default `{"error": "..."}` format.
+    body: Option<serde_json::Value>,
 }
 
 impl ApiError {
@@ -41,13 +44,16 @@ impl ApiError {
         Self {
             status: StatusCode::NOT_FOUND,
             message: format!("{} not found", entity),
+            body: None,
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = serde_json::json!({ "error": self.message });
+        let body = self
+            .body
+            .unwrap_or_else(|| serde_json::json!({ "error": self.message }));
         (self.status, Json(body)).into_response()
     }
 }
@@ -56,20 +62,42 @@ impl IntoResponse for ApiError {
 /// inline error returns like `Err((StatusCode::NOT_FOUND, "...".into()))` still work.
 impl From<(StatusCode, String)> for ApiError {
     fn from((status, message): (StatusCode, String)) -> Self {
-        Self { status, message }
+        Self {
+            status,
+            message,
+            body: None,
+        }
     }
 }
 
 fn manifest_error(e: ManifestError) -> ApiError {
-    let status = match &e {
-        ManifestError::NotFound(_) => StatusCode::NOT_FOUND,
-        ManifestError::Validation(_) => StatusCode::BAD_REQUEST,
-        ManifestError::InvalidState(_) => StatusCode::CONFLICT,
-    };
-    tracing::warn!("Client error: {}", e);
-    ApiError {
-        status,
-        message: e.to_string(),
+    match &e {
+        ManifestError::ClaimConflict(info) => {
+            tracing::warn!("Claim conflict: {}", e);
+            ApiError {
+                status: StatusCode::CONFLICT,
+                message: e.to_string(),
+                body: Some(serde_json::json!({
+                    "error": "claim_conflict",
+                    "message": e.to_string(),
+                    "conflict": info,
+                })),
+            }
+        }
+        _ => {
+            let status = match &e {
+                ManifestError::NotFound(_) => StatusCode::NOT_FOUND,
+                ManifestError::Validation(_) => StatusCode::BAD_REQUEST,
+                ManifestError::InvalidState(_) => StatusCode::CONFLICT,
+                ManifestError::ClaimConflict(_) => unreachable!(),
+            };
+            tracing::warn!("Client error: {}", e);
+            ApiError {
+                status,
+                message: e.to_string(),
+                body: None,
+            }
+        }
     }
 }
 
@@ -89,5 +117,6 @@ pub(crate) fn internal_error(e: anyhow::Error) -> ApiError {
     ApiError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         message: "Internal server error".to_string(),
+        body: None,
     }
 }

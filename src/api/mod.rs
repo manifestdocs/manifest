@@ -257,6 +257,8 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
             "/features/{id}/verification",
             put(handlers::record_feature_verification),
         )
+        .route("/features/{id}/claim", put(handlers::set_feature_claim))
+        .route("/features/{id}/complete", post(handlers::complete_feature))
         // Memories
         .route(
             "/projects/{id}/memories",

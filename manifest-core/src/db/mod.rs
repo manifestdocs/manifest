@@ -110,9 +110,22 @@ pub fn escape_like_pattern(query: &str) -> String {
 /// Events emitted when features change, used for SSE notifications.
 #[derive(Debug, Clone)]
 pub enum FeatureEvent {
-    Created { project_id: ProjectId },
-    Updated { project_id: ProjectId },
-    Deleted { project_id: ProjectId },
+    Created {
+        project_id: ProjectId,
+    },
+    Updated {
+        project_id: ProjectId,
+    },
+    Deleted {
+        project_id: ProjectId,
+    },
+    Completed {
+        project_id: ProjectId,
+        feature_id: crate::models::FeatureId,
+        feature_title: String,
+        project_name: String,
+        agent_type: Option<String>,
+    },
 }
 
 impl FeatureEvent {
@@ -123,8 +136,23 @@ impl FeatureEvent {
             FeatureEvent::Created { project_id } => *project_id,
             FeatureEvent::Updated { project_id } => *project_id,
             FeatureEvent::Deleted { project_id } => *project_id,
+            FeatureEvent::Completed { project_id, .. } => *project_id,
         }
     }
+}
+
+/// Structured claim conflict details returned when an agent tries to claim
+/// a feature that is already claimed by another agent.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ClaimConflictInfo {
+    /// The agent type that currently owns the claim (e.g. "claude", "gemini").
+    pub agent_type: String,
+    /// The feature ID that is already claimed.
+    pub feature_id: String,
+    /// When the existing claim was established (RFC3339).
+    pub claimed_at: String,
+    /// Optional metadata from the existing claim.
+    pub claim_metadata: Option<String>,
 }
 
 /// Domain errors that can be meaningfully handled by callers.
@@ -139,6 +167,9 @@ pub enum ManifestError {
     /// The operation is invalid for the entity's current state.
     #[error("{0}")]
     InvalidState(String),
+    /// Another agent already holds a claim on this feature.
+    #[error("Feature already claimed by '{}'", .0.agent_type)]
+    ClaimConflict(ClaimConflictInfo),
 }
 
 impl ManifestError {
@@ -363,6 +394,8 @@ impl Database {
         self.migrate_add_verification_columns().await?;
         // Migration: add project_memories table and FTS5 index
         self.migrate_add_project_memories_table().await?;
+        // Migration: add claim tracking columns to features
+        self.migrate_add_claim_columns().await?;
         Ok(())
     }
 
@@ -1023,11 +1056,10 @@ impl Database {
     /// Also creates the FTS5 virtual table on SQLite.
     async fn migrate_add_project_memories_table(&self) -> Result<()> {
         let has_table = {
-            let count: i64 =
-                sqlx::query_scalar(&self.dialect.table_exists_sql("project_memories"))
-                    .fetch_one(&self.pool)
-                    .await
-                    .unwrap_or(0);
+            let count: i64 = sqlx::query_scalar(&self.dialect.table_exists_sql("project_memories"))
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
             count > 0
         };
 
@@ -1243,6 +1275,49 @@ impl Database {
             .execute(&self.pool)
             .await?;
         sqlx::query("ALTER TABLE features ADD COLUMN verified_at TEXT")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Add claimed_by, claimed_at, and claim_metadata columns to features table.
+    async fn migrate_add_claim_columns(&self) -> Result<()> {
+        let has_column = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("claimed_by"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'features' AND column_name = 'claimed_by'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_column {
+            tracing::debug!("claim columns migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Adding claimed_by, claimed_at, claim_metadata columns to features table");
+        sqlx::query("ALTER TABLE features ADD COLUMN claimed_by TEXT")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("ALTER TABLE features ADD COLUMN claimed_at TEXT")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("ALTER TABLE features ADD COLUMN claim_metadata TEXT")
             .execute(&self.pool)
             .await?;
 

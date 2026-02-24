@@ -888,6 +888,72 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /features/{id}/claim:
+    parameters:
+      - $ref: '#/components/parameters/FeatureId'
+    put:
+      tags: [Features]
+      summary: Atomically claim a feature
+      description: |
+        Atomically transitions a feature to in_progress and sets claim fields
+        (agent_type, claimed_at, claim_metadata) in a single transaction.
+
+        Uses BEGIN IMMEDIATE on SQLite to prevent race conditions when two agents
+        try to claim the same feature simultaneously. Exactly one succeeds; the
+        other receives a 409 Conflict with details about the existing claim.
+      operationId: claimFeature
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimFeatureInput'
+      responses:
+        '200':
+          description: Feature claimed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Feature already claimed by another agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimConflictError'
+
+  /features/{id}/complete:
+    parameters:
+      - $ref: '#/components/parameters/FeatureId'
+    post:
+      tags: [Features]
+      summary: Complete a feature
+      description: |
+        Records a history entry with the work summary and commit references,
+        transitions the feature to 'implemented', and clears any active claims.
+      operationId: completeFeature
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteFeatureInput'
+      responses:
+        '201':
+          description: Feature completed with history entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteFeatureResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   parameters:
     ProjectId:
@@ -1799,3 +1865,87 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PortfolioProject'
+
+    # ============================================================
+    # Claim & Complete schemas
+    # ============================================================
+    ClaimFeatureInput:
+      type: object
+      required: [agent_type]
+      properties:
+        agent_type:
+          type: string
+          description: Agent type claiming this feature (e.g. 'claude', 'gemini', 'codex', 'copilot').
+          example: 'claude'
+        metadata:
+          type: string
+          nullable: true
+          description: Optional JSON metadata about the agent's execution context.
+          example: '{"branch":"feature/auth"}'
+        force:
+          type: boolean
+          default: false
+          description: Force claim even if another agent holds it.
+
+    ClaimConflictError:
+      type: object
+      required: [error, message, conflict]
+      description: Returned when a feature is already claimed by another agent.
+      properties:
+        error:
+          type: string
+          enum: [claim_conflict]
+        message:
+          type: string
+          example: "Feature already claimed by 'claude'"
+        conflict:
+          type: object
+          required: [agent_type, feature_id, claimed_at]
+          properties:
+            agent_type:
+              type: string
+              description: The agent type that currently owns the claim.
+              example: 'claude'
+            feature_id:
+              type: string
+              format: uuid
+              description: The feature ID that is already claimed.
+            claimed_at:
+              type: string
+              format: date-time
+              description: When the existing claim was established.
+            claim_metadata:
+              type: string
+              nullable: true
+              description: Optional metadata from the existing claim.
+
+    CompleteFeatureInput:
+      type: object
+      required: [summary]
+      properties:
+        summary:
+          type: string
+          description: Summary of work done.
+        commits:
+          type: array
+          default: []
+          items:
+            type: object
+            required: [sha, message]
+            properties:
+              sha:
+                type: string
+              message:
+                type: string
+              author:
+                type: string
+                nullable: true
+
+    CompleteFeatureResponse:
+      type: object
+      required: [feature, history]
+      properties:
+        feature:
+          $ref: '#/components/schemas/Feature'
+        history:
+          $ref: '#/components/schemas/FeatureHistory'

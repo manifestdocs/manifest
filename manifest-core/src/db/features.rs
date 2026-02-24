@@ -11,10 +11,10 @@ use super::{
 use crate::models::*;
 
 /// SELECT columns for the features table (bare names).
-const FEATURE_COLS: &str = "id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, feature_number, target_version_id, verification_result, verified_at, created_at, updated_at";
+const FEATURE_COLS: &str = "id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, feature_number, target_version_id, verification_result, verified_at, claimed_by, claimed_at, claim_metadata, created_at, updated_at";
 
 /// SELECT columns for the features table with `f.` table alias.
-const FEATURE_COLS_F: &str = "f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.feature_number, f.target_version_id, f.verification_result, f.verified_at, f.created_at, f.updated_at";
+const FEATURE_COLS_F: &str = "f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.feature_number, f.target_version_id, f.verification_result, f.verified_at, f.claimed_by, f.claimed_at, f.claim_metadata, f.created_at, f.updated_at";
 
 impl Database {
     /// Get all features across all projects with optional pagination.
@@ -289,6 +289,9 @@ impl Database {
             target_version_id,
             verification_result: None,
             verified_at: None,
+            claimed_by: None,
+            claimed_at: None,
+            claim_metadata: None,
             created_at: now,
             updated_at: now,
         })
@@ -390,6 +393,9 @@ impl Database {
                 target_version_id,
                 verification_result: None,
                 verified_at: None,
+                claimed_by: None,
+                claimed_at: None,
+                claim_metadata: None,
                 created_at: now,
                 updated_at: now,
             });
@@ -594,6 +600,9 @@ impl Database {
             target_version_id,
             verification_result: existing.verification_result,
             verified_at: existing.verified_at,
+            claimed_by: existing.claimed_by,
+            claimed_at: existing.claimed_at,
+            claim_metadata: existing.claim_metadata,
             created_at: existing.created_at,
             updated_at: now,
         };
@@ -1077,7 +1086,9 @@ impl Database {
                    AND f.state IN ('proposed', 'in_progress')
                    AND f.parent_id IS NOT NULL
                    AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
-                 ORDER BY f.priority ASC, f.created_at ASC
+                 ORDER BY
+                     CASE f.state WHEN 'proposed' THEN 0 ELSE 1 END,
+                     f.priority ASC, f.created_at ASC
                  LIMIT 1"
             );
             sqlx::query(&sql)
@@ -1103,6 +1114,7 @@ impl Database {
                     CASE WHEN f.target_version_id IS NOT NULL AND f.target_version_id = (SELECT id FROM next_version) THEN 0
                          WHEN f.target_version_id IS NULL THEN 1
                          ELSE 2 END,
+                    CASE f.state WHEN 'proposed' THEN 0 ELSE 1 END,
                     f.priority ASC,
                     f.created_at ASC
                 LIMIT 1"
@@ -1346,5 +1358,270 @@ impl Database {
         }
 
         Ok(report)
+    }
+
+    /// Set claim fields on a feature (called when an agent starts work).
+    pub async fn set_feature_claim(
+        &self,
+        id: FeatureId,
+        agent_type: &str,
+        metadata: Option<&str>,
+    ) -> Result<()> {
+        let now = Utc::now();
+        sqlx::query(
+            "UPDATE features SET claimed_by = $1, claimed_at = $2, claim_metadata = $3, updated_at = $4 WHERE id = $5",
+        )
+        .bind(agent_type)
+        .bind(now.to_rfc3339())
+        .bind(metadata)
+        .bind(now.to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Atomically claim a feature: check for existing claims, transition state
+    /// to in_progress, and set claim fields — all within a single transaction.
+    ///
+    /// Uses `BEGIN IMMEDIATE` on SQLite to acquire a write lock at transaction
+    /// start, preventing two agents from simultaneously reading the feature as
+    /// unclaimed and both proceeding to claim it.
+    ///
+    /// Returns the updated Feature on success.
+    /// Returns `ManifestError::ClaimConflict` if another agent already holds a claim.
+    /// Returns `ManifestError::NotFound` if the feature does not exist.
+    pub async fn claim_feature_atomic(
+        &self,
+        id: FeatureId,
+        agent_type: &str,
+        metadata: Option<&str>,
+        force: bool,
+    ) -> Result<Feature> {
+        let mut conn = self.pool.acquire().await?;
+
+        // Use BEGIN IMMEDIATE for SQLite to acquire write lock immediately,
+        // preventing concurrent readers from proceeding with stale data.
+        // PostgreSQL uses standard BEGIN (row-level locking via SELECT FOR UPDATE).
+        if self.dialect.is_sqlite() {
+            sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+        } else {
+            sqlx::query("BEGIN").execute(&mut *conn).await?;
+        }
+
+        // Fetch the feature within the transaction
+        let row = sqlx::query(&format!(
+            "SELECT {FEATURE_COLS} FROM features WHERE id = $1{}",
+            if self.dialect.is_postgres() {
+                " FOR UPDATE"
+            } else {
+                ""
+            }
+        ))
+        .bind(id.to_string())
+        .fetch_optional(&mut *conn)
+        .await;
+
+        let row = match row {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                return Err(ManifestError::not_found("Feature").into());
+            }
+            Err(e) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                return Err(e.into());
+            }
+        };
+
+        let feature: Feature = row_to_feature(&row)?;
+
+        // Check for existing claim conflict (unless force=true)
+        if !force && feature.claimed_by.is_some() && feature.state == FeatureState::InProgress {
+            let conflict = super::ClaimConflictInfo {
+                agent_type: feature.claimed_by.clone().unwrap_or_default(),
+                feature_id: id.to_string(),
+                claimed_at: feature
+                    .claimed_at
+                    .map(|t| t.to_rfc3339())
+                    .unwrap_or_default(),
+                claim_metadata: feature.claim_metadata.clone(),
+            };
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            return Err(ManifestError::ClaimConflict(conflict).into());
+        }
+
+        let now = Utc::now();
+
+        // Determine if state transition is needed
+        let should_transition = matches!(
+            feature.state,
+            FeatureState::Proposed | FeatureState::Implemented
+        );
+        let new_state = if should_transition {
+            FeatureState::InProgress
+        } else {
+            feature.state
+        };
+
+        // If transitioning to in_progress, auto-assign to "next" version
+        let target_version_id = if new_state == FeatureState::InProgress
+            && feature.state != FeatureState::InProgress
+        {
+            // Look up the next version (outside the critical path is fine,
+            // but we do it inside the txn for consistency)
+            let next_ver: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at LIMIT 1",
+            )
+            .bind(feature.project_id.to_string())
+            .fetch_optional(&mut *conn)
+            .await?;
+            next_ver.or(feature.target_version_id.map(|v| v.to_string()))
+        } else {
+            feature.target_version_id.map(|v| v.to_string())
+        };
+
+        // Atomically update state + claim in a single UPDATE
+        let result = sqlx::query(
+            "UPDATE features SET state = $1, claimed_by = $2, claimed_at = $3, claim_metadata = $4, target_version_id = $5, updated_at = $6 WHERE id = $7",
+        )
+        .bind(new_state.as_str())
+        .bind(agent_type)
+        .bind(now.to_rfc3339())
+        .bind(metadata)
+        .bind(&target_version_id)
+        .bind(now.to_rfc3339())
+        .bind(id.to_string())
+        .execute(&mut *conn)
+        .await;
+
+        if let Err(e) = result {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            return Err(e.into());
+        }
+
+        // Commit the transaction
+        sqlx::query("COMMIT").execute(&mut *conn).await?;
+
+        // Emit event
+        let _ = self.events.send(FeatureEvent::Updated {
+            project_id: feature.project_id,
+        });
+
+        // Re-fetch the updated feature
+        let updated = self
+            .get_feature(id)
+            .await?
+            .ok_or_else(|| ManifestError::not_found("Feature"))?;
+
+        Ok(updated)
+    }
+
+    /// Clear claim fields on a feature (called when work is completed).
+    pub async fn clear_feature_claim(&self, id: FeatureId) -> Result<()> {
+        let now = Utc::now();
+        sqlx::query(
+            "UPDATE features SET claimed_by = NULL, claimed_at = NULL, claim_metadata = NULL, updated_at = $1 WHERE id = $2",
+        )
+        .bind(now.to_rfc3339())
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Complete a feature: create history entry, update state to implemented,
+    /// clear claims, clear desired_details, and emit a Completed event.
+    ///
+    /// This consolidates the completion logic that was previously split between
+    /// the MCP tool and API handler, following the principle:
+    /// "business logic lives in the DB layer."
+    pub async fn complete_feature(
+        &self,
+        feature_id: FeatureId,
+        summary: &str,
+        commits: &[CommitRef],
+    ) -> Result<(Feature, FeatureHistory)> {
+        // Get current feature
+        let feature = self
+            .get_feature(feature_id)
+            .await?
+            .ok_or_else(|| ManifestError::not_found("Feature"))?;
+
+        // Verify it's a leaf feature
+        if !self.is_leaf(feature_id).await? {
+            return Err(ManifestError::invalid_state("Cannot complete a non-leaf feature").into());
+        }
+
+        // Capture agent_type before clearing claim
+        let agent_type = feature.claimed_by.clone();
+
+        // Create history entry
+        let history = self
+            .create_history_entry(CreateHistoryInput {
+                feature_id,
+                version_id: None, // will default to feature's target_version_id
+                details: HistoryDetails {
+                    summary: summary.to_string(),
+                    commits: commits.to_vec(),
+                },
+            })
+            .await?;
+
+        // Update state to implemented + clear claims + clear desired_details
+        let needs_state_change = feature.state != FeatureState::Implemented;
+        let has_pending_changes = feature.desired_details.is_some();
+
+        let input = UpdateFeatureInput {
+            parent_id: None,
+            title: None,
+            details: None,
+            desired_details: if has_pending_changes {
+                Some(None) // Clear desired_details
+            } else {
+                None
+            },
+            details_summary: None,
+            state: if needs_state_change {
+                Some(FeatureState::Implemented)
+            } else {
+                None
+            },
+            priority: None,
+            target_version_id: None,
+            blocked_by: None,
+        };
+
+        // If neither state change nor pending changes, still clear claims
+        if !needs_state_change && !has_pending_changes {
+            self.clear_feature_claim(feature_id).await?;
+        } else {
+            self.update_feature(feature_id, input).await?;
+            self.clear_feature_claim(feature_id).await?;
+        }
+
+        // Re-fetch feature with updated state
+        let updated_feature = self
+            .get_feature(feature_id)
+            .await?
+            .ok_or_else(|| ManifestError::not_found("Feature"))?;
+
+        // Get project name for the Completed event
+        let project_name = self
+            .get_project(feature.project_id)
+            .await?
+            .map(|p| p.name)
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Emit Completed event (richer than generic Updated)
+        let _ = self.events.send(FeatureEvent::Completed {
+            project_id: feature.project_id,
+            feature_id,
+            feature_title: updated_feature.title.clone(),
+            project_name,
+            agent_type,
+        });
+
+        Ok((updated_feature, history))
     }
 }

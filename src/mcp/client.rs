@@ -763,4 +763,58 @@ impl ManifestClient {
             .await?;
         self.handle_response(response).await
     }
+
+    /// Atomically claim a feature (agent_type, metadata).
+    ///
+    /// Returns `ClientError::Conflict` with structured JSON body if another
+    /// agent already holds a claim (unless force=true).
+    pub async fn set_feature_claim(
+        &self,
+        id: Uuid,
+        agent_type: &str,
+        metadata: Option<&str>,
+        force: bool,
+    ) -> Result<(), ClientError> {
+        let body = serde_json::json!({
+            "agent_type": agent_type,
+            "metadata": metadata,
+            "force": force,
+        });
+        let response = self
+            .request(reqwest::Method::PUT, &format!("/features/{}/claim", id))
+            .json(&body)
+            .send()
+            .await?;
+        self.handle_response::<serde_json::Value>(response).await?;
+        Ok(())
+    }
+
+    /// Complete a feature: create history, update state, clear claims.
+    pub async fn complete_feature(
+        &self,
+        feature_id: Uuid,
+        summary: &str,
+        commits: &[CommitRef],
+    ) -> Result<CompleteFeatureResponse, ClientError> {
+        let body = serde_json::json!({
+            "summary": summary,
+            "commits": commits,
+        });
+        let response = self
+            .request(
+                reqwest::Method::POST,
+                &format!("/features/{}/complete", feature_id),
+            )
+            .json(&body)
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+}
+
+/// Response from the complete_feature endpoint.
+#[derive(Debug, serde::Deserialize)]
+pub struct CompleteFeatureResponse {
+    pub feature: Feature,
+    pub history: FeatureHistory,
 }

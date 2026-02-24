@@ -247,6 +247,11 @@ pub(crate) fn row_to_feature(row: &AnyRow) -> Result<Feature> {
         verified_at: row
             .get::<Option<String>, _>("verified_at")
             .and_then(|s| parse_datetime(s).ok()),
+        claimed_by: row.get::<Option<String>, _>("claimed_by"),
+        claimed_at: row
+            .get::<Option<String>, _>("claimed_at")
+            .and_then(|s| parse_datetime(s).ok()),
+        claim_metadata: row.get::<Option<String>, _>("claim_metadata"),
         created_at: parse_datetime(row.get("created_at"))?,
         updated_at: parse_datetime(row.get("updated_at"))?,
     })

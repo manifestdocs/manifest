@@ -28,12 +28,14 @@ use super::spec::SpecConfig;
 use super::client_err;
 
 /// Check if an in_progress feature is stale (no update for >24h).
-/// Returns a warning text block if stale, None otherwise.
+/// Uses `claimed_at` when available (more accurate — not reset by metadata changes),
+/// falls back to `updated_at` for features claimed before this field existed.
 pub(crate) fn stale_warning(feature: &Feature) -> Option<String> {
     if feature.state != FeatureState::InProgress {
         return None;
     }
-    let elapsed = Utc::now() - feature.updated_at;
+    let reference_time = feature.claimed_at.unwrap_or(feature.updated_at);
+    let elapsed = Utc::now() - reference_time;
     if elapsed > chrono::Duration::hours(24) {
         let hours = elapsed.num_hours();
         let display = if hours >= 48 {
@@ -41,11 +43,16 @@ pub(crate) fn stale_warning(feature: &Feature) -> Option<String> {
         } else {
             format!("{} hours", hours)
         };
+        let claimed_by_info = feature
+            .claimed_by
+            .as_deref()
+            .map(|agent| format!(" (claimed by '{}')", agent))
+            .unwrap_or_default();
         Some(format!(
-            "WARNING: This feature has been in_progress for {} with no updates. \
+            "WARNING: This feature has been in_progress for {}{} with no updates. \
              If work is complete, call complete_feature to record what was done. \
              If work was abandoned, update state back to 'proposed'.",
-            display
+            display, claimed_by_info
         ))
     } else {
         None
@@ -519,30 +526,45 @@ pub async fn start_feature(
     // Track whether this is a change request (implemented feature with desired_details)
     let has_change_request = feature_with_context.feature.desired_details.is_some();
 
-    // Transition to in_progress if proposed, or if implemented with pending changes
-    let should_transition = match feature_with_context.feature.state {
-        FeatureState::Proposed => true,
-        FeatureState::Implemented if feature_with_context.feature.desired_details.is_some() => true,
-        _ => false,
-    };
-    if should_transition {
-        client
-            .update_feature(
-                feature_id,
-                &UpdateFeatureInput {
-                    parent_id: None,
-                    title: None,
-                    details: None,
-                    desired_details: None,
-                    details_summary: None,
-                    state: Some(FeatureState::InProgress),
-                    priority: None,
-                    target_version_id: None,
-                    blocked_by: None,
-                },
-            )
-            .await
-            .map_err(client_err)?;
+    // Atomic claim: transition state to in_progress + set claim fields in one
+    // transaction. Returns a clear conflict error if another agent already
+    // holds a claim (unless force=true).
+    if let Err(e) = client
+        .set_feature_claim(
+            feature_id,
+            &req.agent_type,
+            req.claim_metadata.as_deref(),
+            req.force,
+        )
+        .await
+    {
+        if let crate::mcp::client::ClientError::Conflict(ref body) = e {
+            // Parse the structured conflict response for a clear agent message
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) {
+                if parsed.get("error").and_then(|v| v.as_str()) == Some("claim_conflict") {
+                    let conflict = &parsed["conflict"];
+                    let agent = conflict["agent_type"].as_str().unwrap_or("unknown");
+                    let claimed_at = conflict["claimed_at"].as_str().unwrap_or("unknown time");
+                    let feature_id_str = conflict["feature_id"].as_str().unwrap_or("unknown");
+                    let metadata_info = conflict["claim_metadata"]
+                        .as_str()
+                        .map(|m| format!("\nClaim metadata: {}", m))
+                        .unwrap_or_default();
+
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "CONFLICT: Feature '{}' is already claimed by '{}' (since {}, feature_id: {}).{}\n\
+                         To override, call start_feature with force=true.\n\
+                         Otherwise, pick a different feature — use get_next_feature or find_features with state='proposed'.",
+                        feature_with_context.feature.title,
+                        agent,
+                        claimed_at,
+                        feature_id_str,
+                        metadata_info,
+                    ))]));
+                }
+            }
+        }
+        return Err(client_err(e));
     }
 
     // Cascade: also start all proposed children (max 5 levels deep)
@@ -730,14 +752,14 @@ pub async fn complete_feature(
         })
         .collect();
 
-    // Create history entry directly (no session)
-    let history = client
-        .create_feature_history(feature_id, &req.summary, &commits)
+    // Complete feature (creates history + updates state + clears claims + emits event)
+    let response = client
+        .complete_feature(feature_id, &req.summary, &commits)
         .await
         .map_err(client_err)?;
 
-    // Get updated feature
-    let feature = client.get_feature(feature_id).await.map_err(client_err)?;
+    let feature = response.feature;
+    let history = response.history;
 
     // Git: merge feature branch back into default branch (best-effort)
     let mut merge_message: Option<String> = None;

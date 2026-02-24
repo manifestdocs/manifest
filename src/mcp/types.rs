@@ -16,6 +16,25 @@ use crate::serde_helpers::default_true;
 pub struct StartFeatureRequest {
     #[schemars(description = "The UUID of the feature to start working on")]
     pub feature_id: String,
+    #[schemars(
+        description = "Agent type claiming this feature: 'claude', 'gemini', 'codex', or 'copilot'. Defaults to 'claude'."
+    )]
+    #[serde(default = "default_agent_type")]
+    pub agent_type: String,
+    #[schemars(
+        description = "Force start even if another agent has claimed this feature. Default false."
+    )]
+    #[serde(default)]
+    pub force: bool,
+    #[schemars(
+        description = "Optional JSON metadata about the agent's execution context (e.g., branch name, worktree path, container ID)."
+    )]
+    #[serde(default)]
+    pub claim_metadata: Option<String>,
+}
+
+fn default_agent_type() -> String {
+    "claude".to_string()
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -734,6 +734,77 @@ fn truncate_at_file_boundary(diff: &str, max_chars: usize) -> String {
     result
 }
 
+// ============================================================
+// Claim Management
+// ============================================================
+
+/// Input for setting a feature claim.
+#[derive(Debug, Deserialize)]
+pub struct SetClaimInput {
+    pub agent_type: String,
+    pub metadata: Option<String>,
+    /// Force claim even if another agent holds it. Default false.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// PUT /features/:id/claim — atomically claim a feature.
+///
+/// Returns 200 on success, 409 Conflict with structured body if another agent
+/// already holds a claim (unless force=true).
+pub async fn set_feature_claim(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+    Json(input): Json<SetClaimInput>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    db.claim_feature_atomic(
+        id.into(),
+        &input.agent_type,
+        input.metadata.as_deref(),
+        input.force,
+    )
+    .await
+    .map_err(internal_error)?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ============================================================
+// Feature Completion
+// ============================================================
+
+/// Input for completing a feature.
+#[derive(Debug, Deserialize)]
+pub struct CompleteFeatureInput {
+    pub summary: String,
+    #[serde(default)]
+    pub commits: Vec<CommitRef>,
+}
+
+/// POST /features/:id/complete — complete a feature (create history + update state + clear claims).
+pub async fn complete_feature(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+    Json(input): Json<CompleteFeatureInput>,
+) -> Result<(StatusCode, Json<CompleteFeatureResponse>), ApiError> {
+    let (feature, history) = db
+        .complete_feature(id.into(), &input.summary, &input.commits)
+        .await
+        .map_err(internal_error)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(CompleteFeatureResponse { feature, history }),
+    ))
+}
+
+/// Response for the complete_feature endpoint.
+#[derive(Debug, serde::Serialize)]
+pub struct CompleteFeatureResponse {
+    pub feature: Feature,
+    pub history: FeatureHistory,
+}
+
 /// Subscribe to real-time feature change notifications via SSE.
 pub async fn subscribe_project_features(
     State(db): State<Database>,
@@ -745,8 +816,23 @@ pub async fn subscribe_project_features(
     let stream = BroadcastStream::new(rx).filter_map(move |result| {
         let val = match result {
             Ok(event) if event.project_id() == project_id => {
-                // Emit a simple "change" event - client will refetch
-                Some(Ok(Event::default().event("change").data("feature_changed")))
+                use crate::db::FeatureEvent;
+                match event {
+                    FeatureEvent::Completed {
+                        feature_title,
+                        agent_type,
+                        ..
+                    } => {
+                        let payload = serde_json::json!({
+                            "feature_title": feature_title,
+                            "agent_type": agent_type,
+                        });
+                        Some(Ok(Event::default()
+                            .event("feature_completed")
+                            .data(payload.to_string())))
+                    }
+                    _ => Some(Ok(Event::default().event("change").data("feature_changed"))),
+                }
             }
             Ok(_) => None,  // Different project, ignore
             Err(_) => None, // Lagged, ignore (client will catch up on next event)

@@ -199,7 +199,7 @@ impl McpServer {
     // ============================================================
 
     #[tool(
-        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress'. Returns full feature details—this is your spec to implement. IMPORTANT: You MUST call this tool when a user asks you to implement, work on, or build a feature—even if you just created the feature or already have context. Also handles implemented features with pending changes (desired_details set by a human edit)—transitions implemented → in_progress so you can implement the requested changes. Do not change the feature's target version during implementation.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). If you need to work on an area that has children, start one of its child features instead."
+        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress' and records your claim (agent_type + metadata). Returns full feature details—this is your spec to implement. IMPORTANT: You MUST call this tool when a user asks you to implement, work on, or build a feature—even if you just created the feature or already have context. Also handles implemented features with pending changes (desired_details set by a human edit)—transitions implemented → in_progress so you can implement the requested changes. Do not change the feature's target version during implementation.\n\nCONCURRENCY: If another agent has claimed this feature, returns a conflict warning with details (who claimed it, when, branch info). Use force=true to override the claim.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). If you need to work on an area that has children, start one of its child features instead."
     )]
     async fn start_feature(
         &self,
@@ -209,7 +209,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, then sets state to 'implemented'. Automatically clears desired_details if present (pending change request fulfilled). Call only after verification.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). Only leaf features can be completed. If a parent's children are all implemented, the parent's status is derived automatically — do NOT attempt to complete the parent.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI."
+        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, sets state to 'implemented', and clears the agent claim. Automatically clears desired_details if present (pending change request fulfilled). Call only after verification.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). Only leaf features can be completed. If a parent's children are all implemented, the parent's status is derived automatically — do NOT attempt to complete the parent.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI."
     )]
     async fn complete_feature(
         &self,
@@ -239,7 +239,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "ORIENT: Get the highest-priority workable feature. Returns the top 'proposed' or 'in_progress' feature from the next unreleased version. Use ONLY when the user explicitly asks for \"the next feature\", \"what's next\", or \"what should I work on\". Do NOT use this when the user references a specific feature—use get_active_feature instead.\n\nIf the returned feature is 'in_progress', another agent is likely already working on it. Ask the user before claiming it, and suggest the next 'proposed' feature as an alternative (use find_features with state='proposed')."
+        description = "ORIENT: Get the highest-priority workable feature. Returns the top 'proposed' feature from the next unreleased version (prefers proposed over in_progress). Use ONLY when the user explicitly asks for \"the next feature\", \"what's next\", or \"what should I work on\". Do NOT use this when the user references a specific feature—use get_active_feature instead.\n\nIf the returned feature is 'in_progress', another agent has already claimed it—skip it and call find_features with state='proposed' to find unclaimed work instead."
     )]
     async fn get_next_feature(
         &self,
@@ -430,7 +430,7 @@ When all features in the "next" version are implemented, ask the user before cal
 When the user asks you to work on something, use these tools to find the right feature:
 
 - get_active_feature — the feature selected in the Manifest app. Call this FIRST when the user says "this feature", "work on this", "implement it", or gives instructions without specifying which feature. After calling, confirm by naming the feature.
-- get_next_feature — highest-priority proposed or in_progress feature from the next unreleased version. Use ONLY when the user explicitly says "next feature", "what's next", or "what should I work on next".
+- get_next_feature — highest-priority proposed feature from the next unreleased version. Use ONLY when the user explicitly says "next feature", "what's next", or "what should I work on next". If it returns an in_progress feature, skip it (another agent claimed it) and use find_features with state='proposed' instead.
 - find_features — search by project, state, or keyword
 - get_feature — full details and history for a known feature ID
 - get_project_instructions — full project instructions when the breadcrumb summary isn't enough
@@ -524,7 +524,7 @@ ALWAYS call update_feature after implementing — details must reflect what was 
 ALWAYS call complete_feature with summary and commit SHAs — this records history and marks the feature done.
 NEVER change a feature's target version during implementation.
 NEVER call start_feature or complete_feature on a feature set (▪ symbol, has children). These tools reject non-leaf features. Work on leaf children instead.
-If a feature is already in_progress, ASK the user before working on it — another agent likely claimed it. Offer the next proposed feature as an alternative.
+If a feature is already in_progress, skip it — another agent claimed it. Use find_features with state='proposed' to find unclaimed work instead.
 The word "next" triggers get_next_feature. All other references trigger get_active_feature.
 </critical_rules>
 </manifest_instructions>"#;

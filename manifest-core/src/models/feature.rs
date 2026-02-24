@@ -244,6 +244,16 @@ pub struct Feature {
     /// Timestamp of the most recent verification run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified_at: Option<DateTime<Utc>>,
+    /// Agent type that claimed this feature (e.g., "claude", "gemini", "codex", "copilot").
+    /// Set when `start_feature` transitions to `in_progress`, cleared on `complete_feature`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claimed_by: Option<String>,
+    /// When the feature was claimed (RFC3339). Used for staleness detection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claimed_at: Option<DateTime<Utc>>,
+    /// Agent-specific metadata as JSON (e.g., branch name, worktree path, container ID).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_metadata: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
