@@ -63,7 +63,7 @@ impl SpecStatus {
 
     /// True when details exist but are very sparse (leaf only).
     /// Threshold adapts to `ac_level`.
-    pub fn has_warnings(&self, config: &SpecConfig) -> bool {
+    pub fn is_sparse(&self, config: &SpecConfig) -> bool {
         if self.tier != FeatureTier::Leaf || !self.has_details {
             return false;
         }
@@ -73,6 +73,25 @@ impl SpecStatus {
             GuidanceLevel::Thorough => 40,
         };
         self.word_count < threshold
+    }
+
+    /// True when leaf spec is too long. Research shows comprehensive specs
+    /// degrade agent performance compared to focused ones (SkillsBench 2026).
+    pub fn is_verbose(&self, config: &SpecConfig) -> bool {
+        if self.tier != FeatureTier::Leaf || !self.has_details {
+            return false;
+        }
+        let threshold = match config.ac_level {
+            GuidanceLevel::Concise => 200,
+            GuidanceLevel::Standard => 400,
+            GuidanceLevel::Thorough => 600,
+        };
+        self.word_count > threshold
+    }
+
+    /// True when either sparse or verbose warnings apply.
+    pub fn has_warnings(&self, config: &SpecConfig) -> bool {
+        self.is_sparse(config) || self.is_verbose(config)
     }
 
     /// One-line status string for MCP responses.
@@ -173,17 +192,18 @@ impl SpecStatus {
                 GuidanceLevel::Concise => {
                     "This feature has no specification. Use update_feature to add details before starting.\n\n\
                      Write a brief specification (~30-80 words):\n\
-                     - Goal: what the feature does and why\n\
-                     - Key constraint: the most important limitation or requirement"
+                     - Intent: what capability this adds and why it matters\n\
+                     - Key constraint: the most important limitation or requirement\n\
+                     - Do NOT include: file paths, directory structure, or implementation approach"
                         .to_string()
                 }
                 GuidanceLevel::Standard => {
                     "This feature has no specification. Use update_feature to add details before starting.\n\n\
-                     Write a concise specification (~50-150 words):\n\
-                     - Goal: what the feature does and why\n\
-                     - Constraints: performance, security, compatibility\n\
-                     - Key interfaces: function signatures with types (if applicable)\n\
-                     - Examples: 1-3 concrete examples of expected behavior (if helpful)"
+                     Write a focused specification (~50-150 words):\n\
+                     - Intent: what capability this adds and why it matters\n\
+                     - Constraints: business rules, edge cases, non-obvious requirements\n\
+                     - Done when: 2-3 concrete acceptance criteria\n\
+                     - Do NOT include: file paths, codebase structure, or implementation approach \u{2014} agents discover these from code"
                         .to_string()
                 }
                 GuidanceLevel::Thorough => {
@@ -191,27 +211,36 @@ impl SpecStatus {
                      Write a detailed specification (~100-300 words):\n\
                      - Story: As a [user], I can [capability] so that [benefit]\n\
                      - Acceptance criteria: Given/When/Then for key scenarios\n\
-                     - Constraints: performance, security, compatibility\n\
-                     - Key interfaces: function signatures with types\n\
-                     - Examples: concrete examples of expected behavior"
+                     - Constraints: business rules, domain-specific requirements, edge cases\n\
+                     - Do NOT include: file paths, directory structure, codebase overviews, or step-by-step implementation plans \u{2014} agents discover code structure on their own"
                         .to_string()
                 }
             });
         }
 
-        let threshold = match config.ac_level {
-            GuidanceLevel::Concise => 10,
-            GuidanceLevel::Standard => 20,
-            GuidanceLevel::Thorough => 40,
-        };
-
-        if self.word_count < threshold {
+        if self.is_sparse(config) {
             return Some(
                 "Specification exists but is brief. Consider adding key constraints \
-                 or examples before implementing."
+                 or acceptance criteria before implementing."
                     .to_string(),
             );
         }
+
+        if self.is_verbose(config) {
+            let (target, limit) = match config.ac_level {
+                GuidanceLevel::Concise => ("30-80", 200),
+                GuidanceLevel::Standard => ("50-150", 400),
+                GuidanceLevel::Thorough => ("100-300", 600),
+            };
+            return Some(format!(
+                "Spec is ~{} words (over {} word limit). Research shows focused specs ({} words) \
+                 outperform comprehensive ones. Consider trimming to intent, constraints, and \
+                 acceptance criteria only. Remove file paths, implementation details, and \
+                 codebase descriptions \u{2014} agents discover these from code.",
+                self.word_count, limit, target,
+            ));
+        }
+
         None
     }
 }
@@ -321,12 +350,20 @@ mod tests {
     }
 
     #[test]
-    fn no_details_guidance_mentions_goal_and_constraints() {
+    fn no_details_guidance_mentions_intent_and_constraints() {
         let config = default_config();
         let status = analyze_spec(None, false, false);
         let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("Goal"));
+        assert!(guidance.contains("Intent"));
         assert!(guidance.contains("Constraints"));
+    }
+
+    #[test]
+    fn no_details_guidance_discourages_file_paths() {
+        let config = default_config();
+        let status = analyze_spec(None, false, false);
+        let guidance = status.guidance(&config).unwrap();
+        assert!(guidance.contains("Do NOT include"));
     }
 
     // --- Feature set tests ---
@@ -516,5 +553,75 @@ mod tests {
         let guidance = status.guidance(&config).unwrap();
         assert!(guidance.contains("Domain terminology"));
         assert!(guidance.contains("alternatives considered"));
+    }
+
+    // --- Verbose spec tests ---
+
+    #[test]
+    fn verbose_spec_warns_standard() {
+        let config = default_config();
+        // Generate a spec over 400 words
+        let words: Vec<&str> = std::iter::repeat("word").take(410).collect();
+        let spec = words.join(" ");
+        let status = analyze_spec(Some(&spec), false, false);
+        assert!(status.is_verbose(&config));
+        assert!(status.has_warnings(&config));
+        let guidance = status.guidance(&config).unwrap();
+        assert!(guidance.contains("over 400 word limit"));
+        assert!(guidance.contains("focused specs"));
+    }
+
+    #[test]
+    fn verbose_spec_warns_concise() {
+        let config = concise_config();
+        let words: Vec<&str> = std::iter::repeat("word").take(210).collect();
+        let spec = words.join(" ");
+        let status = analyze_spec(Some(&spec), false, false);
+        assert!(status.is_verbose(&config));
+        assert!(status.has_warnings(&config));
+        let guidance = status.guidance(&config).unwrap();
+        assert!(guidance.contains("over 200 word limit"));
+    }
+
+    #[test]
+    fn verbose_spec_warns_thorough() {
+        let config = thorough_config();
+        let words: Vec<&str> = std::iter::repeat("word").take(610).collect();
+        let spec = words.join(" ");
+        let status = analyze_spec(Some(&spec), false, false);
+        assert!(status.is_verbose(&config));
+        let guidance = status.guidance(&config).unwrap();
+        assert!(guidance.contains("over 600 word limit"));
+    }
+
+    #[test]
+    fn under_verbose_threshold_no_warning() {
+        let config = default_config();
+        let words: Vec<&str> = std::iter::repeat("word").take(100).collect();
+        let spec = words.join(" ");
+        let status = analyze_spec(Some(&spec), false, false);
+        assert!(!status.is_verbose(&config));
+        assert!(!status.is_sparse(&config));
+        assert!(!status.has_warnings(&config));
+        assert!(status.guidance(&config).is_none());
+    }
+
+    #[test]
+    fn verbose_does_not_apply_to_feature_sets() {
+        let config = default_config();
+        let words: Vec<&str> = std::iter::repeat("word").take(500).collect();
+        let spec = words.join(" ");
+        let status = analyze_spec(Some(&spec), true, false);
+        assert!(!status.is_verbose(&config));
+        assert!(!status.has_warnings(&config));
+    }
+
+    #[test]
+    fn verbose_does_not_apply_to_projects() {
+        let config = default_config();
+        let words: Vec<&str> = std::iter::repeat("word").take(500).collect();
+        let spec = words.join(" ");
+        let status = analyze_spec(Some(&spec), true, true);
+        assert!(!status.is_verbose(&config));
     }
 }

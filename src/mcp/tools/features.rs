@@ -626,7 +626,7 @@ pub async fn start_feature(
         ));
     }
 
-    // If spec has warnings, prepend a warning text block
+    // If spec is too sparse or too verbose, prepend a warning text block
     if spec_status.has_warnings(&config) {
         let warning = spec_status.guidance(&config).unwrap_or_default();
         content.push(Content::text(format!("\u{26a0} {}", warning)));

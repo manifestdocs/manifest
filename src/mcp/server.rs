@@ -185,7 +185,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "SETUP: Create a single feature. BEFORE creating, call find_features to check for duplicates and render_feature_tree to find the right parent group. Name by capability (e.g., 'Router') not task. Use parent_id to place under an existing group. For leaf features, add a concise specification in details. For parent features, add shared context that applies to all children. Use `plan` for bulk creation."
+        description = "SETUP: Create a single feature. BEFORE creating, call find_features to check for duplicates and render_feature_tree to find the right parent group. Features describe what the system CAN DO, not what you DID. They outlive the work that created them. Good: 'OAuth Login', 'CSV Export'. Bad: 'Fix login bug', 'Update icons', 'Add retry logic'. If the title describes a one-time action, update an existing feature instead of creating a new one. Use parent_id to place under an existing group. For leaf features, add a concise specification in details. For parent features, add shared context that applies to all children. Use `plan` for bulk creation."
     )]
     async fn create_feature(
         &self,
@@ -446,6 +446,8 @@ Features describe system capabilities, not work items to close. A feature titled
 start_feature returns tier-specific guidance for writing specs at each level (project, feature set, leaf). To write a spec, use update_feature with `details` to set it directly, or `desired_details` to propose changes for human review.
 
 When a human edits an implemented feature in the web UI, changes are saved to `desired_details` — start_feature returns guidance for handling these change requests.
+
+Spec quality: focused specs (50-200 words) outperform comprehensive ones. Write what the agent cannot discover from code — intent, business rules, edge cases, acceptance criteria. Do NOT put file paths, directory layouts, codebase overviews, or step-by-step implementation plans in specs — agents discover code structure on their own and extra context degrades performance.
 </features_as_docs>
 
 <updating_features>
