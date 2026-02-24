@@ -136,12 +136,12 @@ impl Database {
         project_id: ProjectId,
     ) -> Result<(Vec<PortfolioFeatureRef>, i64)> {
         let rows = sqlx::query(
-            "SELECT id, title FROM features
-             WHERE project_id = $1
-               AND state = 'in_progress'
-               AND parent_id IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = id)
-             ORDER BY priority ASC, created_at ASC",
+            "SELECT f.id, f.title FROM features f
+             WHERE f.project_id = $1
+               AND f.state = 'in_progress'
+               AND f.parent_id IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
+             ORDER BY f.priority ASC, f.created_at ASC",
         )
         .bind(project_id.to_string())
         .fetch_all(&self.pool)
@@ -168,12 +168,12 @@ impl Database {
         project_id: ProjectId,
     ) -> Result<(Vec<PortfolioFeatureRef>, i64)> {
         let rows = sqlx::query(
-            "SELECT id, title FROM features
-             WHERE project_id = $1
-               AND state = 'blocked'
-               AND parent_id IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = id)
-             ORDER BY priority ASC, created_at ASC",
+            "SELECT f.id, f.title FROM features f
+             WHERE f.project_id = $1
+               AND f.state = 'blocked'
+               AND f.parent_id IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
+             ORDER BY f.priority ASC, f.created_at ASC",
         )
         .bind(project_id.to_string())
         .fetch_all(&self.pool)
