@@ -173,7 +173,9 @@ pub struct CreateFeatureRequest {
     )]
     #[serde(default)]
     pub parent_id: Option<Uuid>,
-    #[schemars(description = "Short title for the feature (e.g., 'User Authentication')")]
+    #[schemars(
+        description = "Short capability name (2-5 words). Describe what users can DO, not what you changed. Good: 'User Authentication', 'Markdown Export'. Bad: 'Fix auth bug', 'Update header styling', 'Add validation'. If the work is a refinement of an existing capability, update that feature instead."
+    )]
     pub title: String,
     #[schemars(
         description = "Feature details. For leaf features: concise specification — goal, constraints, key interfaces. For parent features: shared context (architecture, patterns, constraints) that flows to children. IMPORTANT: Do not repeat the feature title in the details — the title is displayed separately."
