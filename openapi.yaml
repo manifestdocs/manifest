@@ -40,6 +40,14 @@ tags:
     description: Server health checks
   - name: Portfolio
     description: Multi-project dashboard — aggregated health snapshots for all projects
+  - name: Verification
+    description: Feature implementation verification
+  - name: Memories
+    description: Project memory storage for AI agents
+  - name: Settings
+    description: Server configuration management
+  - name: Analysis
+    description: Codebase analysis for project discovery
 
 paths:
   /portfolio:
@@ -96,6 +104,27 @@ paths:
                   status:
                     type: string
                     example: ok
+
+  /version:
+    get:
+      tags: [Health]
+      summary: Get server version
+      operationId: getVersion
+      responses:
+        '200':
+          description: Server version information
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, releases_url]
+                properties:
+                  version:
+                    type: string
+                    example: '1.0.0'
+                  releases_url:
+                    type: string
+                    example: 'https://api.github.com/repos/manifestdocs/manifest/releases/latest'
 
   # ============================================================
   # Filesystem
@@ -181,6 +210,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  # ============================================================
+  # Analysis
+  # ============================================================
+  /codebase/analyze:
+    get:
+      tags: [Analysis]
+      summary: Analyze a codebase directory
+      description: |
+        Discovers project structure including language, frameworks, modules, and documentation.
+        Used by AI agents before planning features to understand what capabilities exist.
+      operationId: analyzeProject
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Absolute path to the directory to analyze.
+        - name: include_docs
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+          description: Include documentation content (README, CLAUDE.md).
+        - name: max_depth
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 3
+          description: Maximum directory depth to scan.
+      responses:
+        '200':
+          description: Project analysis results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectAnalysis'
+        '400':
+          description: Invalid path
+        '403':
+          description: Access denied
+        '404':
+          description: Directory not found
 
   # ============================================================
   # Projects
@@ -556,6 +631,13 @@ paths:
         Always returns summaries only - use GET /features/{id} for full details.
       operationId: listProjectFeatures
       parameters:
+        - name: version_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter features by target version assignment.
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
       responses:
@@ -658,6 +740,53 @@ paths:
                 items:
                   $ref: '#/components/schemas/FeatureTreeNode'
 
+  /projects/{id}/features/next:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Features]
+      summary: Get the next workable feature
+      description: |
+        Returns the single highest-priority feature that is workable (proposed or in_progress).
+        Sort order: version > priority > created_at.
+        Features targeting the "next" version (first unreleased) come first,
+        then features with no version (backlog).
+      operationId: getNextFeature
+      parameters:
+        - name: version_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Optional version ID to filter features.
+      responses:
+        '200':
+          description: The next workable feature with context, or null if none found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureWithContext'
+                nullable: true
+
+  /projects/{id}/subscribe:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Features]
+      summary: Subscribe to feature change events (SSE)
+      description: |
+        Server-sent event stream that fires whenever a feature in this project is modified.
+        Events include `change` (generic modification) and `feature_completed` (with JSON payload).
+      operationId: subscribeProjectFeatures
+      responses:
+        '200':
+          description: SSE stream of feature change events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
   # ============================================================
   # Directories (standalone)
   # ============================================================
@@ -686,6 +815,13 @@ paths:
         Always returns summaries only - use GET /features/{id} for full details.
       operationId: listFeatures
       parameters:
+        - name: version_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter features by target version assignment.
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
       responses:
@@ -738,6 +874,38 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/FeatureSummary'
+
+  /features/resolve:
+    get:
+      tags: [Features]
+      summary: Resolve a feature by UUID, display ID, or prefix
+      description: |
+        Resolves a feature from a UUID, display ID (e.g. "MAN-42"), or UUID prefix.
+        Returns the matching feature if exactly one match is found.
+      operationId: resolveFeature
+      parameters:
+        - name: prefix
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 'ID to resolve: UUID, display ID like "MAN-42", or UUID prefix.'
+        - name: project_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Optional project UUID to scope the search to.
+      responses:
+        '200':
+          description: The resolved feature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Feature'
+        '404':
+          description: No feature found matching the prefix
 
   /features/{id}:
     parameters:
@@ -802,6 +970,27 @@ paths:
                 items:
                   $ref: '#/components/schemas/Feature'
 
+  /features/{id}/context:
+    parameters:
+      - $ref: '#/components/parameters/FeatureId'
+    get:
+      tags: [Features]
+      summary: Get a feature with hierarchical context
+      description: |
+        Returns the feature with navigation context: parent, siblings, children, and
+        breadcrumb trail from root. Used by AI agents to understand where a feature
+        sits in the tree.
+      operationId: getFeatureWithContext
+      responses:
+        '200':
+          description: Feature with hierarchical context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureWithContext'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /features/{id}/history:
     parameters:
       - $ref: '#/components/parameters/FeatureId'
@@ -846,6 +1035,70 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /features/{id}/verify:
+    parameters:
+      - $ref: '#/components/parameters/FeatureId'
+    post:
+      tags: [Verification]
+      summary: Get verification context
+      description: |
+        Assembles the feature spec + breadcrumb context and optionally filters a provided diff.
+        Returns structured context for an AI agent to analyze — no LLM call server-side.
+      operationId: getVerifyContext
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                diff:
+                  type: string
+                  nullable: true
+                  description: Optional git diff to include in the verification context.
+      responses:
+        '200':
+          description: Assembled verification context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyFeatureContextResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /features/{id}/verification:
+    parameters:
+      - $ref: '#/components/parameters/FeatureId'
+    put:
+      tags: [Verification]
+      summary: Record verification results
+      description: |
+        Stores agent-generated verification comments on the feature record.
+        Overwrites any previous verification result. Pass an empty comments array
+        if the implementation fully satisfies the spec.
+      operationId: recordFeatureVerification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [comments]
+              properties:
+                comments:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/VerificationComment'
+      responses:
+        '200':
+          description: Feature with updated verification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Feature'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /features/{id}/diff:
     parameters:
       - $ref: '#/components/parameters/FeatureId'
@@ -887,6 +1140,31 @@ paths:
                   $ref: '#/components/schemas/FeatureSummary'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /features/{id}/blocked-ancestor:
+    parameters:
+      - $ref: '#/components/parameters/FeatureId'
+    get:
+      tags: [Features]
+      summary: Find blocked ancestor in parent chain
+      description: |
+        Walks up the parent chain to find the first blocked ancestor feature set.
+        Returns null if no blocked ancestor is found.
+      operationId: findBlockedAncestor
+      responses:
+        '200':
+          description: Blocked ancestor if found, or null
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  title:
+                    type: string
 
   /features/{id}/claim:
     parameters:
@@ -953,6 +1231,188 @@ paths:
                 $ref: '#/components/schemas/CompleteFeatureResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Memories
+  # ============================================================
+  /projects/{id}/memories:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Memories]
+      summary: Search or list project memories
+      operationId: listMemories
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search query (full-text on SQLite, LIKE fallback on PostgreSQL). Omit to list all.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+            maximum: 100
+          description: Maximum results to return.
+      responses:
+        '200':
+          description: List of project memories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectMemory'
+    post:
+      tags: [Memories]
+      summary: Create a project memory
+      operationId: createMemory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMemoryInput'
+      responses:
+        '201':
+          description: Memory created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMemory'
+
+  /projects/{id}/memories/{memory_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Memory UUID
+    delete:
+      tags: [Memories]
+      summary: Delete a project memory
+      operationId: deleteMemory
+      responses:
+        '204':
+          description: Memory deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Settings
+  # ============================================================
+  /settings:
+    get:
+      tags: [Settings]
+      summary: Get server settings
+      operationId: getSettings
+      responses:
+        '200':
+          description: Current server configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  database_path:
+                    type: string
+                    nullable: true
+                  database_path_resolved:
+                    type: string
+                  config_file:
+                    type: string
+                  default_agent:
+                    type: string
+                    example: 'claude'
+    put:
+      tags: [Settings]
+      summary: Update server settings
+      description: |
+        Updates server configuration. If the database path changes, triggers a server restart.
+      operationId: updateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                database_path:
+                  type: string
+                  nullable: true
+                  description: Path to the SQLite database file. Null resets to default.
+                default_agent:
+                  type: string
+                  nullable: true
+                  description: "Default agent type. Allowed: claude, gemini, copilot, codex."
+      responses:
+        '200':
+          description: Settings updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  database_path:
+                    type: string
+                    nullable: true
+                  database_path_resolved:
+                    type: string
+                  config_file:
+                    type: string
+                  default_agent:
+                    type: string
+                  restart_required:
+                    type: boolean
+
+  /settings/mcp-status:
+    get:
+      tags: [Settings]
+      summary: Check MCP configuration status
+      description: Checks if the default agent has an MCP server configured.
+      operationId: checkMcpStatus
+      responses:
+        '200':
+          description: MCP configuration status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent:
+                    type: string
+                  configured:
+                    type: boolean
+                  config_file:
+                    type: string
+                  setup_hint:
+                    type: string
+
+  /settings/configure-mcp:
+    post:
+      tags: [Settings]
+      summary: Auto-configure MCP for the default agent
+      operationId: configureMcp
+      responses:
+        '200':
+          description: MCP configured successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  config_file:
+                    type: string
+        '400':
+          description: Agent not supported for auto-configuration
 
 components:
   parameters:
@@ -1949,3 +2409,271 @@ components:
           $ref: '#/components/schemas/Feature'
         history:
           $ref: '#/components/schemas/FeatureHistory'
+
+    # ============================================================
+    # Feature context schemas
+    # ============================================================
+    FeatureWithContext:
+      type: object
+      description: A feature with its hierarchical navigation context.
+      required: [id, project_id, title, state, priority, siblings, children, breadcrumb, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        title:
+          type: string
+        details:
+          type: string
+          nullable: true
+        desired_details:
+          type: string
+          nullable: true
+        details_summary:
+          type: string
+          nullable: true
+        state:
+          $ref: '#/components/schemas/FeatureState'
+        priority:
+          type: integer
+        feature_number:
+          type: integer
+          nullable: true
+        target_version_id:
+          type: string
+          format: uuid
+          nullable: true
+        parent:
+          $ref: '#/components/schemas/FeatureSummaryContext'
+          nullable: true
+        siblings:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureSummaryContext'
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureSummaryContext'
+        breadcrumb:
+          type: array
+          items:
+            $ref: '#/components/schemas/BreadcrumbItem'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    FeatureSummaryContext:
+      type: object
+      required: [id, title, state]
+      description: Lightweight feature summary for context (parent, siblings, children).
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        state:
+          $ref: '#/components/schemas/FeatureState'
+
+    BreadcrumbItem:
+      type: object
+      required: [id, title]
+      description: Breadcrumb item for navigation path (root to feature).
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        details:
+          type: string
+          nullable: true
+          description: Contextual details from this ancestor.
+
+    # ============================================================
+    # Verification schemas
+    # ============================================================
+    VerifyFeatureContextResponse:
+      type: object
+      required: [spec, diff_truncated, instructions]
+      description: Assembled context for feature verification.
+      properties:
+        spec:
+          type: string
+          description: Feature specification + breadcrumb context formatted as markdown.
+        diff:
+          type: string
+          nullable: true
+          description: Filtered implementation diff.
+        diff_truncated:
+          type: boolean
+          description: True if the diff was truncated due to size limit.
+        instructions:
+          type: string
+          description: Instruction text for the calling agent.
+
+    VerificationComment:
+      type: object
+      required: [severity, title, body]
+      description: A single comment from implementation verification.
+      properties:
+        severity:
+          type: string
+          enum: [critical, major, minor]
+          description: "critical: core requirement missing. major: significant gap. minor: style drift."
+        title:
+          type: string
+          description: One-line summary of the gap.
+        body:
+          type: string
+          description: Actionable explanation with suggested fix.
+        file:
+          type: string
+          nullable: true
+          description: Affected file path if the gap is localized.
+
+    # ============================================================
+    # Memory schemas
+    # ============================================================
+    ProjectMemory:
+      type: object
+      required: [id, project_id, content, tags, created_by, created_at, updated_at]
+      description: A project memory entry for AI agent recall.
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        content:
+          type: string
+          description: Plain text or markdown content.
+        tags:
+          type: array
+          items:
+            type: string
+          description: Tags for categorisation.
+        source_feature_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Feature this memory originated from.
+        created_by:
+          type: string
+          description: "Who created this: 'agent' or 'human'."
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateMemoryInput:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          description: Plain text or markdown content to remember.
+        tags:
+          type: array
+          default: []
+          items:
+            type: string
+          description: Tags for categorisation.
+        source_feature_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Feature this memory is associated with.
+        created_by:
+          type: string
+          default: 'agent'
+          description: "Who created this: 'agent' or 'human'."
+
+    # ============================================================
+    # Analysis schemas
+    # ============================================================
+    ProjectAnalysis:
+      type: object
+      description: Analysis results for a codebase directory.
+      properties:
+        name:
+          type: string
+          nullable: true
+          description: Detected project name.
+        description:
+          type: string
+          nullable: true
+          description: Detected project description.
+        project_type:
+          type: object
+          properties:
+            language:
+              type: string
+            frameworks:
+              type: array
+              items:
+                type: string
+            build_tool:
+              type: string
+              nullable: true
+        git_remote:
+          type: string
+          nullable: true
+        directories:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              kind:
+                type: string
+              file_count:
+                type: integer
+        modules:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              path:
+                type: string
+              is_major:
+                type: boolean
+        documentation:
+          type: object
+          nullable: true
+          properties:
+            readme:
+              type: string
+              nullable: true
+            claude_md:
+              type: string
+              nullable: true
+        hints:
+          type: array
+          items:
+            type: object
+            properties:
+              title:
+                type: string
+              reason:
+                type: string
+              paths:
+                type: array
+                items:
+                  type: string
