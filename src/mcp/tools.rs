@@ -8,6 +8,7 @@ pub mod generate;
 pub mod memories;
 pub mod projects;
 pub mod spec;
+pub mod sync;
 pub mod versions;
 
 /// Convert a ManifestClient error to an MCP error.

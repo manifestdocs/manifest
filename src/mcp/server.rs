@@ -1,7 +1,7 @@
 //! MCP server for AI-assisted feature development.
 //!
 //! Exposes tools optimized for CLI agents like Claude Code:
-//! - Discovery: list_projects, find_features, get_feature, render_feature_tree
+//! - Discovery: list_projects, find_features, get_feature, render_feature_tree, sync
 //! - Setup: init_project, add_project_directory, plan, create_feature
 //! - Work: start_feature, complete_feature, get_next_feature
 //! - Versions: list_versions, create_version, set_feature_version, release_version
@@ -14,7 +14,7 @@ use super::types::{
     GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
     PlanFeaturesRequest, RecallRequest, RecordVerificationRequest, ReleaseVersionRequest,
     RememberRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest,
-    UpdateFeatureRequest, VerifyFeatureRequest,
+    SyncRequest, UpdateFeatureRequest, VerifyFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -182,6 +182,13 @@ impl McpServer {
         params: Parameters<PlanFeaturesRequest>,
     ) -> Result<CallToolResult, McpError> {
         tools::features::plan(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "DISCOVER: Reconcile the feature tree with codebase changes made outside Manifest. Analyzes git commit history, matches commits against existing features, and returns structured proposals: features to mark as implemented, features needing detail updates, and new capabilities to add. Does NOT modify anything — review the proposals and apply them using update_feature, complete_feature, or create_feature."
+    )]
+    async fn sync(&self, params: Parameters<SyncRequest>) -> Result<CallToolResult, McpError> {
+        tools::sync::sync(&self.client, params.0).await
     }
 
     #[tool(

@@ -559,6 +559,21 @@ pub struct VerificationCommentInput {
 }
 
 // ============================================================
+// Sync Request Type
+// ============================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SyncRequest {
+    #[schemars(description = "The UUID of the project to sync")]
+    pub project_id: Uuid,
+    #[schemars(
+        description = "Git ref to start analysis from (tag, commit SHA, or branch). If not provided, analyzes the last 200 commits."
+    )]
+    #[serde(default)]
+    pub since: Option<String>,
+}
+
+// ============================================================
 // Memory Request Types
 // ============================================================
 
