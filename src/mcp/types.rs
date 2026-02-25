@@ -66,6 +66,10 @@ pub struct FindFeaturesRequest {
     #[schemars(description = "Optional project UUID to filter features by project")]
     pub project_id: Option<Uuid>,
     #[schemars(
+        description = "Optional version UUID to filter features by their target version assignment"
+    )]
+    pub version_id: Option<Uuid>,
+    #[schemars(
         description = "Optional state filter: 'proposed', 'in_progress', 'implemented', or 'archived'"
     )]
     pub state: Option<String>,

@@ -456,6 +456,8 @@ impl From<Feature> for FeatureSummary {
 pub struct ListFeaturesQuery {
     /// Project ID to filter features (required in cloud mode).
     pub project_id: Option<ProjectId>,
+    /// Version ID to filter features by their target version assignment.
+    pub version_id: Option<VersionId>,
     /// Maximum number of features to return.
     pub limit: Option<u32>,
     /// Number of features to skip for pagination.

@@ -27,7 +27,7 @@ pub async fn list_versions(
         .map_err(client_err)?;
 
     let features = client
-        .list_features(Some(req.project_id), None, None, None)
+        .list_features(Some(req.project_id), None, None, None, None)
         .await
         .map_err(client_err)?;
 

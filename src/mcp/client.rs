@@ -221,6 +221,7 @@ impl ManifestClient {
     pub async fn list_features(
         &self,
         project_id: Option<Uuid>,
+        version_id: Option<Uuid>,
         state: Option<&str>,
         limit: Option<u32>,
         offset: Option<u32>,
@@ -232,6 +233,9 @@ impl ManifestClient {
 
         // Build query string
         let mut params = vec![];
+        if let Some(v) = version_id {
+            params.push(format!("version_id={}", v));
+        }
         if let Some(s) = state {
             params.push(format!("state={}", s));
         }

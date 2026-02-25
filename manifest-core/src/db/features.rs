@@ -17,16 +17,26 @@ const FEATURE_COLS: &str = "id, project_id, parent_id, title, details, desired_d
 const FEATURE_COLS_F: &str = "f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.feature_number, f.target_version_id, f.verification_result, f.verified_at, f.claimed_by, f.claimed_at, f.claim_metadata, f.created_at, f.updated_at";
 
 impl Database {
-    /// Get all features across all projects with optional pagination.
+    /// Get all features across all projects with optional pagination and version filter.
     pub async fn get_all_features_paginated(
         &self,
+        version_id: Option<VersionId>,
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Feature>> {
-        let mut sql = format!("SELECT {FEATURE_COLS} FROM features ORDER BY priority, title");
-        append_pagination(&mut sql, limit, offset, 1, &self.dialect);
+        let mut next_param = 1u32;
+        let mut sql = format!("SELECT {FEATURE_COLS} FROM features");
+        if version_id.is_some() {
+            sql.push_str(&format!(" WHERE target_version_id = ${next_param}"));
+            next_param += 1;
+        }
+        sql.push_str(" ORDER BY priority, title");
+        append_pagination(&mut sql, limit, offset, next_param, &self.dialect);
 
         let mut q = sqlx::query(&sql);
+        if let Some(vid) = version_id {
+            q = q.bind(vid.to_string());
+        }
         if let Some(lim) = limit {
             q = q.bind(lim as i64);
         }
@@ -41,22 +51,32 @@ impl Database {
 
     /// Get all features across all projects without pagination.
     pub async fn get_all_features(&self) -> Result<Vec<Feature>> {
-        self.get_all_features_paginated(None, None).await
+        self.get_all_features_paginated(None, None, None).await
     }
 
-    /// Get all features for a project with optional pagination.
+    /// Get all features for a project with optional pagination and version filter.
     pub async fn get_features_by_project_paginated(
         &self,
         project_id: ProjectId,
+        version_id: Option<VersionId>,
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<Feature>> {
+        let mut next_param = 2u32;
         let mut sql = format!(
-            "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 ORDER BY priority, title"
+            "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1"
         );
-        append_pagination(&mut sql, limit, offset, 2, &self.dialect);
+        if version_id.is_some() {
+            sql.push_str(&format!(" AND target_version_id = ${next_param}"));
+            next_param += 1;
+        }
+        sql.push_str(" ORDER BY priority, title");
+        append_pagination(&mut sql, limit, offset, next_param, &self.dialect);
 
         let mut q = sqlx::query(&sql).bind(project_id.to_string());
+        if let Some(vid) = version_id {
+            q = q.bind(vid.to_string());
+        }
         if let Some(lim) = limit {
             q = q.bind(lim as i64);
         }
@@ -71,7 +91,7 @@ impl Database {
 
     /// Get all features for a project without pagination.
     pub async fn get_features_by_project(&self, project_id: ProjectId) -> Result<Vec<Feature>> {
-        self.get_features_by_project_paginated(project_id, None, None)
+        self.get_features_by_project_paginated(project_id, None, None, None)
             .await
     }
 
@@ -443,7 +463,12 @@ impl Database {
             }
         } else {
             let had_desired_details = existing.desired_details.is_some();
-            let desired_details = input.desired_details.unwrap_or(existing.desired_details);
+            let mut desired_details = input.desired_details.unwrap_or(existing.desired_details);
+            if let Some(ref dd) = desired_details {
+                if Some(dd.as_str()) == details.as_deref() {
+                    desired_details = None;
+                }
+            }
             let is_proposing = desired_details.is_some() && !had_desired_details;
             (desired_details, is_proposing)
         };

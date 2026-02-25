@@ -78,6 +78,7 @@ pub async fn find_features(
         client
             .list_features(
                 req.project_id,
+                req.version_id,
                 req.state.as_deref(),
                 effective_limit,
                 req.offset,

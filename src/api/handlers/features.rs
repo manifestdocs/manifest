@@ -33,7 +33,7 @@ pub async fn list_features(
 ) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
     // Use SQL-based pagination for efficiency
     let features = db
-        .get_all_features_paginated(query.limit, query.offset)
+        .get_all_features_paginated(query.version_id, query.limit, query.offset)
         .await
         .map_err(internal_error)?;
 
@@ -50,7 +50,12 @@ pub async fn list_project_features(
 ) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
     // Use SQL-based pagination for efficiency
     let features = db
-        .get_features_by_project_paginated(project_id.into(), query.limit, query.offset)
+        .get_features_by_project_paginated(
+            project_id.into(),
+            query.version_id,
+            query.limit,
+            query.offset,
+        )
         .await
         .map_err(internal_error)?;
     // Always return summaries only - use get_feature for full details

@@ -62,7 +62,7 @@ pub async fn sync(client: &ManifestClient, req: SyncRequest) -> Result<CallToolR
 
     // Fetch all features for the project
     let features = client
-        .list_features(Some(req.project_id), None, None, None)
+        .list_features(Some(req.project_id), None, None, None, None)
         .await
         .map_err(super::client_err)?;
 
