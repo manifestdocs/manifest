@@ -115,11 +115,7 @@ impl Database {
             let in_version = next_version_id.is_some()
                 && target_version_id
                     .as_ref()
-                    .map(|id| {
-                        id == &next_version_id
-                            .unwrap()
-                            .to_string()
-                    })
+                    .map(|id| id == &next_version_id.unwrap().to_string())
                     .unwrap_or(false);
             Ok(PortfolioNextFeature {
                 id: feature_id,
@@ -201,12 +197,13 @@ impl Database {
         let since = (Utc::now() - chrono::Duration::days(7)).to_rfc3339();
 
         let recent_rows = sqlx::query(
-            "SELECT f.id, f.title, fh.created_at
+            "SELECT f.id, f.title, MAX(fh.created_at) as created_at
              FROM feature_history fh
              JOIN features f ON fh.feature_id = f.id
              WHERE f.project_id = $1
                AND fh.created_at > $2
-             ORDER BY fh.created_at DESC
+             GROUP BY f.id, f.title
+             ORDER BY created_at DESC
              LIMIT 5",
         )
         .bind(project_id.to_string())

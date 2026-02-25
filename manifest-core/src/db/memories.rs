@@ -148,14 +148,13 @@ impl Database {
             .await;
         }
 
-        let rows_affected = sqlx::query(
-            "DELETE FROM project_memories WHERE id = $1 AND project_id = $2",
-        )
-        .bind(memory_id.to_string())
-        .bind(project_id.to_string())
-        .execute(&self.pool)
-        .await?
-        .rows_affected();
+        let rows_affected =
+            sqlx::query("DELETE FROM project_memories WHERE id = $1 AND project_id = $2")
+                .bind(memory_id.to_string())
+                .bind(project_id.to_string())
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
 
         Ok(rows_affected > 0)
     }
@@ -199,4 +198,3 @@ fn sanitize_fts_query(q: &str) -> String {
     let cleaned = q.replace('"', " ");
     format!("\"{}\"", cleaned.trim())
 }
-

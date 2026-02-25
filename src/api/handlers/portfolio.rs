@@ -17,9 +17,11 @@ pub async fn get_portfolio(State(db): State<Database>) -> Result<Json<Portfolio>
     db.get_portfolio().await.map(Json).map_err(internal_error)
 }
 
-/// GET /portfolio/events — SSE stream that fires a `change` event whenever
-/// any feature in any project is modified. The client re-fetches GET /portfolio
-/// on each event. No payload — the data endpoint does the work.
+/// GET /portfolio/events — SSE stream that fires events whenever any feature
+/// in any project is modified. Emits typed events:
+/// - `change` — generic modification (create, update, delete)
+/// - `feature_completed` — a feature was completed, with JSON payload
+///   containing feature_title, project_name, and agent_type
 ///
 /// This reuses the existing global broadcast channel in `Database::subscribe()`.
 /// The per-project SSE handler filters by project_id; this handler emits for
@@ -31,9 +33,29 @@ pub async fn subscribe_portfolio(
 
     let stream = BroadcastStream::new(rx).filter_map(|result| {
         let val = match result {
-            Ok(_) => Some(Ok(Event::default()
-                .event("change")
-                .data("portfolio_changed"))),
+            Ok(event) => {
+                use crate::db::FeatureEvent;
+                match event {
+                    FeatureEvent::Completed {
+                        feature_title,
+                        project_name,
+                        agent_type,
+                        ..
+                    } => {
+                        let payload = serde_json::json!({
+                            "feature_title": feature_title,
+                            "project_name": project_name,
+                            "agent_type": agent_type,
+                        });
+                        Some(Ok(Event::default()
+                            .event("feature_completed")
+                            .data(payload.to_string())))
+                    }
+                    _ => Some(Ok(Event::default()
+                        .event("change")
+                        .data("portfolio_changed"))),
+                }
+            }
             Err(_) => None, // Lagged receiver — client will catch up on next event
         };
         std::future::ready(val)
