@@ -57,7 +57,7 @@ impl Database {
             "SELECT
                 v.id as version_id,
                 v.name as version_name,
-                COUNT(f.id) as feature_count,
+                COUNT(CASE WHEN f.state != 'archived' THEN 1 END) as feature_count,
                 SUM(CASE WHEN f.state = 'implemented' THEN 1 ELSE 0 END) as implemented_count
              FROM versions v
              LEFT JOIN features f

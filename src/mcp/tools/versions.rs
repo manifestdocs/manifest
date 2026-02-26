@@ -31,11 +31,14 @@ pub async fn list_versions(
         .await
         .map_err(client_err)?;
 
-    // Count features per version and backlog
+    // Count features per version and backlog (excluding archived)
     let mut version_feature_counts: std::collections::HashMap<VersionId, u32> =
         std::collections::HashMap::new();
     let mut backlog_count: u32 = 0;
     for feature in &features {
+        if feature.state == manifest_core::models::FeatureState::Archived {
+            continue;
+        }
         if let Some(vid) = feature.target_version_id {
             *version_feature_counts.entry(vid).or_insert(0) += 1;
         } else {
