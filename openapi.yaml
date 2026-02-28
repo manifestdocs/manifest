@@ -1233,6 +1233,50 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   # ============================================================
+  # Proofs
+  # ============================================================
+  /features/{id}/proofs:
+    parameters:
+      - $ref: '#/components/parameters/FeatureId'
+    get:
+      tags: [Proofs]
+      summary: List proofs for a feature
+      description: Returns all proofs for a feature, ordered by most recent first.
+      operationId: listProofsForFeature
+      responses:
+        '200':
+          description: List of proofs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Proof'
+
+  /proofs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Proof ID
+    get:
+      tags: [Proofs]
+      summary: Get a proof by ID
+      operationId: getProof
+      responses:
+        '200':
+          description: The proof
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proof'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
   # Memories
   # ============================================================
   /projects/{id}/memories:

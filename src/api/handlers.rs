@@ -5,6 +5,7 @@ mod health;
 mod memories;
 mod portfolio;
 mod projects;
+mod proofs;
 mod settings;
 mod versions;
 
@@ -15,6 +16,7 @@ pub use health::*;
 pub use memories::*;
 pub use portfolio::*;
 pub use projects::*;
+pub use proofs::*;
 pub use settings::*;
 pub use versions::*;
 
