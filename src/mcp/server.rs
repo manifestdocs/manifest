@@ -12,9 +12,9 @@ use super::types::{
     DeleteFeatureRequest, FindFeaturesRequest, ForgetRequest, GenerateFeatureTreeRequest,
     GetActiveFeatureRequest, GetFeatureRequest, GetNextFeatureRequest, GetProjectHistoryRequest,
     GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
-    PlanFeaturesRequest, RecallRequest, RecordVerificationRequest, ReleaseVersionRequest,
-    RememberRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest,
-    SyncRequest, UpdateFeatureRequest, VerifyFeatureRequest,
+    PlanFeaturesRequest, ProveFeatureRequest, RecallRequest, RecordVerificationRequest,
+    ReleaseVersionRequest, RememberRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest,
+    StartFeatureRequest, SyncRequest, UpdateFeatureRequest, VerifyFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -223,6 +223,16 @@ impl McpServer {
         params: Parameters<CompleteFeatureRequest>,
     ) -> Result<CallToolResult, McpError> {
         tools::features::complete_feature(&self.client, params.0).await
+    }
+
+    #[tool(
+        description = "BUILD: Record test evidence for a feature. Creates a proof record with the test command, exit code, structured test results, and evidence file paths. Can be called multiple times during TDD (red/green cycle) or once after tests pass. Proof is separate from completion — call this to record evidence, then call complete_feature when done.\n\nThe agent is the universal adapter: run any test framework, parse its output, and produce structured results. Include { name, suite, state, file, line, duration_ms, message } for each test for consistent rendering in both CLI and web UI.\n\nProof is advisory, never blocking. Features without proof are visibly unproven, not invalid."
+    )]
+    async fn prove_feature(
+        &self,
+        params: Parameters<ProveFeatureRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::prove_feature(&self.client, params.0).await
     }
 
     #[tool(
@@ -515,14 +525,20 @@ When creating new features:
    - The feature details ARE your specification
    - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
    - If desired_details is present, this is a CHANGE REQUEST: compare desired_details with details
-   - Write tests first, then implement, then verify
+   - Check testing_guidance in the start_feature response for project testing policy
+   - If testing_policy is "tdd": write failing tests first, call prove_feature (red), implement, call prove_feature again (green)
+   - If testing_policy is "advisory": write tests alongside implementation, call prove_feature when tests pass
+   - prove_feature records test evidence separately from completion — call it whenever you have test results
+   - Include structured test results: { name, suite, state, file, line, duration_ms, message }
+   - The agent is the universal adapter: run any test framework, parse its output into the structured format
    - As you implement, update_feature details to reflect what you actually built
 
 4. DOCUMENT — MANDATORY after implementing:
    a) call update_feature to set details to what was actually built
-   b) call complete_feature with a summary of what you did + commit SHAs
+   b) call prove_feature to record test evidence (if not already done during BUILD)
+   c) call complete_feature with a summary of what you did + commit SHAs
 
-Common sequence: list_projects → get_active_feature → start_feature → [implement] → update_feature (details) → complete_feature
+Common sequence: list_projects → get_active_feature → start_feature → [implement] → prove_feature → update_feature (details) → complete_feature
 </workflow>
 
 <critical_rules>

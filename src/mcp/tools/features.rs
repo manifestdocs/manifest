@@ -10,8 +10,9 @@ use crate::mcp::{
     types::{
         CommitInfo, CompleteFeatureRequest, CreateFeatureRequest, DeleteFeatureRequest,
         FeatureInfo, FeatureInfoWithContext, FindFeaturesRequest, GetFeatureRequest,
-        GetNextFeatureRequest, HistoryEntryInfo, PlanFeaturesRequest, RecordVerificationRequest,
-        RenderFeatureTreeRequest, StartFeatureRequest, UpdateFeatureRequest, VerifyFeatureRequest,
+        GetNextFeatureRequest, HistoryEntryInfo, PlanFeaturesRequest, ProveFeatureRequest,
+        RecordVerificationRequest, RenderFeatureTreeRequest, StartFeatureRequest,
+        UpdateFeatureRequest, VerifyFeatureRequest,
     },
     ManifestClient,
 };
@@ -623,7 +624,7 @@ pub async fn start_feature(
         testing_guidance: config.testing_guidance(),
         testable_criteria_count: spec_status.testable_criteria_count,
         detail_level: config.detail_level.as_str().to_string(),
-        workflow_reminder: "After implementing, you MUST complete both steps:\n1. update_feature — set details to what was actually built\n2. complete_feature — summary + commit SHAs\nSkipping either step leaves a stale spec that misleads future agents.".to_string(),
+        workflow_reminder: "After implementing, you MUST complete these steps:\n1. prove_feature — record test evidence (command, results, evidence files)\n2. update_feature — set details to what was actually built\n3. complete_feature — summary + commit SHAs\nSkipping these steps leaves a stale spec that misleads future agents.".to_string(),
     };
 
     let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
@@ -663,8 +664,9 @@ pub async fn start_feature(
 
     content.push(Content::text(
         "COMPLETION CONTRACT: After implementing this feature, you MUST:\n\
-         1. update_feature — set `details` to describe what was actually built\n\
-         2. complete_feature — provide summary of work + commit SHAs\n\
+         1. prove_feature — record test evidence (command, structured results, evidence files)\n\
+         2. update_feature — set `details` to describe what was actually built\n\
+         3. complete_feature — provide summary of work + commit SHAs\n\
          Skipping these steps leaves stale documentation that misleads future agents.",
     ));
 
@@ -843,6 +845,102 @@ pub async fn complete_feature(
     }
     content.push(Content::text(json));
     Ok(CallToolResult::success(content))
+}
+
+/// Record test evidence for a feature.
+pub async fn prove_feature(
+    client: &ManifestClient,
+    req: ProveFeatureRequest,
+) -> Result<CallToolResult, McpError> {
+    use crate::models::{CreateProofInput, Evidence, TestResult, TestState};
+
+    // Resolve feature ID
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
+        .await
+        .map_err(client_err)?;
+
+    // Convert test results
+    let tests = req.tests.map(|test_inputs| {
+        test_inputs
+            .into_iter()
+            .map(|t| TestResult {
+                name: t.name,
+                suite: t.suite,
+                state: TestState::from_str(&t.state).unwrap_or(TestState::Errored),
+                file: t.file,
+                line: t.line,
+                duration_ms: t.duration_ms,
+                message: t.message,
+            })
+            .collect()
+    });
+
+    // Convert evidence
+    let evidence: Vec<Evidence> = req
+        .evidence
+        .into_iter()
+        .map(|e| Evidence {
+            path: e.path,
+            note: e.note,
+        })
+        .collect();
+
+    let input = CreateProofInput {
+        feature_id: feature_id.into(),
+        history_id: None,
+        command: req.command,
+        exit_code: req.exit_code,
+        output: req.output,
+        tests,
+        evidence,
+        commit_sha: req.commit_sha,
+        agent_type: Some("claude".to_string()),
+    };
+
+    let proof = client
+        .create_proof(feature_id, &input)
+        .await
+        .map_err(client_err)?;
+
+    // Build summary
+    let test_summary = if let Some(ref tests) = proof.tests {
+        let passed = tests
+            .iter()
+            .filter(|t| t.state == TestState::Passed)
+            .count();
+        let failed = tests
+            .iter()
+            .filter(|t| t.state == TestState::Failed)
+            .count();
+        let errored = tests
+            .iter()
+            .filter(|t| t.state == TestState::Errored)
+            .count();
+        let skipped = tests
+            .iter()
+            .filter(|t| t.state == TestState::Skipped)
+            .count();
+        let mut parts = Vec::new();
+        if passed > 0 {
+            parts.push(format!("{passed} passed"));
+        }
+        if failed > 0 {
+            parts.push(format!("{failed} failed"));
+        }
+        if errored > 0 {
+            parts.push(format!("{errored} errored"));
+        }
+        if skipped > 0 {
+            parts.push(format!("{skipped} skipped"));
+        }
+        parts.join(", ")
+    } else {
+        format!("exit code {}", proof.exit_code)
+    };
+
+    let summary = format!("Proof recorded — {test_summary}");
+    Ok(CallToolResult::success(vec![Content::text(summary)]))
 }
 
 /// Get the next workable feature for a project.

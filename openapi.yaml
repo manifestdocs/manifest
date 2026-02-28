@@ -1252,6 +1252,24 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Proof'
+    post:
+      tags: [Proofs]
+      summary: Create a proof for a feature
+      description: Record test evidence for a feature. Can be called multiple times (TDD red/green cycle).
+      operationId: createProofForFeature
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProofInput'
+      responses:
+        '200':
+          description: The created proof
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Proof'
 
   /proofs/{id}:
     parameters:
@@ -2628,6 +2646,41 @@ components:
           type: string
           nullable: true
           description: Optional note about why this file is evidence.
+
+    CreateProofInput:
+      type: object
+      required: [command, exit_code]
+      description: Input for creating a new proof record.
+      properties:
+        command:
+          type: string
+          description: The test command that was run (e.g., "cargo test auth_spec").
+        exit_code:
+          type: integer
+          description: Process exit code (0 = all tests passed).
+        output:
+          type: string
+          nullable: true
+          description: Raw stdout/stderr output (truncated to 10K chars).
+        tests:
+          type: array
+          nullable: true
+          description: Structured test results for consistent rendering.
+          items:
+            $ref: '#/components/schemas/TestResult'
+        evidence:
+          type: array
+          description: Evidence file paths linked to this proof.
+          items:
+            $ref: '#/components/schemas/Evidence'
+        commit_sha:
+          type: string
+          nullable: true
+          description: Git commit SHA at the time of proving.
+        agent_type:
+          type: string
+          nullable: true
+          description: Agent that produced the proof (e.g., "claude", "human").
 
     FeatureSummaryContext:
       type: object

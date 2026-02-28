@@ -62,6 +62,68 @@ pub struct CommitRefInput {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProveFeatureRequest {
+    #[schemars(description = "Feature ID (UUID, display ID like 'MAN-42', or UUID prefix)")]
+    pub feature_id: String,
+    #[schemars(
+        description = "The test command that was run (e.g., 'cargo test auth_spec', 'pytest tests/auth')"
+    )]
+    pub command: String,
+    #[schemars(description = "Process exit code (0 = success/all tests passed)")]
+    pub exit_code: i32,
+    #[schemars(
+        description = "Raw stdout/stderr output (truncated to 10K chars). Optional — structured test results are preferred."
+    )]
+    #[serde(default)]
+    pub output: Option<String>,
+    #[schemars(
+        description = "Structured test results for consistent display. Each entry: { name, suite?, state: 'passed'|'failed'|'errored'|'skipped', file?, line?, duration_ms?, message? }. The agent parses framework output into this format."
+    )]
+    #[serde(default)]
+    pub tests: Option<Vec<TestResultInput>>,
+    #[schemars(
+        description = "Evidence file paths (relative to project root) with optional notes. Example: [{ path: 'tests/auth_test.rs', note: 'Auth integration tests' }]"
+    )]
+    #[serde(default)]
+    pub evidence: Vec<EvidenceInput>,
+    #[schemars(description = "Git commit SHA at the time of proving (short or full)")]
+    #[serde(default)]
+    pub commit_sha: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TestResultInput {
+    #[schemars(description = "Test name (e.g., 'creates a feature')")]
+    pub name: String,
+    #[schemars(description = "Test suite or module (e.g., 'db_spec')")]
+    #[serde(default)]
+    pub suite: Option<String>,
+    #[schemars(description = "Result: 'passed', 'failed', 'errored', or 'skipped'")]
+    pub state: String,
+    #[schemars(description = "Source file path relative to project root")]
+    #[serde(default)]
+    pub file: Option<String>,
+    #[schemars(description = "Line number in source file")]
+    #[serde(default)]
+    pub line: Option<u32>,
+    #[schemars(description = "Duration in milliseconds")]
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[schemars(description = "Failure or error message")]
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EvidenceInput {
+    #[schemars(description = "File path relative to project root")]
+    pub path: String,
+    #[schemars(description = "Note about why this file is evidence")]
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct FindFeaturesRequest {
     #[schemars(description = "Optional project UUID to filter features by project")]
     pub project_id: Option<Uuid>,

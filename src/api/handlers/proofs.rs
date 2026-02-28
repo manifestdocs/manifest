@@ -3,13 +3,26 @@ use axum::Json;
 use uuid::Uuid;
 
 use crate::db::Database;
-use crate::models::Proof;
+use crate::models::{CreateProofInput, Proof};
 
 use super::{internal_error, ApiError};
 
 // ============================================================
 // Proofs
 // ============================================================
+
+/// Create a new proof for a feature.
+pub async fn create_proof_for_feature(
+    State(db): State<Database>,
+    Path(feature_id): Path<Uuid>,
+    Json(mut input): Json<CreateProofInput>,
+) -> Result<Json<Proof>, ApiError> {
+    input.feature_id = feature_id.into();
+    db.create_proof(input)
+        .await
+        .map(Json)
+        .map_err(internal_error)
+}
 
 /// List all proofs for a feature, ordered by most recent first.
 pub async fn list_proofs_for_feature(

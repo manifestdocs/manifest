@@ -262,7 +262,7 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
         // Proofs
         .route(
             "/features/{id}/proofs",
-            get(handlers::list_proofs_for_feature),
+            get(handlers::list_proofs_for_feature).post(handlers::create_proof_for_feature),
         )
         .route("/proofs/{id}", get(handlers::get_proof))
         // Memories

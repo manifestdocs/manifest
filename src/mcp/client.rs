@@ -814,6 +814,23 @@ impl ManifestClient {
             .await?;
         self.handle_response(response).await
     }
+
+    /// Create a proof for a feature.
+    pub async fn create_proof(
+        &self,
+        feature_id: Uuid,
+        input: &CreateProofInput,
+    ) -> Result<Proof, ClientError> {
+        let response = self
+            .request(
+                reqwest::Method::POST,
+                &format!("/features/{}/proofs", feature_id),
+            )
+            .json(input)
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
 }
 
 /// Response from the complete_feature endpoint.
