@@ -1086,12 +1086,18 @@ impl Database {
             }
         }
 
+        // Fetch latest proof for this feature
+        let latest_proof = self
+            .get_latest_proof_for_feature(feature.id)
+            .await?;
+
         Ok(Some(FeatureWithContext {
             feature,
             parent,
             siblings,
             children,
             breadcrumb,
+            latest_proof,
         }))
     }
 

@@ -561,4 +561,7 @@ pub struct FeatureWithContext {
     pub children: Vec<FeatureSummaryContext>,
     /// Breadcrumb trail from root to this feature.
     pub breadcrumb: Vec<BreadcrumbItem>,
+    /// Most recent proof (test evidence) for this feature.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_proof: Option<super::Proof>,
 }

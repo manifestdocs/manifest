@@ -2479,12 +2479,111 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BreadcrumbItem'
+        latest_proof:
+          $ref: '#/components/schemas/Proof'
+          nullable: true
+          description: Most recent proof (test evidence) for this feature.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    Proof:
+      type: object
+      required: [id, feature_id, command, exit_code, created_at]
+      description: Test evidence record for a feature.
+      properties:
+        id:
+          type: string
+          format: uuid
+        feature_id:
+          type: string
+          format: uuid
+        history_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional link to a feature_history entry.
+        command:
+          type: string
+          description: The test command that was run (e.g., "cargo test auth_spec").
+        exit_code:
+          type: integer
+          description: Process exit code (0 = all tests passed).
+        output:
+          type: string
+          nullable: true
+          description: Raw stdout/stderr output, capped at 10K characters.
+        tests:
+          type: array
+          nullable: true
+          description: Structured test results for consistent rendering.
+          items:
+            $ref: '#/components/schemas/TestResult'
+        evidence:
+          type: array
+          description: Evidence file paths linked to this proof.
+          items:
+            $ref: '#/components/schemas/Evidence'
+        commit_sha:
+          type: string
+          nullable: true
+          description: Git commit SHA at the time of proving.
+        agent_type:
+          type: string
+          nullable: true
+          description: Agent that produced the proof (e.g., "claude", "human").
+        created_at:
+          type: string
+          format: date-time
+
+    TestResult:
+      type: object
+      required: [name, state]
+      description: A single test result within a proof.
+      properties:
+        name:
+          type: string
+          description: Name of the test.
+        suite:
+          type: string
+          nullable: true
+          description: Test suite or module name.
+        state:
+          type: string
+          enum: [passed, failed, errored, skipped]
+          description: Result state.
+        file:
+          type: string
+          nullable: true
+          description: Source file path (relative to project root).
+        line:
+          type: integer
+          nullable: true
+          description: Line number in the source file.
+        duration_ms:
+          type: integer
+          nullable: true
+          description: Duration in milliseconds.
+        message:
+          type: string
+          nullable: true
+          description: Failure or error message.
+
+    Evidence:
+      type: object
+      required: [path]
+      description: A file path linked as evidence for a proof.
+      properties:
+        path:
+          type: string
+          description: File path (relative to project root).
+        note:
+          type: string
+          nullable: true
+          description: Optional note about why this file is evidence.
 
     FeatureSummaryContext:
       type: object

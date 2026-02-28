@@ -13,6 +13,7 @@ mod history;
 mod memories;
 mod portfolio;
 mod projects;
+mod proofs;
 mod users;
 mod versions;
 
@@ -398,6 +399,8 @@ impl Database {
         self.migrate_add_claim_columns().await?;
         // Migration: add testing_policy column to projects
         self.migrate_add_testing_policy().await?;
+        // Migration: add proofs table
+        self.migrate_add_proofs_table().await?;
         Ok(())
     }
 
@@ -1320,6 +1323,64 @@ impl Database {
             .execute(&self.pool)
             .await?;
         sqlx::query("ALTER TABLE features ADD COLUMN claim_metadata TEXT")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Add proofs table for test evidence.
+    async fn migrate_add_proofs_table(&self) -> Result<()> {
+        let table_exists = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='proofs'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema.is_some()
+        } else {
+            let exists: Option<String> = sqlx::query_scalar(
+                "SELECT table_name FROM information_schema.tables
+                 WHERE table_name = 'proofs'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            exists.is_some()
+        };
+
+        if table_exists {
+            tracing::debug!("proofs table migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Creating proofs table");
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS proofs (
+                id TEXT PRIMARY KEY,
+                feature_id TEXT NOT NULL,
+                history_id TEXT,
+                command TEXT NOT NULL,
+                exit_code INTEGER NOT NULL,
+                output TEXT,
+                tests TEXT,
+                evidence TEXT,
+                commit_sha TEXT,
+                agent_type TEXT,
+                created_at TEXT NOT NULL,
+                CONSTRAINT fk_proofs_feature FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
+                CONSTRAINT fk_proofs_history FOREIGN KEY (history_id) REFERENCES feature_history(id) ON DELETE SET NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_proofs_feature ON proofs(feature_id)")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_proofs_history ON proofs(history_id)")
             .execute(&self.pool)
             .await?;
 

@@ -365,6 +365,35 @@ pub(crate) fn row_to_oauth_identity(row: &AnyRow) -> Result<OAuthIdentity> {
     })
 }
 
+/// Map a database row to a [`Proof`].
+pub(crate) fn row_to_proof(row: &AnyRow) -> Result<Proof> {
+    let tests: Option<Vec<TestResult>> = row
+        .get::<Option<String>, _>("tests")
+        .and_then(|s| serde_json::from_str(&s).ok());
+
+    let evidence: Vec<Evidence> = row
+        .get::<Option<String>, _>("evidence")
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    Ok(Proof {
+        id: parse_id(row.get("id"))?,
+        feature_id: parse_id(row.get("feature_id"))?,
+        history_id: row
+            .get::<Option<String>, _>("history_id")
+            .map(parse_id)
+            .transpose()?,
+        command: row.get("command"),
+        exit_code: row.get("exit_code"),
+        output: row.get("output"),
+        tests,
+        evidence,
+        commit_sha: row.get("commit_sha"),
+        agent_type: row.get("agent_type"),
+        created_at: parse_datetime(row.get("created_at"))?,
+    })
+}
+
 /// Map a database row to a [`ProjectMembership`].
 pub(crate) fn row_to_project_membership(row: &AnyRow) -> Result<ProjectMembership> {
     Ok(ProjectMembership {

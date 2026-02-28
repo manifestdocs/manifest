@@ -101,3 +101,8 @@ define_id!(
     /// Unique identifier for a [`ProjectDirectory`](super::ProjectDirectory).
     DirectoryId
 );
+
+define_id!(
+    /// Unique identifier for a [`Proof`](super::Proof).
+    ProofId
+);

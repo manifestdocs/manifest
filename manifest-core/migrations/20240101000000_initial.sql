@@ -122,6 +122,29 @@ CREATE INDEX IF NOT EXISTS idx_history_feature ON feature_history(feature_id);
 CREATE INDEX IF NOT EXISTS idx_history_created ON feature_history(created_at DESC);
 
 -- ============================================================
+-- Proofs (test evidence for features)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS proofs (
+    id TEXT PRIMARY KEY,
+    feature_id TEXT NOT NULL,
+    history_id TEXT,
+    command TEXT NOT NULL,
+    exit_code INTEGER NOT NULL,
+    output TEXT,
+    tests TEXT,
+    evidence TEXT,
+    commit_sha TEXT,
+    agent_type TEXT,
+    created_at TEXT NOT NULL,
+    CONSTRAINT fk_proofs_feature FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
+    CONSTRAINT fk_proofs_history FOREIGN KEY (history_id) REFERENCES feature_history(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_proofs_feature ON proofs(feature_id);
+CREATE INDEX IF NOT EXISTS idx_proofs_history ON proofs(history_id);
+
+-- ============================================================
 -- App Focus (tracks which feature is focused in the desktop app)
 -- ============================================================
 
