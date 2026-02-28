@@ -1,3 +1,4 @@
+pub mod adapters;
 pub mod analysis;
 pub mod api;
 #[cfg(feature = "embed-web")]

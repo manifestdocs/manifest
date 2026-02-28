@@ -187,6 +187,7 @@ pub(crate) fn row_to_project(row: &AnyRow) -> Result<Project> {
             .get::<Option<String>, _>("testing_policy")
             .and_then(|s| TestingPolicy::from_str(&s).ok())
             .unwrap_or(TestingPolicy::Advisory),
+        test_adapter: row.get::<Option<String>, _>("test_adapter"),
         key_prefix: row
             .get::<Option<String>, _>("key_prefix")
             .unwrap_or_default(),

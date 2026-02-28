@@ -401,6 +401,8 @@ impl Database {
         self.migrate_add_testing_policy().await?;
         // Migration: add proofs table
         self.migrate_add_proofs_table().await?;
+        // Migration: add test_adapter column to projects
+        self.migrate_add_test_adapter().await?;
         Ok(())
     }
 
@@ -1422,6 +1424,43 @@ impl Database {
         )
         .execute(&self.pool)
         .await?;
+
+        Ok(())
+    }
+
+    /// Add test_adapter column to projects table.
+    async fn migrate_add_test_adapter(&self) -> Result<()> {
+        let has_column = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("test_adapter"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'projects' AND column_name = 'test_adapter'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_column {
+            tracing::debug!("test_adapter migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Adding test_adapter column to projects table");
+        sqlx::query("ALTER TABLE projects ADD COLUMN test_adapter TEXT")
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

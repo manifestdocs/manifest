@@ -57,6 +57,9 @@ dirs = "5"
 # Terminal (PTY for web terminal)
 portable-pty = "0.8"
 
+# Lua runtime for test output adapters
+mlua = { version = "0.10", features = ["lua54", "vendored"] }
+
 # Security (API key auth for self-hosted)
 subtle = "2"
 sha2 = "0.10"

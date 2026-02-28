@@ -307,6 +307,7 @@ impl Database {
             ac_level: GuidanceLevel::Standard,
             ac_format: AcFormat::Checkbox,
             testing_policy: TestingPolicy::Advisory,
+            test_adapter: None,
             key_prefix,
             created_at: now,
             updated_at: now,

@@ -195,6 +195,8 @@ pub struct Project {
     pub ac_format: AcFormat,
     /// Controls the testing policy (`none`, `advisory`, or `tdd`).
     pub testing_policy: TestingPolicy,
+    /// Test output adapter name (e.g., "cargo-test", "pytest"). When set, overrides auto-detection.
+    pub test_adapter: Option<String>,
     /// Prefix for display IDs (e.g., "MAN" for MAN-42). Auto-derived from slug.
     pub key_prefix: String,
     pub created_at: DateTime<Utc>,
@@ -267,6 +269,9 @@ pub struct UpdateProjectInput {
     pub ac_format: Option<AcFormat>,
     /// Controls the testing policy (`none`, `advisory`, or `tdd`).
     pub testing_policy: Option<TestingPolicy>,
+    /// Test output adapter name (e.g., "cargo-test", "pytest"). Overrides auto-detection.
+    #[validate(length(max = 100))]
+    pub test_adapter: Option<String>,
     /// Override the key prefix for display IDs (e.g., "MAN"). 2-5 uppercase letters.
     pub key_prefix: Option<String>,
 }

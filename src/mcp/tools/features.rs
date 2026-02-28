@@ -852,6 +852,7 @@ pub async fn prove_feature(
     client: &ManifestClient,
     req: ProveFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
+    use crate::adapters;
     use crate::models::{CreateProofInput, Evidence, TestResult, TestState};
 
     // Resolve feature ID
@@ -860,8 +861,8 @@ pub async fn prove_feature(
         .await
         .map_err(client_err)?;
 
-    // Convert test results
-    let tests = req.tests.map(|test_inputs| {
+    // Convert agent-provided test results
+    let mut tests: Option<Vec<TestResult>> = req.tests.map(|test_inputs| {
         test_inputs
             .into_iter()
             .map(|t| TestResult {
@@ -875,6 +876,37 @@ pub async fn prove_feature(
             })
             .collect()
     });
+
+    // Adapter fallback: when agent provides output but no structured tests,
+    // try to parse via a Lua adapter
+    if tests.is_none() {
+        if let Some(ref output) = req.output {
+            // Fetch project settings for adapter name and project directory
+            let feature = client.get_feature(feature_id).await.map_err(client_err)?;
+            let project_id: uuid::Uuid = feature.project_id.into();
+            let project_with_dirs = client.get_project(project_id).await.map_err(client_err)?;
+            let adapter_name = project_with_dirs.project.test_adapter.as_deref();
+            let project_dir = project_with_dirs
+                .directories
+                .iter()
+                .find(|d| d.is_primary)
+                .or(project_with_dirs.directories.first())
+                .map(|d| d.path.as_str());
+
+            if let Some(result) =
+                adapters::parse_test_output(&req.command, output, adapter_name, project_dir)
+            {
+                if !result.tests.is_empty() {
+                    tracing::info!(
+                        "Adapter '{}' parsed {} test results from output",
+                        result.adapter_name,
+                        result.tests.len()
+                    );
+                    tests = Some(result.tests);
+                }
+            }
+        }
+    }
 
     // Convert evidence
     let evidence: Vec<Evidence> = req

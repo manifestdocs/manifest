@@ -1610,6 +1610,10 @@ components:
           enum: [none, advisory, tdd]
           default: advisory
           description: Testing policy for the project (none, advisory, or tdd).
+        test_adapter:
+          type: string
+          nullable: true
+          description: Test output adapter name (e.g., "cargo-test", "pytest"). Overrides auto-detection from command.
         created_at:
           type: string
           format: date-time
@@ -1687,6 +1691,10 @@ components:
           type: string
           enum: [none, advisory, tdd]
           description: Testing policy for the project (none, advisory, or tdd).
+        test_adapter:
+          type: string
+          nullable: true
+          description: Test output adapter name (e.g., "cargo-test", "pytest"). Overrides auto-detection.
 
     ProjectDirectory:
       type: object
@@ -1784,6 +1792,10 @@ components:
           enum: [none, advisory, tdd]
           default: advisory
           description: Testing policy for the project (none, advisory, or tdd).
+        test_adapter:
+          type: string
+          nullable: true
+          description: Test output adapter name (e.g., "cargo-test", "pytest"). Overrides auto-detection from command.
         created_at:
           type: string
           format: date-time
