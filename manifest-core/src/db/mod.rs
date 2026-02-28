@@ -396,6 +396,8 @@ impl Database {
         self.migrate_add_project_memories_table().await?;
         // Migration: add claim tracking columns to features
         self.migrate_add_claim_columns().await?;
+        // Migration: add testing_policy column to projects
+        self.migrate_add_testing_policy().await?;
         Ok(())
     }
 
@@ -1320,6 +1322,45 @@ impl Database {
         sqlx::query("ALTER TABLE features ADD COLUMN claim_metadata TEXT")
             .execute(&self.pool)
             .await?;
+
+        Ok(())
+    }
+
+    /// Add testing_policy column to projects table.
+    async fn migrate_add_testing_policy(&self) -> Result<()> {
+        let has_column = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("testing_policy"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'projects' AND column_name = 'testing_policy'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_column {
+            tracing::debug!("testing_policy migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Adding testing_policy column to projects table");
+        sqlx::query(
+            "ALTER TABLE projects ADD COLUMN testing_policy TEXT NOT NULL DEFAULT 'advisory'",
+        )
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }

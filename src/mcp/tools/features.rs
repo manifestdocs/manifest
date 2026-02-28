@@ -506,6 +506,7 @@ pub async fn start_feature(
         detail_level: project_with_dirs.project.detail_level,
         ac_level: project_with_dirs.project.ac_level,
         ac_format: project_with_dirs.project.ac_format,
+        testing_policy: project_with_dirs.project.testing_policy,
     };
 
     // Spec gate: analyze specification completeness
@@ -618,6 +619,7 @@ pub async fn start_feature(
         feature_tier: spec_status.tier.as_str().to_string(),
         ac_level: config.ac_level.as_str().to_string(),
         ac_format: config.ac_format.as_str().to_string(),
+        testing_policy: config.testing_policy.as_str().to_string(),
         detail_level: config.detail_level.as_str().to_string(),
         workflow_reminder: "After implementing, you MUST complete both steps:\n1. update_feature — set details to what was actually built\n2. complete_feature — summary + commit SHAs\nSkipping either step leaves a stale spec that misleads future agents.".to_string(),
     };
@@ -861,6 +863,7 @@ pub async fn get_next_feature(
                 detail_level: project_with_dirs.project.detail_level,
                 ac_level: project_with_dirs.project.ac_level,
                 ac_format: project_with_dirs.project.ac_format,
+                testing_policy: project_with_dirs.project.testing_policy,
             };
 
             let is_root = feature_ctx.feature.parent_id.is_none();
@@ -895,6 +898,7 @@ pub async fn get_next_feature(
                 feature_tier: spec_status.tier.as_str().to_string(),
                 ac_level: config.ac_level.as_str().to_string(),
                 ac_format: config.ac_format.as_str().to_string(),
+                testing_policy: config.testing_policy.as_str().to_string(),
                 detail_level: config.detail_level.as_str().to_string(),
                 spec_guidance: spec_status.guidance(&config),
             };

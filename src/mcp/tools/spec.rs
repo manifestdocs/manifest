@@ -4,7 +4,7 @@
 //! non-trivial content. Provides tier-aware, level-aware guidance for project,
 //! feature set, and leaf features.
 
-use manifest_core::models::{AcFormat, GuidanceLevel};
+use manifest_core::models::{AcFormat, GuidanceLevel, TestingPolicy};
 
 /// Project-level configuration that controls guidance text and thresholds.
 #[derive(Debug, Clone, Copy)]
@@ -15,6 +15,8 @@ pub struct SpecConfig {
     pub ac_level: GuidanceLevel,
     /// Controls the output format of acceptance criteria.
     pub ac_format: AcFormat,
+    /// Controls the testing policy for this project.
+    pub testing_policy: TestingPolicy,
 }
 
 impl Default for SpecConfig {
@@ -23,6 +25,7 @@ impl Default for SpecConfig {
             detail_level: GuidanceLevel::Standard,
             ac_level: GuidanceLevel::Standard,
             ac_format: AcFormat::Checkbox,
+            testing_policy: TestingPolicy::Advisory,
         }
     }
 }
@@ -282,6 +285,7 @@ mod tests {
             detail_level: GuidanceLevel::Concise,
             ac_level: GuidanceLevel::Concise,
             ac_format: AcFormat::Checkbox,
+            testing_policy: TestingPolicy::Advisory,
         }
     }
 
@@ -290,6 +294,7 @@ mod tests {
             detail_level: GuidanceLevel::Thorough,
             ac_level: GuidanceLevel::Thorough,
             ac_format: AcFormat::Checkbox,
+            testing_policy: TestingPolicy::Advisory,
         }
     }
 

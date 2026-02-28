@@ -26,6 +26,21 @@ pub enum AcFormat {
     Gherkin,
 }
 
+/// Controls the testing policy for a project.
+///
+/// Determines how aggressively Manifest nudges agents toward test-first
+/// workflows. The policy is advisory — it never blocks feature completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TestingPolicy {
+    /// No testing guidance or nudging.
+    None,
+    /// Show testing guidance in `start_feature` but don't enforce.
+    #[default]
+    Advisory,
+    /// Full TDD workflow: prompt for tests first, warn on unproven features.
+    Tdd,
+}
+
 impl GuidanceLevel {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -108,6 +123,48 @@ impl<'de> Deserialize<'de> for AcFormat {
     }
 }
 
+impl TestingPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TestingPolicy::None => "none",
+            TestingPolicy::Advisory => "advisory",
+            TestingPolicy::Tdd => "tdd",
+        }
+    }
+}
+
+impl FromStr for TestingPolicy {
+    type Err = super::ParseEnumError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "none" => Ok(Self::None),
+            "advisory" => Ok(Self::Advisory),
+            "tdd" => Ok(Self::Tdd),
+            _ => Err(super::ParseEnumError(s.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for TestingPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for TestingPolicy {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TestingPolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        TestingPolicy::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
 /// A project containing features.
 ///
 /// Projects are the top-level organizational unit. Each project can have
@@ -136,6 +193,8 @@ pub struct Project {
     pub ac_level: GuidanceLevel,
     /// Controls the output format of acceptance criteria (`checkbox` or `gherkin`).
     pub ac_format: AcFormat,
+    /// Controls the testing policy (`none`, `advisory`, or `tdd`).
+    pub testing_policy: TestingPolicy,
     /// Prefix for display IDs (e.g., "MAN" for MAN-42). Auto-derived from slug.
     pub key_prefix: String,
     pub created_at: DateTime<Utc>,
@@ -206,6 +265,8 @@ pub struct UpdateProjectInput {
     pub ac_level: Option<GuidanceLevel>,
     /// Controls the output format of acceptance criteria (`checkbox` or `gherkin`).
     pub ac_format: Option<AcFormat>,
+    /// Controls the testing policy (`none`, `advisory`, or `tdd`).
+    pub testing_policy: Option<TestingPolicy>,
     /// Override the key prefix for display IDs (e.g., "MAN"). 2-5 uppercase letters.
     pub key_prefix: Option<String>,
 }

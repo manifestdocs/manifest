@@ -306,6 +306,7 @@ impl Database {
             detail_level: GuidanceLevel::Standard,
             ac_level: GuidanceLevel::Standard,
             ac_format: AcFormat::Checkbox,
+            testing_policy: TestingPolicy::Advisory,
             key_prefix,
             created_at: now,
             updated_at: now,

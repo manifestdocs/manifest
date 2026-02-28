@@ -1543,6 +1543,11 @@ components:
           enum: [checkbox, gherkin]
           default: checkbox
           description: Output format for acceptance criteria.
+        testing_policy:
+          type: string
+          enum: [none, advisory, tdd]
+          default: advisory
+          description: Testing policy for the project (none, advisory, or tdd).
         created_at:
           type: string
           format: date-time
@@ -1616,6 +1621,10 @@ components:
           type: string
           enum: [checkbox, gherkin]
           description: Output format for acceptance criteria.
+        testing_policy:
+          type: string
+          enum: [none, advisory, tdd]
+          description: Testing policy for the project (none, advisory, or tdd).
 
     ProjectDirectory:
       type: object
@@ -1708,6 +1717,11 @@ components:
           enum: [checkbox, gherkin]
           default: checkbox
           description: Output format for acceptance criteria.
+        testing_policy:
+          type: string
+          enum: [none, advisory, tdd]
+          default: advisory
+          description: Testing policy for the project (none, advisory, or tdd).
         created_at:
           type: string
           format: date-time

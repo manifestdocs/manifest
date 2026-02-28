@@ -183,6 +183,10 @@ pub(crate) fn row_to_project(row: &AnyRow) -> Result<Project> {
             .get::<Option<String>, _>("ac_format")
             .and_then(|s| AcFormat::from_str(&s).ok())
             .unwrap_or(AcFormat::Checkbox),
+        testing_policy: row
+            .get::<Option<String>, _>("testing_policy")
+            .and_then(|s| TestingPolicy::from_str(&s).ok())
+            .unwrap_or(TestingPolicy::Advisory),
         key_prefix: row
             .get::<Option<String>, _>("key_prefix")
             .unwrap_or_default(),

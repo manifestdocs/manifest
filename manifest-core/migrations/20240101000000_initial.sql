@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS projects (
     detail_level TEXT NOT NULL DEFAULT 'standard',
     ac_level TEXT NOT NULL DEFAULT 'standard',
     ac_format TEXT NOT NULL DEFAULT 'checkbox',
+    testing_policy TEXT NOT NULL DEFAULT 'advisory',
     key_prefix TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

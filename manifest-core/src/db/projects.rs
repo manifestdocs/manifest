@@ -7,7 +7,7 @@ use super::{Database, ManifestError};
 use crate::models::*;
 
 /// SELECT columns for the projects table.
-const PROJECT_COLS: &str = "id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, key_prefix, created_at, updated_at";
+const PROJECT_COLS: &str = "id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, testing_policy, key_prefix, created_at, updated_at";
 
 impl Database {
     /// Get all projects ordered by name.
@@ -97,6 +97,7 @@ impl Database {
             detail_level: GuidanceLevel::Standard,
             ac_level: GuidanceLevel::Standard,
             ac_format: AcFormat::Checkbox,
+            testing_policy: TestingPolicy::Advisory,
             key_prefix,
             created_at: now,
             updated_at: now,
@@ -128,10 +129,11 @@ impl Database {
         let detail_level = input.detail_level.unwrap_or(existing.detail_level);
         let ac_level = input.ac_level.unwrap_or(existing.ac_level);
         let ac_format = input.ac_format.unwrap_or(existing.ac_format);
+        let testing_policy = input.testing_policy.unwrap_or(existing.testing_policy);
         let key_prefix = input.key_prefix.unwrap_or(existing.key_prefix);
 
         sqlx::query(
-            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, detail_level = $7, ac_level = $8, ac_format = $9, key_prefix = $10, updated_at = $11 WHERE id = $12",
+            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, detail_level = $7, ac_level = $8, ac_format = $9, testing_policy = $10, key_prefix = $11, updated_at = $12 WHERE id = $13",
         )
         .bind(&slug)
         .bind(&name)
@@ -142,6 +144,7 @@ impl Database {
         .bind(detail_level.as_str())
         .bind(ac_level.as_str())
         .bind(ac_format.as_str())
+        .bind(testing_policy.as_str())
         .bind(&key_prefix)
         .bind(now.to_rfc3339())
         .bind(id.to_string())
@@ -172,6 +175,7 @@ impl Database {
             detail_level,
             ac_level,
             ac_format,
+            testing_policy,
             key_prefix,
             created_at: existing.created_at,
             updated_at: now,
