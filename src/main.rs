@@ -233,8 +233,54 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Status) => {
-            eprintln!("Not implemented yet");
-            std::process::exit(1);
+            let port: u16 = std::env::var("MANIFEST_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(17010);
+
+            let Some(pid) = read_pid_file() else {
+                println!("Manifest server is not running.");
+                std::process::exit(1);
+            };
+
+            let alive = std::process::Command::new("kill")
+                .arg("-0")
+                .arg(pid.to_string())
+                .status()
+                .is_ok_and(|s| s.success());
+
+            if !alive {
+                remove_pid_file();
+                println!("Manifest server is not running.");
+                std::process::exit(1);
+            }
+
+            // Process is alive — check the HTTP endpoint for version
+            let url = format!("http://127.0.0.1:{}/api/v1/version", port);
+            match reqwest::Client::new()
+                .get(&url)
+                .timeout(std::time::Duration::from_secs(2))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(body) = resp.json::<serde_json::Value>().await {
+                        let version = body["version"].as_str().unwrap_or("unknown");
+                        println!(
+                            "Manifest server running (pid {}, port {}, v{}).",
+                            pid, port, version
+                        );
+                    } else {
+                        println!("Manifest server running (pid {}, port {}).", pid, port);
+                    }
+                }
+                _ => {
+                    println!(
+                        "Manifest server process alive (pid {}) but not responding on port {}.",
+                        pid, port
+                    );
+                }
+            }
         }
         Some(Commands::Stop) => {
             if let Some(pid) = read_pid_file() {
