@@ -375,6 +375,8 @@ pub struct StartFeatureResponse {
     /// Testing workflow guidance based on project policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub testing_guidance: Option<String>,
+    /// Number of testable criteria detected in the spec.
+    pub testable_criteria_count: usize,
     /// Specification detail level.
     pub detail_level: String,
     /// Reminder to call complete_feature.
@@ -400,6 +402,8 @@ pub struct NextFeatureResponse {
     /// Testing workflow guidance based on project policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub testing_guidance: Option<String>,
+    /// Number of testable criteria detected in the spec.
+    pub testable_criteria_count: usize,
     /// Specification detail level.
     pub detail_level: String,
     /// Guidance for improving spec (if needed).

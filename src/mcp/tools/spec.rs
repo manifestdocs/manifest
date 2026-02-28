@@ -92,6 +92,8 @@ pub struct SpecStatus {
     pub has_details: bool,
     pub word_count: usize,
     pub tier: FeatureTier,
+    /// Number of testable criteria detected in the spec.
+    pub testable_criteria_count: usize,
 }
 
 impl SpecStatus {
@@ -128,9 +130,14 @@ impl SpecStatus {
         self.word_count > threshold
     }
 
-    /// True when either sparse or verbose warnings apply.
+    /// True when spec-level warnings apply (sparse, verbose, or missing testable criteria).
     pub fn has_warnings(&self, config: &SpecConfig) -> bool {
-        self.is_sparse(config) || self.is_verbose(config)
+        self.is_sparse(config)
+            || self.is_verbose(config)
+            || (self.tier == FeatureTier::Leaf
+                && self.has_details
+                && self.testable_criteria_count == 0
+                && config.testing_policy != TestingPolicy::None)
     }
 
     /// One-line status string for MCP responses.
@@ -280,14 +287,131 @@ impl SpecStatus {
             ));
         }
 
+        // Testable criteria warning (advisory/tdd only)
+        if self.testable_criteria_count == 0 && config.testing_policy != TestingPolicy::None {
+            return Some(
+                "No testable criteria detected. Consider adding acceptance criteria with \
+                 concrete assertions (e.g. \"returns 200\", \"creates a record\", \
+                 \"rejects invalid input\") or Gherkin Given/When/Then scenarios. \
+                 Testable criteria map directly to structured proof records."
+                    .to_string(),
+            );
+        }
+
         None
     }
+}
+
+/// Count testable criteria in a spec's text.
+///
+/// Detects three patterns:
+/// 1. Gherkin `Given`/`When`/`Then` lines — each `Then` counts as one criterion
+/// 2. Markdown checkbox items with assertion language (returns, creates, rejects, etc.)
+/// 3. Numbered list items with measurable outcomes
+///
+/// Returns the total count of testable criteria found.
+pub fn count_testable_criteria(text: &str) -> usize {
+    let mut count = 0;
+
+    // Assertion verbs that indicate testable outcomes
+    let assertion_verbs = [
+        "returns",
+        "creates",
+        "deletes",
+        "updates",
+        "rejects",
+        "accepts",
+        "validates",
+        "sends",
+        "receives",
+        "fails",
+        "succeeds",
+        "throws",
+        "emits",
+        "sets",
+        "clears",
+        "adds",
+        "removes",
+        "blocks",
+        "allows",
+        "denies",
+        "redirects",
+        "renders",
+        "displays",
+        "hides",
+        "shows",
+        "stores",
+        "logs",
+        "triggers",
+        "produces",
+        "generates",
+        "contains",
+        "includes",
+        "excludes",
+        "matches",
+        "equals",
+    ];
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+
+        // Pattern 1: Gherkin Then lines (each Then is a testable assertion)
+        if lower.starts_with("then ") || lower.starts_with("- then ") {
+            count += 1;
+            continue;
+        }
+
+        // Pattern 2: Checkbox items with assertion verbs
+        // Matches: - [ ] returns 200, - [x] creates a record
+        if (trimmed.starts_with("- [ ] ") || trimmed.starts_with("- [x] "))
+            && assertion_verbs.iter().any(|v| lower.contains(v))
+        {
+            count += 1;
+            continue;
+        }
+
+        // Pattern 3: Numbered items with assertion verbs (e.g. "1. Returns 200")
+        if let Some(rest) = strip_numbered_prefix(trimmed) {
+            if assertion_verbs
+                .iter()
+                .any(|v| rest.to_ascii_lowercase().contains(v))
+            {
+                count += 1;
+                continue;
+            }
+        }
+
+        // Pattern 2b: Plain dash list items with assertion verbs in AC sections
+        if trimmed.starts_with("- ")
+            && !trimmed.starts_with("- [ ")
+            && assertion_verbs.iter().any(|v| lower.contains(v))
+        {
+            count += 1;
+        }
+    }
+
+    count
+}
+
+/// Strip a numbered list prefix like "1. ", "2) ", returning the rest.
+fn strip_numbered_prefix(s: &str) -> Option<&str> {
+    let mut chars = s.chars();
+    // Must start with a digit
+    if !chars.next().is_some_and(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    // Consume remaining digits
+    let rest = chars.as_str();
+    let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+    // Must be followed by ". " or ") "
+    rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") "))
 }
 
 /// Analyze a feature's details for specification completeness.
 ///
 /// Uses word count as the primary heuristic. Warning thresholds adapt to
-/// the project's configured `ac_level`.
+/// the project's configured `ac_level`. Also counts testable criteria.
 pub fn analyze_spec(details: Option<&str>, has_children: bool, is_root: bool) -> SpecStatus {
     let text = details.unwrap_or("").trim();
     let has_details = !text.is_empty();
@@ -301,10 +425,17 @@ pub fn analyze_spec(details: Option<&str>, has_children: bool, is_root: bool) ->
         FeatureTier::Leaf
     };
 
+    let testable_criteria_count = if tier == FeatureTier::Leaf && has_details {
+        count_testable_criteria(text)
+    } else {
+        0
+    };
+
     SpecStatus {
         has_details,
         word_count,
         tier,
+        testable_criteria_count,
     }
 }
 
@@ -362,7 +493,11 @@ mod tests {
 
     #[test]
     fn sufficient_details_no_warnings() {
-        let config = default_config();
+        // Use testing_policy: None to isolate word-count warnings from testable criteria warnings
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::None,
+            ..default_config()
+        };
         let spec = "Accepts an email and password, validates credentials against the database, \
                      returns a JWT on success. Must rate-limit to 5 attempts per minute. \
                      Returns 401 with generic error on failure.";
@@ -515,7 +650,11 @@ mod tests {
 
     #[test]
     fn concise_leaf_lower_warning_threshold() {
-        let config = concise_config();
+        // Use testing_policy: None to isolate word-count warnings from testable criteria warnings
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::None,
+            ..concise_config()
+        };
         // 5 words — below concise threshold of 10
         let status = analyze_spec(Some("Handle login with email"), false, false);
         assert!(status.has_warnings(&config));
@@ -637,7 +776,11 @@ mod tests {
 
     #[test]
     fn under_verbose_threshold_no_warning() {
-        let config = default_config();
+        // Use testing_policy: None to isolate word-count warnings from testable criteria warnings
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::None,
+            ..default_config()
+        };
         let words: Vec<&str> = std::iter::repeat("word").take(100).collect();
         let spec = words.join(" ");
         let status = analyze_spec(Some(&spec), false, false);
@@ -724,5 +867,103 @@ mod tests {
         assert!(guidance.contains("name"));
         assert!(guidance.contains("state"));
         assert!(guidance.contains("duration_ms"));
+    }
+
+    // --- Testable criteria detection tests ---
+
+    #[test]
+    fn detects_gherkin_then_as_testable() {
+        let spec = "Given a user exists\nWhen they log in\nThen they see the dashboard\nThen they receive a session cookie";
+        assert_eq!(count_testable_criteria(spec), 2);
+    }
+
+    #[test]
+    fn detects_checkbox_with_assertion_verbs() {
+        let spec =
+            "- [ ] returns 200 on success\n- [ ] creates a new record\n- [ ] rejects invalid input";
+        assert_eq!(count_testable_criteria(spec), 3);
+    }
+
+    #[test]
+    fn detects_checked_checkbox_items() {
+        let spec = "- [x] returns 200 on success\n- [ ] creates a new record";
+        assert_eq!(count_testable_criteria(spec), 2);
+    }
+
+    #[test]
+    fn detects_numbered_items_with_assertions() {
+        let spec =
+            "1. Returns 200 on success\n2. Creates a database record\n3. Sends confirmation email";
+        assert_eq!(count_testable_criteria(spec), 3);
+    }
+
+    #[test]
+    fn detects_dash_list_items_with_assertions() {
+        let spec = "- Returns 200 on valid request\n- Rejects malformed JSON\n- Logs the event";
+        assert_eq!(count_testable_criteria(spec), 3);
+    }
+
+    #[test]
+    fn ignores_non_assertion_items() {
+        let spec = "- Use Redis for caching\n- Should be fast\n- Must be user-friendly";
+        assert_eq!(count_testable_criteria(spec), 0);
+    }
+
+    #[test]
+    fn mixed_testable_and_non_testable() {
+        let spec = "Goal: handle user login\n\n\
+                     - [ ] returns JWT on success\n\
+                     - Use bcrypt for hashing\n\
+                     - [ ] rejects expired tokens";
+        assert_eq!(count_testable_criteria(spec), 2);
+    }
+
+    #[test]
+    fn analyze_spec_populates_count_for_leaf() {
+        let spec = "- [ ] returns 200\n- [ ] creates a record";
+        let status = analyze_spec(Some(spec), false, false);
+        assert_eq!(status.testable_criteria_count, 2);
+    }
+
+    #[test]
+    fn analyze_spec_zero_count_for_feature_set() {
+        let spec = "- [ ] returns 200\n- [ ] creates a record";
+        let status = analyze_spec(Some(spec), true, false);
+        assert_eq!(status.testable_criteria_count, 0);
+    }
+
+    #[test]
+    fn no_testable_criteria_warns_with_advisory_policy() {
+        let config = default_config(); // advisory
+        let spec = "Handle user login with appropriate validation and security measures.";
+        let status = analyze_spec(Some(spec), false, false);
+        assert_eq!(status.testable_criteria_count, 0);
+        assert!(status.has_warnings(&config));
+        let guidance = status.guidance(&config).unwrap();
+        assert!(guidance.contains("No testable criteria"));
+    }
+
+    #[test]
+    fn no_testable_criteria_no_warning_with_none_policy() {
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::None,
+            ..default_config()
+        };
+        let spec = "Handle user login with appropriate validation and security measures.";
+        let status = analyze_spec(Some(spec), false, false);
+        assert_eq!(status.testable_criteria_count, 0);
+        assert!(!status.has_warnings(&config));
+        assert!(status.guidance(&config).is_none());
+    }
+
+    #[test]
+    fn testable_criteria_present_no_warning() {
+        let config = default_config(); // advisory
+        let spec =
+            "Handle user login.\n- [ ] returns JWT on success\n- [ ] rejects invalid credentials";
+        let status = analyze_spec(Some(spec), false, false);
+        assert_eq!(status.testable_criteria_count, 2);
+        assert!(!status.has_warnings(&config));
+        assert!(status.guidance(&config).is_none());
     }
 }
