@@ -9,6 +9,39 @@ use manifest::{db, mcp};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Return the path to the PID file: `<data_dir>/manifest.pid`.
+fn pid_file_path() -> Option<PathBuf> {
+    if let Ok(data_dir) = std::env::var("MANIFEST_DATA_DIR") {
+        Some(PathBuf::from(data_dir).join("manifest.pid"))
+    } else {
+        directories::ProjectDirs::from("", "", "manifest")
+            .map(|dirs| dirs.data_dir().join("manifest.pid"))
+    }
+}
+
+/// Write the current process PID to the PID file.
+fn write_pid_file() {
+    if let Some(path) = pid_file_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, std::process::id().to_string());
+    }
+}
+
+/// Remove the PID file.
+fn remove_pid_file() {
+    if let Some(path) = pid_file_path() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Read the PID from the PID file, returning None if missing or unreadable.
+fn read_pid_file() -> Option<u32> {
+    let path = pid_file_path()?;
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
 /// Print startup banner to the specified writer
 fn print_banner<W: Write>(mut w: W, url: &str) {
     let banner = format!(
@@ -90,7 +123,8 @@ fn init_tracing(use_stderr: bool) {
 }
 
 /// Start the HTTP server with graceful shutdown support.
-/// Returns `true` if the server should restart (e.g. after a settings change).
+/// Returns `true` if the server should restart (e.g. after a settings change),
+/// `false` if it received a termination signal.
 async fn run_server(
     bind_addr: String,
     port: u16,
@@ -105,20 +139,40 @@ async fn run_server(
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port)).await?;
     tracing::info!("Manifest server listening on http://{}:{}", bind_addr, port);
 
+    write_pid_file();
+
+    let should_restart = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let restart_flag = should_restart.clone();
+
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             let mut rx = shutdown_rx;
-            // Wait for the shutdown signal
-            while !*rx.borrow_and_update() {
-                if rx.changed().await.is_err() {
-                    break;
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("failed to register SIGTERM handler");
+
+            tokio::select! {
+                _ = async {
+                    while !*rx.borrow_and_update() {
+                        if rx.changed().await.is_err() {
+                            break;
+                        }
+                    }
+                } => {
+                    // Watch channel triggered (e.g. settings change) — restart
+                    restart_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                    tracing::info!("Shutdown signal received, draining connections...");
+                }
+                _ = sigterm.recv() => {
+                    tracing::info!("SIGTERM received, draining connections...");
                 }
             }
-            tracing::info!("Shutdown signal received, draining connections...");
         })
         .await?;
 
-    Ok(true)
+    remove_pid_file();
+
+    Ok(should_restart.load(std::sync::atomic::Ordering::SeqCst))
 }
 
 #[tokio::main]
@@ -183,8 +237,27 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         }
         Some(Commands::Stop) => {
-            eprintln!("Not implemented yet");
-            std::process::exit(1);
+            if let Some(pid) = read_pid_file() {
+                let status = std::process::Command::new("kill")
+                    .arg("-0")
+                    .arg(pid.to_string())
+                    .status();
+                let alive = matches!(status, Ok(s) if s.success());
+
+                if alive {
+                    let _ = std::process::Command::new("kill")
+                        .arg(pid.to_string())
+                        .status();
+                    println!("Sent stop signal to Manifest server (pid {}).", pid);
+                } else {
+                    remove_pid_file();
+                    eprintln!("Stale PID file (process {} not running). Cleaned up.", pid);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Manifest server is not running (no PID file found).");
+                std::process::exit(1);
+            }
         }
         Some(Commands::MigrateRoots) => {
             println!("Migrating existing projects to use root features...");
