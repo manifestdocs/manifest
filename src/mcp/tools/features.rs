@@ -620,6 +620,7 @@ pub async fn start_feature(
         ac_level: config.ac_level.as_str().to_string(),
         ac_format: config.ac_format.as_str().to_string(),
         testing_policy: config.testing_policy.as_str().to_string(),
+        testing_guidance: config.testing_guidance(),
         detail_level: config.detail_level.as_str().to_string(),
         workflow_reminder: "After implementing, you MUST complete both steps:\n1. update_feature — set details to what was actually built\n2. complete_feature — summary + commit SHAs\nSkipping either step leaves a stale spec that misleads future agents.".to_string(),
     };
@@ -899,6 +900,7 @@ pub async fn get_next_feature(
                 ac_level: config.ac_level.as_str().to_string(),
                 ac_format: config.ac_format.as_str().to_string(),
                 testing_policy: config.testing_policy.as_str().to_string(),
+                testing_guidance: config.testing_guidance(),
                 detail_level: config.detail_level.as_str().to_string(),
                 spec_guidance: spec_status.guidance(&config),
             };

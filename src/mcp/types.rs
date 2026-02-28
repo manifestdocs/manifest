@@ -372,6 +372,9 @@ pub struct StartFeatureResponse {
     pub ac_format: String,
     /// Testing policy (none, advisory, tdd).
     pub testing_policy: String,
+    /// Testing workflow guidance based on project policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub testing_guidance: Option<String>,
     /// Specification detail level.
     pub detail_level: String,
     /// Reminder to call complete_feature.
@@ -394,6 +397,9 @@ pub struct NextFeatureResponse {
     pub ac_format: String,
     /// Testing policy (none, advisory, tdd).
     pub testing_policy: String,
+    /// Testing workflow guidance based on project policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub testing_guidance: Option<String>,
     /// Specification detail level.
     pub detail_level: String,
     /// Guidance for improving spec (if needed).

@@ -26,7 +26,7 @@ impl Database {
         let tests_json = input
             .tests
             .as_ref()
-            .map(|t| serde_json::to_string(t))
+            .map(serde_json::to_string)
             .transpose()?;
 
         let evidence_json = if input.evidence.is_empty() {

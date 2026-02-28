@@ -30,6 +30,42 @@ impl Default for SpecConfig {
     }
 }
 
+impl SpecConfig {
+    /// Generate testing guidance based on `testing_policy` and `ac_format`.
+    /// Returns `None` when policy is `None`.
+    pub fn testing_guidance(&self) -> Option<String> {
+        match self.testing_policy {
+            TestingPolicy::None => None,
+            TestingPolicy::Advisory => Some(
+                "This project encourages test-first development.\n\
+                 Before implementing, consider writing tests that describe the expected behavior.\n\
+                 Use the acceptance criteria in the spec as your test outline.\n\
+                 Use prove_feature to record test evidence at any point. Include structured test\n\
+                 results (name, state, file, line) when possible for consistent display."
+                    .to_string(),
+            ),
+            TestingPolicy::Tdd => {
+                let criteria_term = if self.ac_format == AcFormat::Gherkin {
+                    "Gherkin scenarios"
+                } else {
+                    "acceptance criteria"
+                };
+                Some(format!(
+                    "This project uses test-driven development. Follow this workflow:\n\
+                     1. READ the {criteria_term} in the spec\n\
+                     2. WRITE failing tests that encode each criterion\n\
+                     3. RUN the tests — confirm they fail (red)\n\
+                     4. Call prove_feature with the failing results (records the red state)\n\
+                     5. IMPLEMENT the feature to make tests pass (green)\n\
+                     6. Call prove_feature again with passing results (records the green state)\n\
+                     7. REFACTOR if needed, keeping tests green\n\
+                     Include structured test results: {{ name, suite, state, file, line, duration_ms, message }}"
+                ))
+            }
+        }
+    }
+}
+
 /// The tier of a feature in the hierarchy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeatureTier {
@@ -628,5 +664,65 @@ mod tests {
         let spec = words.join(" ");
         let status = analyze_spec(Some(&spec), true, true);
         assert!(!status.is_verbose(&config));
+    }
+
+    // --- Testing guidance tests ---
+
+    #[test]
+    fn testing_guidance_none_returns_none() {
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::None,
+            ..default_config()
+        };
+        assert!(config.testing_guidance().is_none());
+    }
+
+    #[test]
+    fn testing_guidance_advisory_mentions_prove_feature() {
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::Advisory,
+            ..default_config()
+        };
+        let guidance = config.testing_guidance().unwrap();
+        assert!(guidance.contains("prove_feature"));
+        assert!(guidance.contains("test-first"));
+    }
+
+    #[test]
+    fn testing_guidance_tdd_has_red_green_workflow() {
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::Tdd,
+            ..default_config()
+        };
+        let guidance = config.testing_guidance().unwrap();
+        assert!(guidance.contains("test-driven development"));
+        assert!(guidance.contains("prove_feature"));
+        assert!(guidance.contains("red"));
+        assert!(guidance.contains("green"));
+        assert!(guidance.contains("acceptance criteria"));
+    }
+
+    #[test]
+    fn testing_guidance_tdd_gherkin_references_scenarios() {
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::Tdd,
+            ac_format: AcFormat::Gherkin,
+            ..default_config()
+        };
+        let guidance = config.testing_guidance().unwrap();
+        assert!(guidance.contains("Gherkin scenarios"));
+        assert!(!guidance.contains("acceptance criteria"));
+    }
+
+    #[test]
+    fn testing_guidance_tdd_mentions_structured_results() {
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::Tdd,
+            ..default_config()
+        };
+        let guidance = config.testing_guidance().unwrap();
+        assert!(guidance.contains("name"));
+        assert!(guidance.contains("state"));
+        assert!(guidance.contains("duration_ms"));
     }
 }
