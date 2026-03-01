@@ -1,8 +1,9 @@
-use manifest_core::models::proof::{TestResult, TestState};
-use mlua::{Lua, Result as LuaResult, StdLib, Table, Value};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+use manifest_core::models::{TestResult, TestState};
+use mlua::{Lua, StdLib, Table, Value, VmState};
 
 use super::AdapterError;
 
@@ -41,7 +42,7 @@ fn create_sandbox() -> Result<Lua, AdapterError> {
                     "Adapter execution timeout: instruction limit exceeded".to_string(),
                 ))
             } else {
-                Ok(())
+                Ok(VmState::Continue)
             }
         },
     );

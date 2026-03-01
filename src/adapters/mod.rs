@@ -8,7 +8,7 @@ mod builtin;
 mod detect;
 mod lua_runtime;
 
-use manifest_core::models::proof::TestResult;
+use manifest_core::models::TestResult;
 use std::path::Path;
 
 pub use builtin::list_builtin_adapters;
