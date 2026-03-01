@@ -831,6 +831,21 @@ impl ManifestClient {
             .await?;
         self.handle_response(response).await
     }
+
+    /// Get all proofs for a feature, ordered by most recent first.
+    pub async fn get_proofs_for_feature(
+        &self,
+        feature_id: Uuid,
+    ) -> Result<Vec<Proof>, ClientError> {
+        let response = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/features/{}/proofs", feature_id),
+            )
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
 }
 
 /// Response from the complete_feature endpoint.

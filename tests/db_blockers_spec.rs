@@ -876,3 +876,161 @@ mod feature_claims {
         assert_eq!(claimed.claimed_by.as_deref(), Some("claude"));
     }
 }
+
+// ============================================================
+// Proof Gate on complete_feature
+// ============================================================
+
+mod proof_gate {
+    use super::*;
+
+    /// Helper: create a project with a given testing policy and a leaf feature under root.
+    async fn setup_with_policy(db: &Database, policy: TestingPolicy) -> (Project, Feature) {
+        let project = create_test_project(db).await;
+        // Update project to the desired testing policy
+        db.update_project(
+            project.id,
+            UpdateProjectInput {
+                name: None,
+                slug: None,
+                description: None,
+                instructions: None,
+                current_version_id: None,
+                default_feature_destination: None,
+                detail_level: None,
+                ac_level: None,
+                ac_format: None,
+                testing_policy: Some(policy),
+                test_adapter: None,
+                key_prefix: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let root = db
+            .get_feature(project.root_feature_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let feature = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root.id),
+                    title: "Provable Feature".to_string(),
+                    details: Some("Spec for provable feature".to_string()),
+                    priority: None,
+                    target_version_id: None,
+                    state: Some(FeatureState::InProgress),
+                },
+            )
+            .await
+            .unwrap();
+        (project, feature)
+    }
+
+    #[tokio::test]
+    async fn complete_feature_with_tdd_policy_requires_passing_proof() {
+        let db = setup().await;
+        let (_project, feature) = setup_with_policy(&db, TestingPolicy::Tdd).await;
+
+        // Try to complete without any proof — should be rejected
+        let result = db
+            .complete_feature(feature.id, "Done without proof", &[])
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("no proof recorded"), "Error: {err}");
+    }
+
+    #[tokio::test]
+    async fn complete_feature_with_tdd_policy_rejects_failing_proof() {
+        let db = setup().await;
+        let (_project, feature) = setup_with_policy(&db, TestingPolicy::Tdd).await;
+
+        // Create a failing proof (exit_code != 0)
+        db.create_proof(CreateProofInput {
+            feature_id: feature.id,
+            history_id: None,
+            command: "cargo test".to_string(),
+            exit_code: 1,
+            output: Some("test failed".to_string()),
+            tests: None,
+            evidence: vec![],
+            commit_sha: None,
+            agent_type: Some("claude".to_string()),
+        })
+        .await
+        .unwrap();
+
+        // Try to complete with failing proof — should be rejected
+        let result = db
+            .complete_feature(feature.id, "Done with failing tests", &[])
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("failing tests"), "Error: {err}");
+    }
+
+    #[tokio::test]
+    async fn complete_feature_with_tdd_policy_succeeds_with_passing_proof() {
+        let db = setup().await;
+        let (_project, feature) = setup_with_policy(&db, TestingPolicy::Tdd).await;
+
+        // Create a passing proof (exit_code == 0)
+        db.create_proof(CreateProofInput {
+            feature_id: feature.id,
+            history_id: None,
+            command: "cargo test".to_string(),
+            exit_code: 0,
+            output: Some("all tests passed".to_string()),
+            tests: None,
+            evidence: vec![],
+            commit_sha: None,
+            agent_type: Some("claude".to_string()),
+        })
+        .await
+        .unwrap();
+
+        // Complete should succeed
+        let (completed, history) = db
+            .complete_feature(feature.id, "Done with passing tests", &[])
+            .await
+            .unwrap();
+
+        assert_eq!(completed.state, FeatureState::Implemented);
+        assert_eq!(history.details.summary, "Done with passing tests");
+    }
+
+    #[tokio::test]
+    async fn complete_feature_with_advisory_policy_succeeds_without_proof() {
+        let db = setup().await;
+        let (_project, feature) = setup_with_policy(&db, TestingPolicy::Advisory).await;
+
+        // Complete without proof — advisory should not block
+        let (completed, _history) = db
+            .complete_feature(feature.id, "Done without proof (advisory)", &[])
+            .await
+            .unwrap();
+
+        assert_eq!(completed.state, FeatureState::Implemented);
+    }
+
+    #[tokio::test]
+    async fn complete_feature_with_none_policy_succeeds_without_proof() {
+        let db = setup().await;
+        let (_project, feature) = setup_with_policy(&db, TestingPolicy::None).await;
+
+        // Complete without proof — none policy should not block
+        let (completed, _history) = db
+            .complete_feature(feature.id, "Done without proof (none)", &[])
+            .await
+            .unwrap();
+
+        assert_eq!(completed.state, FeatureState::Implemented);
+    }
+}

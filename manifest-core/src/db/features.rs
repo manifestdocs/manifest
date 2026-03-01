@@ -1584,6 +1584,29 @@ impl Database {
             return Err(ManifestError::invalid_state("Cannot complete a non-leaf feature").into());
         }
 
+        // Check proof requirements based on project testing policy
+        let project = self
+            .get_project(feature.project_id)
+            .await?
+            .ok_or_else(|| ManifestError::not_found("Project"))?;
+
+        if project.testing_policy == TestingPolicy::Tdd {
+            let latest_proof = self.get_latest_proof_for_feature(feature_id).await?;
+            match latest_proof {
+                None => {
+                    return Err(ManifestError::invalid_state(
+                        "Cannot complete feature: no proof recorded. This project requires test evidence (testing_policy: tdd). Call prove_feature with your test results first."
+                    ).into());
+                }
+                Some(ref p) if p.exit_code != 0 => {
+                    return Err(ManifestError::invalid_state(
+                        "Cannot complete feature: latest proof has failing tests (exit code != 0). Fix the tests and call prove_feature again."
+                    ).into());
+                }
+                _ => {} // passing proof exists, proceed
+            }
+        }
+
         // Capture agent_type before clearing claim
         let agent_type = feature.claimed_by.clone();
 
@@ -1637,12 +1660,8 @@ impl Database {
             .await?
             .ok_or_else(|| ManifestError::not_found("Feature"))?;
 
-        // Get project name for the Completed event
-        let project_name = self
-            .get_project(feature.project_id)
-            .await?
-            .map(|p| p.name)
-            .unwrap_or_else(|| "Unknown".to_string());
+        // Use project fetched earlier for the Completed event
+        let project_name = project.name.clone();
 
         // Emit Completed event (richer than generic Updated)
         let _ = self.events.send(FeatureEvent::Completed {

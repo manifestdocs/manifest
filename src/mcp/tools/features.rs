@@ -21,7 +21,8 @@ use chrono::Utc;
 
 use super::format;
 use crate::models::{
-    CommitRef, CreateFeatureInput, Feature, FeatureId, FeatureState, UpdateFeatureInput, VersionId,
+    CommitRef, CreateFeatureInput, Feature, FeatureId, FeatureState, TestingPolicy,
+    UpdateFeatureInput, VersionId,
 };
 
 use super::spec::SpecConfig;
@@ -818,6 +819,20 @@ pub async fn complete_feature(
         }
     }
 
+    // Check for advisory warning (best-effort — don't fail completion)
+    let mut advisory_warning: Option<String> = None;
+    if let Ok(project_with_dirs) = client.get_project(project_id).await {
+        if project_with_dirs.project.testing_policy == TestingPolicy::Advisory {
+            if let Ok(proofs) = client.get_proofs_for_feature(feature_id).await {
+                if proofs.is_empty() || proofs[0].exit_code != 0 {
+                    advisory_warning = Some(
+                        "Warning: No passing test evidence recorded for this feature. Consider running tests and calling prove_feature.".to_string(),
+                    );
+                }
+            }
+        }
+    }
+
     let commit_count = history.details.commits.len();
     let feature_info: FeatureInfo = (&feature).into();
     let history_id: uuid::Uuid = history.id.into();
@@ -840,6 +855,9 @@ pub async fn complete_feature(
         if commit_count == 1 { "" } else { "s" },
     );
     let mut content = vec![Content::text(summary)];
+    if let Some(warning) = advisory_warning {
+        content.push(Content::text(warning));
+    }
     if let Some(msg) = merge_message {
         content.push(Content::text(msg));
     }

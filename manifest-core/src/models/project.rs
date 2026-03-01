@@ -29,15 +29,15 @@ pub enum AcFormat {
 /// Controls the testing policy for a project.
 ///
 /// Determines how aggressively Manifest nudges agents toward test-first
-/// workflows. The policy is advisory — it never blocks feature completion.
+/// workflows and gates feature completion on proof evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TestingPolicy {
     /// No testing guidance or nudging.
     None,
-    /// Show testing guidance in `start_feature` but don't enforce.
+    /// Show testing guidance in `start_feature`, warn on completion without proof.
     #[default]
     Advisory,
-    /// Full TDD workflow: prompt for tests first, warn on unproven features.
+    /// Full TDD workflow: prompt for tests first, block completion without passing proof.
     Tdd,
 }
 
