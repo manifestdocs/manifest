@@ -27,6 +27,71 @@ async fn create_test_project(server: &TestServer) -> Project {
         .json::<Project>()
 }
 
+// ============================================================
+// Project Settings
+// ============================================================
+
+mod project_settings {
+    use super::*;
+
+    mod test_adapter {
+        use super::*;
+
+        #[tokio::test]
+        async fn defaults_to_null_in_project_response() {
+            let server = setup().await;
+            let project = create_test_project(&server).await;
+
+            assert!(project.test_adapter.is_none());
+        }
+
+        #[tokio::test]
+        async fn can_be_set_via_update() {
+            let server = setup().await;
+            let project = create_test_project(&server).await;
+
+            let response = server
+                .put(&format!("/api/v1/projects/{}", project.id))
+                .json(&serde_json::json!({
+                    "test_adapter": "cargo-test"
+                }))
+                .await;
+
+            response.assert_status_ok();
+            let updated: Project = response.json();
+            assert_eq!(updated.test_adapter.as_deref(), Some("cargo-test"));
+        }
+
+        #[tokio::test]
+        async fn persists_through_get() {
+            let server = setup().await;
+            let project = create_test_project(&server).await;
+
+            // Set via PUT
+            server
+                .put(&format!("/api/v1/projects/{}", project.id))
+                .json(&serde_json::json!({
+                    "test_adapter": "pytest"
+                }))
+                .await;
+
+            // Verify via GET
+            let response = server
+                .get(&format!("/api/v1/projects/{}", project.id))
+                .await;
+
+            response.assert_status_ok();
+            let fetched: serde_json::Value = response.json();
+            // GET /projects/{id} returns ProjectWithDirectories (project fields are flattened)
+            assert_eq!(fetched["test_adapter"].as_str(), Some("pytest"));
+        }
+    }
+}
+
+// ============================================================
+// Features
+// ============================================================
+
 mod feature_roots {
     use super::*;
 

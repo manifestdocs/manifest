@@ -243,7 +243,7 @@ pub struct CreateProjectInput {
 }
 
 /// Input for updating an existing project. All fields are optional for partial updates.
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Validate)]
 pub struct UpdateProjectInput {
     /// New display name for the project.
     #[validate(length(min = 1, max = 200))]

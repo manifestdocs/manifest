@@ -164,6 +164,93 @@ mod projects {
 }
 
 // ============================================================
+// Project Settings
+// ============================================================
+
+mod project_settings {
+    use super::*;
+
+    mod test_adapter {
+        use super::*;
+
+        #[tokio::test]
+        async fn defaults_to_none_on_create() {
+            let db = setup().await;
+            let project = create_test_project(&db).await;
+
+            assert!(project.test_adapter.is_none());
+        }
+
+        #[tokio::test]
+        async fn persists_through_update_and_get() {
+            let db = setup().await;
+            let project = create_test_project(&db).await;
+
+            let updated = db
+                .update_project(
+                    project.id,
+                    UpdateProjectInput {
+                        test_adapter: Some("cargo-test".to_string()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .expect("Failed to update project")
+                .expect("Project not found");
+
+            assert_eq!(updated.test_adapter.as_deref(), Some("cargo-test"));
+
+            // Verify it round-trips through a fresh get
+            let fetched = db
+                .get_project(project.id)
+                .await
+                .expect("Query failed")
+                .expect("Project not found");
+
+            assert_eq!(fetched.test_adapter.as_deref(), Some("cargo-test"));
+        }
+
+        #[tokio::test]
+        async fn preserves_value_when_update_omits_field() {
+            let db = setup().await;
+            let project = create_test_project(&db).await;
+
+            // Set the adapter
+            db.update_project(
+                project.id,
+                UpdateProjectInput {
+                    test_adapter: Some("pytest".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Failed to set adapter")
+            .expect("Project not found");
+
+            // Update a different field, omitting test_adapter
+            let updated = db
+                .update_project(
+                    project.id,
+                    UpdateProjectInput {
+                        name: Some("Renamed".to_string()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .expect("Failed to update name")
+                .expect("Project not found");
+
+            assert_eq!(updated.name, "Renamed");
+            assert_eq!(
+                updated.test_adapter.as_deref(),
+                Some("pytest"),
+                "test_adapter should be preserved when not included in update"
+            );
+        }
+    }
+}
+
+// ============================================================
 // Project Directories
 // ============================================================
 
