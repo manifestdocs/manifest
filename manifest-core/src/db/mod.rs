@@ -8,6 +8,7 @@ use tokio::sync::broadcast;
 use crate::models::ProjectId;
 
 mod features;
+pub use features::CompletionResult;
 mod helpers;
 mod history;
 mod memories;

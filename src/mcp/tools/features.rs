@@ -21,8 +21,7 @@ use chrono::Utc;
 
 use super::format;
 use crate::models::{
-    CommitRef, CreateFeatureInput, Feature, FeatureId, FeatureState, TestingPolicy,
-    UpdateFeatureInput, VersionId,
+    CommitRef, CreateFeatureInput, Feature, FeatureId, FeatureState, UpdateFeatureInput, VersionId,
 };
 
 use super::spec::SpecConfig;
@@ -768,6 +767,7 @@ pub async fn complete_feature(
 
     let feature = response.feature;
     let history = response.history;
+    let warnings = response.warnings;
 
     // Git: merge feature branch back into default branch (best-effort)
     let mut merge_message: Option<String> = None;
@@ -819,19 +819,12 @@ pub async fn complete_feature(
         }
     }
 
-    // Check for advisory warning (best-effort — don't fail completion)
-    let mut advisory_warning: Option<String> = None;
-    if let Ok(project_with_dirs) = client.get_project(project_id).await {
-        if project_with_dirs.project.testing_policy == TestingPolicy::Advisory {
-            if let Ok(proofs) = client.get_proofs_for_feature(feature_id).await {
-                if proofs.is_empty() || proofs[0].exit_code != 0 {
-                    advisory_warning = Some(
-                        "Warning: No passing test evidence recorded for this feature. Consider running tests and calling prove_feature.".to_string(),
-                    );
-                }
-            }
-        }
-    }
+    // Fetch latest proof for display (best-effort)
+    let latest_proof = client
+        .get_proofs_for_feature(feature_id)
+        .await
+        .ok()
+        .and_then(|proofs| proofs.into_iter().next());
 
     let commit_count = history.details.commits.len();
     let feature_info: FeatureInfo = (&feature).into();
@@ -855,8 +848,28 @@ pub async fn complete_feature(
         if commit_count == 1 { "" } else { "s" },
     );
     let mut content = vec![Content::text(summary)];
-    if let Some(warning) = advisory_warning {
-        content.push(Content::text(warning));
+    // Verification — full test tree
+    match &latest_proof {
+        Some(proof) => match &proof.test_suites {
+            Some(suites) if !suites.is_empty() => {
+                content.push(Content::text(format!(
+                    "Verification:\n{}",
+                    format::render_test_tree(suites)
+                )));
+            }
+            _ => {
+                content.push(Content::text(format!(
+                    "Verification: exit code {}",
+                    proof.exit_code
+                )));
+            }
+        },
+        None => {
+            content.push(Content::text("Verification: none"));
+        }
+    }
+    for warning in &warnings {
+        content.push(Content::text(format!("\u{26a0} Warning: {warning}")));
     }
     if let Some(msg) = merge_message {
         content.push(Content::text(msg));
@@ -984,9 +997,12 @@ pub async fn prove_feature(
     // Build summary
     let summary = if let Some(ref suites) = proof.test_suites {
         let report = format::render_test_results(suites);
-        format!("Proof recorded — {report}")
+        format!(
+            "Verification recorded:\n{}",
+            format::render_test_tree(suites)
+        )
     } else {
-        format!("Proof recorded — exit code {}", proof.exit_code)
+        format!("Verification recorded — exit code {}", proof.exit_code)
     };
     Ok(CallToolResult::success(vec![Content::text(summary)]))
 }

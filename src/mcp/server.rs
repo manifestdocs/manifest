@@ -216,7 +216,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, sets state to 'implemented', and clears the agent claim. Automatically clears desired_details if present (pending change request fulfilled). Call only after verification.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). Only leaf features can be completed. If a parent's children are all implemented, the parent's status is derived automatically — do NOT attempt to complete the parent.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI."
+        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, sets state to 'implemented', and clears the agent claim. Automatically clears desired_details if present (pending change request fulfilled). Call only after verification.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). Only leaf features can be completed. If a parent's children are all implemented, the parent's status is derived automatically — do NOT attempt to complete the parent.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI.\n\nWARNINGS: Returns advisory warnings when test evidence is missing (no prove_feature call) or when the feature spec was not updated after implementation (no update_feature call). Address these warnings before considering the feature complete."
     )]
     async fn complete_feature(
         &self,
@@ -226,7 +226,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "BUILD: Record test evidence for a feature. Creates a proof record with the test command, exit code, structured test results, and evidence file paths. Can be called multiple times during TDD (red/green cycle) or once after tests pass. Proof is separate from completion — call this to record evidence, then call complete_feature when done.\n\nThe agent is the universal adapter: run any test framework, parse its output, and produce structured results. Include { name, suite, state, file, line, duration_ms, message } for each test for consistent rendering in both CLI and web UI.\n\nProof is advisory, never blocking. Features without proof are visibly unproven, not invalid."
+        description = "BUILD: Record test evidence for a feature. Creates a proof record with the test command, exit code, structured test results, and evidence file paths. Can be called multiple times during TDD (red/green cycle) or once after tests pass. Proof is separate from completion — call this to record evidence, then call complete_feature when done.\n\nThe agent is the universal adapter: run any test framework, parse its output, and produce structured results. Include { name, suite, state, file, line, duration_ms, message } for each test for consistent rendering in both CLI and web UI.\n\nIn TDD mode (testing_policy: tdd), complete_feature REQUIRES a passing proof (exit_code 0). If tests are failing, you must fix the implementation and call prove_feature again — repeat until green. In advisory mode, proof is encouraged but not blocking."
     )]
     async fn prove_feature(
         &self,
@@ -531,12 +531,14 @@ When creating new features:
    - prove_feature records test evidence separately from completion — call it whenever you have test results
    - Include structured test results: { name, suite, state, file, line, duration_ms, message }
    - The agent is the universal adapter: run any test framework, parse its output into the structured format
+   - ITERATE until green: if tests fail after implementation, fix the code and call prove_feature again. Repeat until all tests pass. In TDD mode, complete_feature will reject if the latest proof has a non-zero exit code.
    - As you implement, update_feature details to reflect what you actually built
 
 4. DOCUMENT — MANDATORY after implementing:
    a) call update_feature to set details to what was actually built
-   b) call prove_feature to record test evidence (if not already done during BUILD)
+   b) call prove_feature to record test evidence — do this in ALL modes, not just TDD
    c) call complete_feature with a summary of what you did + commit SHAs
+   NOTE: In TDD mode, complete_feature REQUIRES a passing proof (exit_code 0). In advisory mode, complete_feature returns warnings if prove_feature was not called or if the spec was not updated — address these before considering the feature done.
 
 Common sequence: list_projects → get_active_feature → start_feature → [implement] → prove_feature → update_feature (details) → complete_feature
 </workflow>
@@ -544,7 +546,9 @@ Common sequence: list_projects → get_active_feature → start_feature → [imp
 <critical_rules>
 ALWAYS call start_feature before implementing — it checks spec completeness and returns your specification.
 ALWAYS call update_feature after implementing — details must reflect what was actually built.
+ALWAYS call prove_feature before complete_feature — in all modes. TDD mode blocks completion without proof; advisory mode returns warnings.
 ALWAYS call complete_feature with summary and commit SHAs — this records history and marks the feature done.
+In TDD mode: iterate until tests pass. If prove_feature records failing tests, fix the implementation and call prove_feature again. Do NOT call complete_feature until the latest proof has exit_code 0 — the server will reject it.
 NEVER change a feature's target version during implementation.
 NEVER call start_feature or complete_feature on a feature set (▪ symbol, has children). These tools reject non-leaf features. Work on leaf children instead.
 If a feature is already in_progress, skip it — another agent claimed it. Use find_features with state='proposed' to find unclaimed work instead.

@@ -853,4 +853,6 @@ impl ManifestClient {
 pub struct CompleteFeatureResponse {
     pub feature: Feature,
     pub history: FeatureHistory,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }

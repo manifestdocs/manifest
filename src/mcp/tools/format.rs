@@ -299,7 +299,75 @@ pub fn test_state_symbol(state: &TestState) -> &'static str {
     }
 }
 
-/// Render structured test results (grouped by suite) into a text report for MCP responses.
+/// Render the full test tree — every test listed under its file/suite header.
+///
+/// ```text
+/// tests/db_blockers_spec.rs
+///   ✓ proof_gate::requires_passing_proof
+///   ✓ proof_gate::rejects_failing_proof
+///   ✗ proof_gate::handles_edge_case
+///     assertion failed: expected 3, got 2
+///
+/// 2 passed, 1 failed
+/// ```
+pub fn render_test_tree(suites: &[TestSuite]) -> String {
+    let mut out = String::new();
+    let mut passed = 0u32;
+    let mut failed = 0u32;
+    let mut errored = 0u32;
+    let mut skipped = 0u32;
+
+    for suite in suites {
+        // Suite header: prefer file path, fall back to name
+        let header = suite.file.as_deref().unwrap_or(&suite.name);
+        out.push_str(header);
+        out.push('\n');
+
+        for test in &suite.tests {
+            match test.state {
+                TestState::Passed => passed += 1,
+                TestState::Failed => failed += 1,
+                TestState::Errored => errored += 1,
+                TestState::Skipped => skipped += 1,
+            }
+            let symbol = test_state_symbol(&test.state);
+            out.push_str(&format!("  {} {}", symbol, test.name));
+            if let Some(ms) = test.duration_ms {
+                if ms >= 1000 {
+                    out.push_str(&format!(" ({:.1}s)", ms as f64 / 1000.0));
+                }
+            }
+            out.push('\n');
+            if matches!(test.state, TestState::Failed | TestState::Errored) {
+                if let Some(ref msg) = test.message {
+                    for line in msg.lines() {
+                        out.push_str(&format!("    {}\n", line));
+                    }
+                }
+            }
+        }
+        out.push('\n');
+    }
+
+    // Summary line
+    let mut parts = Vec::new();
+    if passed > 0 {
+        parts.push(format!("{passed} passed"));
+    }
+    if failed > 0 {
+        parts.push(format!("{failed} failed"));
+    }
+    if errored > 0 {
+        parts.push(format!("{errored} errored"));
+    }
+    if skipped > 0 {
+        parts.push(format!("{skipped} skipped"));
+    }
+    out.push_str(&parts.join(", "));
+    out
+}
+
+/// Render a compact one-line summary of test results for inline use.
 ///
 /// Format:
 /// - First line: count summary (e.g., "45 passed, 2 failed, 1 skipped")

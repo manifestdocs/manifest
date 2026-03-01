@@ -604,10 +604,12 @@ mod feature_claims {
             .await
             .unwrap();
 
-        let (completed, history) = db
+        let result = db
             .complete_feature(feature.id, "Implemented the feature", &[])
             .await
             .unwrap();
+        let completed = result.feature;
+        let history = result.history;
 
         // Feature state should be implemented
         assert_eq!(completed.state, FeatureState::Implemented);
@@ -646,7 +648,7 @@ mod feature_claims {
         // Subscribe before completing
         let mut rx = db.subscribe();
 
-        let (_completed, _history) = db.complete_feature(feature.id, "Done", &[]).await.unwrap();
+        let _result = db.complete_feature(feature.id, "Done", &[]).await.unwrap();
 
         // Drain events — the last one should be Completed
         // (there may be Updated events before it from update_feature + clear_claim)
@@ -997,13 +999,13 @@ mod proof_gate {
         .unwrap();
 
         // Complete should succeed
-        let (completed, history) = db
+        let result = db
             .complete_feature(feature.id, "Done with passing tests", &[])
             .await
             .unwrap();
 
-        assert_eq!(completed.state, FeatureState::Implemented);
-        assert_eq!(history.details.summary, "Done with passing tests");
+        assert_eq!(result.feature.state, FeatureState::Implemented);
+        assert_eq!(result.history.details.summary, "Done with passing tests");
     }
 
     #[tokio::test]
@@ -1011,13 +1013,17 @@ mod proof_gate {
         let db = setup().await;
         let (_project, feature) = setup_with_policy(&db, TestingPolicy::Advisory).await;
 
-        // Complete without proof — advisory should not block
-        let (completed, _history) = db
+        // Complete without proof — advisory should not block (but should warn)
+        let result = db
             .complete_feature(feature.id, "Done without proof (advisory)", &[])
             .await
             .unwrap();
 
-        assert_eq!(completed.state, FeatureState::Implemented);
+        assert_eq!(result.feature.state, FeatureState::Implemented);
+        assert!(
+            !result.warnings.is_empty(),
+            "advisory should produce warnings when proof is missing"
+        );
     }
 
     #[tokio::test]
@@ -1025,12 +1031,12 @@ mod proof_gate {
         let db = setup().await;
         let (_project, feature) = setup_with_policy(&db, TestingPolicy::None).await;
 
-        // Complete without proof — none policy should not block
-        let (completed, _history) = db
+        // Complete without proof — none policy should not block or warn about proof
+        let result = db
             .complete_feature(feature.id, "Done without proof (none)", &[])
             .await
             .unwrap();
 
-        assert_eq!(completed.state, FeatureState::Implemented);
+        assert_eq!(result.feature.state, FeatureState::Implemented);
     }
 }

@@ -792,14 +792,18 @@ pub async fn complete_feature(
     Path(id): Path<Uuid>,
     Json(input): Json<CompleteFeatureInput>,
 ) -> Result<(StatusCode, Json<CompleteFeatureResponse>), ApiError> {
-    let (feature, history) = db
+    let result = db
         .complete_feature(id.into(), &input.summary, &input.commits)
         .await
         .map_err(internal_error)?;
 
     Ok((
         StatusCode::CREATED,
-        Json(CompleteFeatureResponse { feature, history }),
+        Json(CompleteFeatureResponse {
+            feature: result.feature,
+            history: result.history,
+            warnings: result.warnings,
+        }),
     ))
 }
 
@@ -808,6 +812,8 @@ pub async fn complete_feature(
 pub struct CompleteFeatureResponse {
     pub feature: Feature,
     pub history: FeatureHistory,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Subscribe to real-time feature change notifications via SSE.

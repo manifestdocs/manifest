@@ -16,6 +16,14 @@ const FEATURE_COLS: &str = "id, project_id, parent_id, title, details, desired_d
 /// SELECT columns for the features table with `f.` table alias.
 const FEATURE_COLS_F: &str = "f.id, f.project_id, f.parent_id, f.title, f.details, f.desired_details, f.details_summary, f.state, f.priority, f.feature_number, f.target_version_id, f.verification_result, f.verified_at, f.claimed_by, f.claimed_at, f.claim_metadata, f.created_at, f.updated_at";
 
+/// Result of completing a feature, including advisory warnings.
+#[derive(Debug)]
+pub struct CompletionResult {
+    pub feature: Feature,
+    pub history: FeatureHistory,
+    pub warnings: Vec<String>,
+}
+
 impl Database {
     /// Get all features across all projects with optional pagination and version filter.
     pub async fn get_all_features_paginated(
@@ -1572,7 +1580,7 @@ impl Database {
         feature_id: FeatureId,
         summary: &str,
         commits: &[CommitRef],
-    ) -> Result<(Feature, FeatureHistory)> {
+    ) -> Result<CompletionResult> {
         // Get current feature
         let feature = self
             .get_feature(feature_id)
@@ -1604,6 +1612,29 @@ impl Database {
                     ).into());
                 }
                 _ => {} // passing proof exists, proceed
+            }
+        }
+
+        // Advisory warnings (non-blocking)
+        let mut warnings = Vec::new();
+
+        if project.testing_policy == TestingPolicy::Advisory {
+            let latest_proof = self.get_latest_proof_for_feature(feature_id).await?;
+            if latest_proof.is_none()
+                || latest_proof.as_ref().is_some_and(|p| p.exit_code != 0)
+            {
+                warnings.push(
+                    "No passing test evidence recorded. Consider running tests and calling prove_feature.".to_string(),
+                );
+            }
+        }
+
+        // Check if spec was updated since the feature was claimed
+        if let Some(claimed_at) = feature.claimed_at {
+            if feature.updated_at <= claimed_at {
+                warnings.push(
+                    "Feature spec not updated since work started. Call update_feature to reflect what was actually built.".to_string(),
+                );
             }
         }
 
@@ -1672,6 +1703,10 @@ impl Database {
             agent_type,
         });
 
-        Ok((updated_feature, history))
+        Ok(CompletionResult {
+            feature: updated_feature,
+            history,
+            warnings,
+        })
     }
 }
