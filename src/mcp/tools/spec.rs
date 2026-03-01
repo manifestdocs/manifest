@@ -31,36 +31,43 @@ impl Default for SpecConfig {
 }
 
 impl SpecConfig {
-    /// Generate testing guidance based on `testing_policy` and `ac_format`.
+    /// Generate testing guidance based on `testing_policy`, `ac_format`, and criteria count.
     /// Returns `None` when policy is `None`.
-    pub fn testing_guidance(&self) -> Option<String> {
+    pub fn testing_guidance(&self, testable_criteria_count: usize) -> Option<String> {
         match self.testing_policy {
             TestingPolicy::None => None,
-            TestingPolicy::Advisory => Some(
-                "This project encourages test-first development.\n\
-                 Before implementing, consider writing tests that describe the expected behavior.\n\
-                 Use the acceptance criteria in the spec as your test outline.\n\
-                 Use prove_feature to record test evidence at any point. Include structured test\n\
-                 results (name, state, file, line) when possible for consistent display."
-                    .to_string(),
-            ),
+            TestingPolicy::Advisory => {
+                if testable_criteria_count > 0 {
+                    Some(format!(
+                        "Your first step: write tests for the {} testable criteria in the spec, then call prove_feature.",
+                        testable_criteria_count,
+                    ))
+                } else {
+                    Some(
+                        "Your first step: write tests that describe the expected behavior, then call prove_feature."
+                            .to_string(),
+                    )
+                }
+            }
             TestingPolicy::Tdd => {
                 let criteria_term = if self.ac_format == AcFormat::Gherkin {
                     "Gherkin scenarios"
                 } else {
-                    "acceptance criteria"
+                    "testable criteria"
                 };
-                Some(format!(
-                    "This project uses test-driven development. Follow this workflow:\n\
-                     1. READ the {criteria_term} in the spec\n\
-                     2. WRITE failing tests that encode each criterion\n\
-                     3. RUN the tests — confirm they fail (red)\n\
-                     4. Call prove_feature with the failing results (records the red state)\n\
-                     5. IMPLEMENT the feature to make tests pass (green)\n\
-                     6. Call prove_feature again with passing results (records the green state)\n\
-                     7. REFACTOR if needed, keeping tests green\n\
-                     Include structured test results: {{ name, suite, state, file, line, duration_ms, message }}"
-                ))
+                if testable_criteria_count > 0 {
+                    Some(format!(
+                        "REQUIRED: Write failing tests for the {} {} BEFORE writing any implementation. \
+                         Call prove_feature with the failing results, then implement to make them pass.",
+                        testable_criteria_count, criteria_term,
+                    ))
+                } else {
+                    Some(
+                        "REQUIRED: Write failing tests that encode the expected behavior BEFORE writing any implementation. \
+                         Call prove_feature with the failing results, then implement to make them pass."
+                            .to_string(),
+                    )
+                }
             }
         }
     }
@@ -238,27 +245,29 @@ impl SpecStatus {
                 GuidanceLevel::Concise => {
                     "This feature has no specification. Use update_feature to add details before starting.\n\n\
                      Write a brief specification (~30-80 words):\n\
-                     - Intent: what capability this adds and why it matters\n\
-                     - Key constraint: the most important limitation or requirement\n\
+                     1. User story: As a [user], I can [capability] so that [benefit].\n\
+                     2. Acceptance criteria (1-2 checkbox items): concrete assertions verifiable in tests.\n\
                      - Do NOT include: file paths, directory structure, or implementation approach"
                         .to_string()
                 }
                 GuidanceLevel::Standard => {
                     "This feature has no specification. Use update_feature to add details before starting.\n\n\
-                     Write a focused specification (~50-150 words):\n\
-                     - Intent: what capability this adds and why it matters\n\
-                     - Constraints: business rules, edge cases, non-obvious requirements\n\
-                     - Done when: 2-3 concrete acceptance criteria\n\
-                     - Do NOT include: file paths, codebase structure, or implementation approach \u{2014} agents discover these from code"
+                     Write a focused specification (~50-150 words) with this structure:\n\n\
+                     1. User story: As a [user], I can [capability] so that [benefit].\n\
+                     2. Brief context (1-2 sentences): key behavior, constraints, or edge cases.\n\
+                     3. Acceptance criteria as checkbox items (3-5) — each should be verifiable in a spec or test:\n\
+                        - [ ] Concrete assertion verifiable in a test\n\
+                        - [ ] Another assertion verifiable in a test\n\n\
+                     Do NOT include: file paths, codebase structure, or implementation approach \u{2014} agents discover these from code."
                         .to_string()
                 }
                 GuidanceLevel::Thorough => {
                     "This feature has no specification. Use update_feature to add details before starting.\n\n\
-                     Write a detailed specification (~100-300 words):\n\
-                     - Story: As a [user], I can [capability] so that [benefit]\n\
-                     - Acceptance criteria: Given/When/Then for key scenarios\n\
-                     - Constraints: business rules, domain-specific requirements, edge cases\n\
-                     - Do NOT include: file paths, directory structure, codebase overviews, or step-by-step implementation plans \u{2014} agents discover code structure on their own"
+                     Write a detailed specification (~100-300 words) with this structure:\n\n\
+                     1. User story: As a [user], I can [capability] so that [benefit].\n\
+                     2. Context: business rules, domain-specific requirements, edge cases.\n\
+                     3. Acceptance criteria as checkbox items (5-8) — each should be verifiable in a spec or test.\n\n\
+                     Do NOT include: file paths, directory structure, codebase overviews, or step-by-step implementation plans \u{2014} agents discover code structure on their own."
                         .to_string()
                 }
             });
@@ -266,8 +275,10 @@ impl SpecStatus {
 
         if self.is_sparse(config) {
             return Some(
-                "Specification exists but is brief. Consider adding key constraints \
-                 or acceptance criteria before implementing."
+                "Specification exists but is too brief. A good spec needs:\n\
+                 1. A user story opening line: As a [user], I can [capability] so that [benefit].\n\
+                 2. Acceptance criteria as checkbox items — concrete assertions verifiable in specs and tests.\n\
+                 Consider fleshing out the spec before implementing."
                     .to_string(),
             );
         }
@@ -290,10 +301,10 @@ impl SpecStatus {
         // Testable criteria warning (advisory/tdd only)
         if self.testable_criteria_count == 0 && config.testing_policy != TestingPolicy::None {
             return Some(
-                "No testable criteria detected. Consider adding acceptance criteria with \
-                 concrete assertions (e.g. \"returns 200\", \"creates a record\", \
-                 \"rejects invalid input\") or Gherkin Given/When/Then scenarios. \
-                 Testable criteria map directly to structured proof records."
+                "No testable criteria detected. Consider adding acceptance criteria as \
+                 checkbox items with concrete assertions verifiable in specs and tests \
+                 (e.g. \"returns 200\", \"creates a record\", \"rejects invalid input\"). \
+                 Each criterion maps directly to a test case."
                     .to_string(),
             );
         }
@@ -817,7 +828,7 @@ mod tests {
             testing_policy: TestingPolicy::None,
             ..default_config()
         };
-        assert!(config.testing_guidance().is_none());
+        assert!(config.testing_guidance(0).is_none());
     }
 
     #[test]
@@ -826,23 +837,21 @@ mod tests {
             testing_policy: TestingPolicy::Advisory,
             ..default_config()
         };
-        let guidance = config.testing_guidance().unwrap();
+        let guidance = config.testing_guidance(0).unwrap();
         assert!(guidance.contains("prove_feature"));
-        assert!(guidance.contains("test-first"));
+        assert!(guidance.contains("Your first step"));
     }
 
     #[test]
-    fn testing_guidance_tdd_has_red_green_workflow() {
+    fn testing_guidance_tdd_has_required_before() {
         let config = SpecConfig {
             testing_policy: TestingPolicy::Tdd,
             ..default_config()
         };
-        let guidance = config.testing_guidance().unwrap();
-        assert!(guidance.contains("test-driven development"));
+        let guidance = config.testing_guidance(0).unwrap();
+        assert!(guidance.contains("REQUIRED"));
+        assert!(guidance.contains("BEFORE"));
         assert!(guidance.contains("prove_feature"));
-        assert!(guidance.contains("red"));
-        assert!(guidance.contains("green"));
-        assert!(guidance.contains("acceptance criteria"));
     }
 
     #[test]
@@ -852,21 +861,39 @@ mod tests {
             ac_format: AcFormat::Gherkin,
             ..default_config()
         };
-        let guidance = config.testing_guidance().unwrap();
+        let guidance = config.testing_guidance(3).unwrap();
         assert!(guidance.contains("Gherkin scenarios"));
-        assert!(!guidance.contains("acceptance criteria"));
+        assert!(!guidance.contains("testable criteria"));
     }
 
     #[test]
-    fn testing_guidance_tdd_mentions_structured_results() {
+    fn testing_guidance_advisory_includes_criteria_count() {
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::Advisory,
+            ..default_config()
+        };
+        let guidance = config.testing_guidance(3).unwrap();
+        assert!(guidance.contains("3 testable criteria"));
+    }
+
+    #[test]
+    fn testing_guidance_tdd_includes_criteria_count() {
         let config = SpecConfig {
             testing_policy: TestingPolicy::Tdd,
             ..default_config()
         };
-        let guidance = config.testing_guidance().unwrap();
-        assert!(guidance.contains("name"));
-        assert!(guidance.contains("state"));
-        assert!(guidance.contains("duration_ms"));
+        let guidance = config.testing_guidance(5).unwrap();
+        assert!(guidance.contains("5 testable criteria"));
+    }
+
+    #[test]
+    fn testing_guidance_zero_criteria_no_count_in_text() {
+        let config = SpecConfig {
+            testing_policy: TestingPolicy::Advisory,
+            ..default_config()
+        };
+        let guidance = config.testing_guidance(0).unwrap();
+        assert!(!guidance.contains("0 testable"));
     }
 
     // --- Testable criteria detection tests ---

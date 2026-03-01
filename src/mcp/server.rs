@@ -458,13 +458,32 @@ RULE: The word "next" triggers get_next_feature. The word "activity" or "history
 </tool_selection>
 
 <features_as_docs>
-Features describe system capabilities, not work items to close. A feature titled "Router" should make sense years from now. Before creating one, apply the user story test: "As a [user], I can [capability] so that [benefit]."
+Features describe system capabilities, not work items to close. A feature titled "Router" should make sense years from now.
+
+**Every leaf feature spec MUST have these two parts:**
+1. **User story** opening line: "As a [user], I can [capability] so that [benefit]."
+2. **Acceptance criteria** as checkbox items: concrete assertions that can be verified in specs and tests.
+
+Example of a GOOD spec (this is the minimum — write more detail when the feature warrants it):
+
+  As a user, I can mark a todo as complete so that I can track my progress.
+
+  Tapping the checkbox next to a todo toggles its completed state. Completed todos display with strikethrough styling.
+
+  - [ ] Checkbox appears to the left of each todo item
+  - [ ] Clicking the checkbox toggles the `completed` boolean
+  - [ ] Completed todos render with line-through text decoration
+  - [ ] Toggling is immediate — no confirmation dialog
+
+Example of a BAD spec (too terse, no user story, no acceptance criteria):
+
+  Clicking a checkbox next to a todo toggles its completed state. Completed todos show with line-through styling.
 
 start_feature returns tier-specific guidance for writing specs at each level (project, feature set, leaf). To write a spec, use update_feature with `details` to set it directly, or `desired_details` to propose changes for human review.
 
 When a human edits an implemented feature in the web UI, changes are saved to `desired_details` — start_feature returns guidance for handling these change requests.
 
-Spec quality: focused specs (50-200 words) outperform comprehensive ones. Write what the agent cannot discover from code — intent, business rules, edge cases, acceptance criteria. Do NOT put file paths, directory layouts, codebase overviews, or step-by-step implementation plans in specs — agents discover code structure on their own and extra context degrades performance.
+Write what the agent cannot discover from code — intent, business rules, edge cases, acceptance criteria. More complex features should have proportionally more detail: additional context, more acceptance criteria, edge cases, and constraints. Do NOT put file paths, directory layouts, codebase overviews, or step-by-step implementation plans in specs — agents discover code structure on their own and extra context degrades performance.
 </features_as_docs>
 
 <updating_features>
@@ -525,7 +544,7 @@ When creating new features:
    - The feature details ARE your specification
    - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
    - If desired_details is present, this is a CHANGE REQUEST: compare desired_details with details
-   - Check testing_guidance in the start_feature response for project testing policy
+   - Follow the testing guidance in the start_feature response — it tells you your first step
    - If testing_policy is "tdd": write failing tests first, call prove_feature (red), implement, call prove_feature again (green)
    - If testing_policy is "advisory": write tests alongside implementation, call prove_feature when tests pass
    - prove_feature records test evidence separately from completion — call it whenever you have test results

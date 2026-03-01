@@ -454,15 +454,10 @@ pub struct StartFeatureResponse {
     pub ac_format: String,
     /// Testing policy (none, advisory, tdd).
     pub testing_policy: String,
-    /// Testing workflow guidance based on project policy.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub testing_guidance: Option<String>,
     /// Number of testable criteria detected in the spec.
     pub testable_criteria_count: usize,
     /// Specification detail level.
     pub detail_level: String,
-    /// Reminder to call complete_feature.
-    pub workflow_reminder: String,
 }
 
 /// Response for get_next_feature MCP tool (serialized as YAML).
