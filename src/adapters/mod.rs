@@ -8,7 +8,7 @@ mod builtin;
 mod detect;
 mod lua_runtime;
 
-use manifest_core::models::TestResult;
+use manifest_core::models::TestSuite;
 use std::path::Path;
 
 pub use builtin::list_builtin_adapters;
@@ -41,8 +41,8 @@ impl std::error::Error for AdapterError {}
 pub struct AdapterResult {
     /// The adapter name that was used.
     pub adapter_name: String,
-    /// Parsed test results.
-    pub tests: Vec<TestResult>,
+    /// Parsed test results grouped into suites.
+    pub test_suites: Vec<TestSuite>,
 }
 
 /// Parse test output using the appropriate adapter.
@@ -107,13 +107,23 @@ pub fn parse_test_output(
 }
 
 /// Execute an adapter script and wrap the result, logging errors gracefully.
+///
+/// Lua adapters return flat results (with optional suite per-test). We group
+/// them into `TestSuite` structs here so callers get the structured format.
 fn execute_and_wrap(name: &str, script: &str, output: &str) -> Option<AdapterResult> {
+    use manifest_core::models::group_into_suites;
+
     match lua_runtime::execute_adapter(script, output) {
-        Ok(tests) => {
-            tracing::debug!("Adapter '{name}' parsed {} test results", tests.len());
+        Ok(flat_results) => {
+            let count = flat_results.len();
+            let test_suites = group_into_suites(flat_results);
+            tracing::debug!(
+                "Adapter '{name}' parsed {count} test results into {} suites",
+                test_suites.len()
+            );
             Some(AdapterResult {
                 adapter_name: name.to_string(),
-                tests,
+                test_suites,
             })
         }
         Err(e) => {

@@ -367,10 +367,24 @@ pub(crate) fn row_to_oauth_identity(row: &AnyRow) -> Result<OAuthIdentity> {
 }
 
 /// Map a database row to a [`Proof`].
+///
+/// The `tests` column may contain either the new `Vec<TestSuite>` format or
+/// the legacy flat `Vec<FlatTestResult>` format. Try new format first, then
+/// fall back to flat and group into suites.
 pub(crate) fn row_to_proof(row: &AnyRow) -> Result<Proof> {
-    let tests: Option<Vec<TestResult>> = row
+    let test_suites: Option<Vec<TestSuite>> = row
         .get::<Option<String>, _>("tests")
-        .and_then(|s| serde_json::from_str(&s).ok());
+        .and_then(|s| {
+            // Try new TestSuite format first (has `tests` array inside each object)
+            serde_json::from_str::<Vec<TestSuite>>(&s)
+                .ok()
+                .or_else(|| {
+                    // Fall back to legacy flat format (has `state` on each object)
+                    serde_json::from_str::<Vec<FlatTestResult>>(&s)
+                        .ok()
+                        .map(group_into_suites)
+                })
+        });
 
     let evidence: Vec<Evidence> = row
         .get::<Option<String>, _>("evidence")
@@ -387,7 +401,7 @@ pub(crate) fn row_to_proof(row: &AnyRow) -> Result<Proof> {
         command: row.get("command"),
         exit_code: row.get("exit_code"),
         output: row.get("output"),
-        tests,
+        test_suites,
         evidence,
         commit_sha: row.get("commit_sha"),
         agent_type: row.get("agent_type"),

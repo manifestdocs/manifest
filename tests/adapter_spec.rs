@@ -4,8 +4,42 @@
 //! Lua parsing → structured TestResult output. Uses realistic test runner
 //! output samples to verify each built-in adapter.
 
-use manifest::adapters::{list_builtin_adapters, parse_test_output};
+use manifest::adapters::{list_builtin_adapters, parse_test_output, AdapterResult};
 use manifest_core::models::TestState;
+
+/// Flatten all tests from an AdapterResult's suites into a single Vec,
+/// carrying the suite name as a tuple for easy assertion.
+struct FlatTest {
+    name: String,
+    suite: String,
+    state: TestState,
+    file: Option<String>,
+    line: Option<u32>,
+    duration_ms: Option<u64>,
+    message: Option<String>,
+}
+
+fn flatten(result: &AdapterResult) -> Vec<FlatTest> {
+    result
+        .test_suites
+        .iter()
+        .flat_map(|suite| {
+            suite.tests.iter().map(move |t| FlatTest {
+                name: t.name.clone(),
+                suite: suite.name.clone(),
+                state: t.state,
+                file: t.file.clone().or_else(|| suite.file.clone()),
+                line: t.line,
+                duration_ms: t.duration_ms,
+                message: t.message.clone(),
+            })
+        })
+        .collect()
+}
+
+fn total_test_count(result: &AdapterResult) -> usize {
+    result.test_suites.iter().map(|s| s.tests.len()).sum()
+}
 
 // ============================================================
 // Built-in Adapter Inventory
@@ -58,15 +92,15 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; 
             .expect("Adapter should match cargo test");
 
         assert_eq!(result.adapter_name, "cargo-test");
-        assert_eq!(result.tests.len(), 4);
+        assert_eq!(total_test_count(&result), 4);
     }
 
     #[test]
     fn maps_ok_to_passed_state() {
         let result = parse_test_output("cargo test", CARGO_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let passed: Vec<_> = result
-            .tests
+        let passed: Vec<_> = tests
             .iter()
             .filter(|t| t.state == TestState::Passed)
             .collect();
@@ -83,9 +117,9 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; 
     #[test]
     fn maps_failed_to_failed_state() {
         let result = parse_test_output("cargo test", CARGO_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let failed: Vec<_> = result
-            .tests
+        let failed: Vec<_> = tests
             .iter()
             .filter(|t| t.state == TestState::Failed)
             .collect();
@@ -97,9 +131,9 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; 
     #[test]
     fn maps_ignored_to_skipped_state() {
         let result = parse_test_output("cargo test", CARGO_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let skipped: Vec<_> = result
-            .tests
+        let skipped: Vec<_> = tests
             .iter()
             .filter(|t| t.state == TestState::Skipped)
             .collect();
@@ -111,25 +145,22 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; 
     #[test]
     fn extracts_suite_from_module_path() {
         let result = parse_test_output("cargo test", CARGO_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let login = result
-            .tests
+        let login = tests
             .iter()
             .find(|t| t.name == "auth::tests::login_with_valid_credentials")
             .unwrap();
 
-        assert_eq!(login.suite.as_deref(), Some("auth::tests"));
+        assert_eq!(login.suite, "auth::tests");
     }
 
     #[test]
     fn extracts_failure_messages() {
         let result = parse_test_output("cargo test", CARGO_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let failed = result
-            .tests
-            .iter()
-            .find(|t| t.state == TestState::Failed)
-            .unwrap();
+        let failed = tests.iter().find(|t| t.state == TestState::Failed).unwrap();
 
         let msg = failed
             .message
@@ -151,7 +182,7 @@ test auth::signup ... ok
             .expect("Should detect cargo-test adapter");
 
         assert_eq!(result.adapter_name, "cargo-test");
-        assert_eq!(result.tests.len(), 2);
+        assert_eq!(total_test_count(&result), 2);
     }
 }
 
@@ -190,9 +221,10 @@ FAILED tests/test_auth.py::test_invalid_password - AssertionError
             .expect("Adapter should match pytest");
 
         assert_eq!(result.adapter_name, "pytest");
-        assert_eq!(result.tests.len(), 3);
+        assert_eq!(total_test_count(&result), 3);
 
-        let states: Vec<_> = result.tests.iter().map(|t| &t.state).collect();
+        let tests = flatten(&result);
+        let states: Vec<_> = tests.iter().map(|t| &t.state).collect();
         assert!(states.contains(&&TestState::Passed));
         assert!(states.contains(&&TestState::Failed));
         assert!(states.contains(&&TestState::Skipped));
@@ -201,12 +233,9 @@ FAILED tests/test_auth.py::test_invalid_password - AssertionError
     #[test]
     fn extracts_file_path() {
         let result = parse_test_output("pytest -v", PYTEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let login = result
-            .tests
-            .iter()
-            .find(|t| t.name == "test_login")
-            .unwrap();
+        let login = tests.iter().find(|t| t.name == "test_login").unwrap();
 
         assert_eq!(login.file.as_deref(), Some("tests/test_auth.py"));
     }
@@ -245,15 +274,15 @@ Tests:       1 failed, 1 skipped, 1 passed, 3 total
             .expect("Adapter should match jest");
 
         assert_eq!(result.adapter_name, "jest");
-        assert_eq!(result.tests.len(), 3);
+        assert_eq!(total_test_count(&result), 3);
     }
 
     #[test]
     fn extracts_duration_from_parenthesized_time() {
         let result = parse_test_output("pnpm test", JEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let login = result
-            .tests
+        let login = tests
             .iter()
             .find(|t| t.name == "logs in with valid credentials")
             .unwrap();
@@ -265,23 +294,23 @@ Tests:       1 failed, 1 skipped, 1 passed, 3 total
     #[test]
     fn tracks_describe_block_as_suite() {
         let result = parse_test_output("pnpm test", JEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let login = result
-            .tests
+        let login = tests
             .iter()
             .find(|t| t.name == "logs in with valid credentials")
             .unwrap();
 
-        assert_eq!(login.suite.as_deref(), Some("Authentication"));
+        assert_eq!(login.suite, "Authentication");
     }
 
     #[test]
     fn extracts_file_from_header() {
         let result = parse_test_output("pnpm test", JEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
         assert!(
-            result
-                .tests
+            tests
                 .iter()
                 .all(|t| t.file.as_deref() == Some("src/auth.test.ts")),
             "All tests should inherit file from PASS header"
@@ -324,14 +353,13 @@ FAIL    github.com/example/auth 0.025s
             .expect("Adapter should match go test");
 
         assert_eq!(result.adapter_name, "go-test");
+        let tests = flatten(&result);
 
-        let passed = result
-            .tests
+        let passed = tests
             .iter()
             .filter(|t| t.state == TestState::Passed)
             .count();
-        let failed = result
-            .tests
+        let failed = tests
             .iter()
             .filter(|t| t.state == TestState::Failed)
             .count();
@@ -343,22 +371,22 @@ FAIL    github.com/example/auth 0.025s
     #[test]
     fn extracts_suite_from_subtest_parent() {
         let result = parse_test_output("go test -v ./...", GO_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let subtest = result
-            .tests
+        let subtest = tests
             .iter()
             .find(|t| t.name == "TestAuth/valid_login")
             .unwrap();
 
-        assert_eq!(subtest.suite.as_deref(), Some("TestAuth"));
+        assert_eq!(subtest.suite, "TestAuth");
     }
 
     #[test]
     fn extracts_duration_in_milliseconds() {
         let result = parse_test_output("go test -v ./...", GO_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let subtest = result
-            .tests
+        let subtest = tests
             .iter()
             .find(|t| t.name == "TestAuth/valid_login")
             .unwrap();
@@ -369,9 +397,9 @@ FAIL    github.com/example/auth 0.025s
     #[test]
     fn extracts_file_and_line_from_failure_output() {
         let result = parse_test_output("go test -v ./...", GO_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let failed = result
-            .tests
+        let failed = tests
             .iter()
             .find(|t| t.name == "TestAuth/invalid_password")
             .unwrap();
@@ -427,7 +455,11 @@ mod resolution {
         let result = parse_test_output("cargo test", "", None, None);
 
         match result {
-            Some(r) => assert!(r.tests.is_empty(), "Empty output should yield no tests"),
+            Some(r) => assert_eq!(
+                total_test_count(&r),
+                0,
+                "Empty output should yield no tests"
+            ),
             None => {} // Also acceptable
         }
     }
@@ -438,7 +470,11 @@ mod resolution {
         let result = parse_test_output("cargo test", garbage, None, None);
 
         match result {
-            Some(r) => assert!(r.tests.is_empty(), "Garbage output should yield no tests"),
+            Some(r) => assert_eq!(
+                total_test_count(&r),
+                0,
+                "Garbage output should yield no tests"
+            ),
             None => {} // Also acceptable
         }
     }
@@ -470,9 +506,10 @@ end
         .expect("Custom adapter should be found");
 
         assert_eq!(result.adapter_name, "cargo-test");
-        assert_eq!(result.tests.len(), 1);
+        assert_eq!(total_test_count(&result), 1);
+        let tests = flatten(&result);
         assert_eq!(
-            result.tests[0].name, "custom_adapter_test",
+            tests[0].name, "custom_adapter_test",
             "Custom adapter should override the built-in one"
         );
     }
@@ -512,8 +549,9 @@ end
         match result {
             Some(r) => {
                 // If it parsed successfully, it must be the safe path
+                let tests = flatten(&r);
                 assert!(
-                    r.tests.is_empty() || r.tests.iter().all(|t| t.name != "exploit"),
+                    tests.is_empty() || tests.iter().all(|t| t.name != "exploit"),
                     "Sandbox must block filesystem access"
                 );
             }
@@ -618,7 +656,7 @@ test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
         assert_eq!(result.adapter_name, "cargo-test");
         assert!(
-            !result.tests.is_empty(),
+            total_test_count(&result) > 0,
             "Should parse at least some tests from our own output"
         );
     }
@@ -626,9 +664,9 @@ test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
     #[test]
     fn all_own_tests_are_passed() {
         let result = parse_test_output("cargo test --all", OWN_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
-        let non_passed: Vec<_> = result
-            .tests
+        let non_passed: Vec<_> = tests
             .iter()
             .filter(|t| t.state != TestState::Passed)
             .collect();
@@ -647,7 +685,7 @@ test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
         // The sample output has 25 + 5 + 4 + 3 = 37 test lines shown
         // (we only included representative subsets, not all lines)
         assert_eq!(
-            result.tests.len(),
+            total_test_count(&result),
             37,
             "Should parse exactly the test lines present in the sample"
         );
@@ -656,17 +694,16 @@ test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
     #[test]
     fn extracts_module_suites_from_own_tests() {
         let result = parse_test_output("cargo test --all", OWN_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
         // Verify suite extraction from our module paths
-        let adapter_test = result
-            .tests
+        let adapter_test = tests
             .iter()
             .find(|t| t.name == "adapters::detect::tests::detects_cargo_test")
             .expect("Should find our own adapter detect test");
 
         assert_eq!(
-            adapter_test.suite.as_deref(),
-            Some("adapters::detect::tests"),
+            adapter_test.suite, "adapters::detect::tests",
             "Suite should be the module path prefix"
         );
     }
@@ -674,10 +711,10 @@ test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
     #[test]
     fn parses_tests_across_multiple_test_binaries() {
         let result = parse_test_output("cargo test --all", OWN_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
 
         // Tests from the main lib binary (adapters::, api::, mcp::)
-        let lib_tests = result
-            .tests
+        let lib_tests = tests
             .iter()
             .filter(|t| {
                 t.name.starts_with("adapters::")
@@ -688,8 +725,7 @@ test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
             .count();
 
         // Tests from integration test binaries (no module prefix)
-        let integration_tests = result
-            .tests
+        let integration_tests = tests
             .iter()
             .filter(|t| {
                 t.name.starts_with("builtin_adapters::")
@@ -724,6 +760,6 @@ test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
         .expect("Explicit cargo-test adapter should work");
 
         assert_eq!(result.adapter_name, "cargo-test");
-        assert!(result.tests.len() > 0);
+        assert!(total_test_count(&result) > 0);
     }
 }

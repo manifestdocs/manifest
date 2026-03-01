@@ -2590,12 +2590,12 @@ components:
           type: string
           nullable: true
           description: Raw stdout/stderr output, capped at 10K characters.
-        tests:
+        test_suites:
           type: array
           nullable: true
-          description: Structured test results for consistent rendering.
+          description: Structured test results grouped by suite.
           items:
-            $ref: '#/components/schemas/TestResult'
+            $ref: '#/components/schemas/TestSuite'
         evidence:
           type: array
           description: Evidence file paths linked to this proof.
@@ -2613,18 +2613,32 @@ components:
           type: string
           format: date-time
 
+    TestSuite:
+      type: object
+      required: [name, tests]
+      description: A group of test results from a single suite or module.
+      properties:
+        name:
+          type: string
+          description: Suite or module name (e.g., "db_spec", "auth::tests").
+        file:
+          type: string
+          nullable: true
+          description: Source file path shared by all tests in the suite.
+        tests:
+          type: array
+          description: Individual test results within this suite.
+          items:
+            $ref: '#/components/schemas/TestResult'
+
     TestResult:
       type: object
       required: [name, state]
-      description: A single test result within a proof.
+      description: A single test result within a suite.
       properties:
         name:
           type: string
           description: Name of the test.
-        suite:
-          type: string
-          nullable: true
-          description: Test suite or module name.
         state:
           type: string
           enum: [passed, failed, errored, skipped]
@@ -2632,7 +2646,7 @@ components:
         file:
           type: string
           nullable: true
-          description: Source file path (relative to project root).
+          description: Per-test file override (rare — most tests inherit from suite).
         line:
           type: integer
           nullable: true
@@ -2674,12 +2688,12 @@ components:
           type: string
           nullable: true
           description: Raw stdout/stderr output (truncated to 10K chars).
-        tests:
+        test_suites:
           type: array
           nullable: true
-          description: Structured test results for consistent rendering.
+          description: Structured test results grouped by suite.
           items:
-            $ref: '#/components/schemas/TestResult'
+            $ref: '#/components/schemas/TestSuite'
         evidence:
           type: array
           description: Evidence file paths linked to this proof.

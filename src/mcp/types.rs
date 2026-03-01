@@ -77,7 +77,12 @@ pub struct ProveFeatureRequest {
     #[serde(default)]
     pub output: Option<String>,
     #[schemars(
-        description = "Structured test results for consistent display. Each entry: { name, suite?, state: 'passed'|'failed'|'errored'|'skipped', file?, line?, duration_ms?, message? }. The agent parses framework output into this format."
+        description = "Structured test results grouped by suite (preferred). Each entry: { name, file?, tests: [{ name, state, file?, line?, duration_ms?, message? }] }."
+    )]
+    #[serde(default)]
+    pub test_suites: Option<Vec<TestSuiteInput>>,
+    #[schemars(
+        description = "Flat test results (legacy, kept for backwards compatibility). Each entry: { name, suite?, state: 'passed'|'failed'|'errored'|'skipped', file?, line?, duration_ms?, message? }. Use test_suites instead when possible."
     )]
     #[serde(default)]
     pub tests: Option<Vec<TestResultInput>>,
@@ -91,11 +96,26 @@ pub struct ProveFeatureRequest {
     pub commit_sha: Option<String>,
 }
 
+/// Structured test suite input for the new grouped format.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TestSuiteInput {
+    #[schemars(description = "Suite or module name (e.g., 'db_spec', 'auth::tests')")]
+    pub name: String,
+    #[schemars(description = "Source file path shared by all tests in the suite")]
+    #[serde(default)]
+    pub file: Option<String>,
+    #[schemars(description = "Individual test results within this suite")]
+    pub tests: Vec<TestResultInput>,
+}
+
+/// Flat test result input (legacy format, kept for backwards compatibility).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TestResultInput {
     #[schemars(description = "Test name (e.g., 'creates a feature')")]
     pub name: String,
-    #[schemars(description = "Test suite or module (e.g., 'db_spec')")]
+    #[schemars(
+        description = "Test suite or module (e.g., 'db_spec'). Used for grouping in flat format."
+    )]
     #[serde(default)]
     pub suite: Option<String>,
     #[schemars(description = "Result: 'passed', 'failed', 'errored', or 'skipped'")]

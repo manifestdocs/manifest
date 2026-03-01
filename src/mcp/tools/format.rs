@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::mcp::types::{BreadcrumbItemInfo, FeatureInfoWithContext};
-use crate::models::{FeatureWithContext, ProjectHistoryEntry, TestResult, TestState};
+use crate::models::{FeatureWithContext, ProjectHistoryEntry, TestState, TestSuite};
 
 /// Render a markdown table from headers and rows.
 ///
@@ -299,30 +299,30 @@ pub fn test_state_symbol(state: &TestState) -> &'static str {
     }
 }
 
-/// Render structured test results into a text report for MCP responses.
+/// Render structured test results (grouped by suite) into a text report for MCP responses.
 ///
 /// Format:
 /// - First line: count summary (e.g., "45 passed, 2 failed, 1 skipped")
-/// - Failed/errored tests listed with symbol, name, file:line, and message
+/// - Failed/errored tests listed with symbol, name, suite, file:line, and message
 /// - Skipped tests listed compactly
 /// - Passed tests omitted (too noisy for agents)
-pub fn render_test_results(tests: &[TestResult]) -> String {
-    let passed = tests
-        .iter()
-        .filter(|t| t.state == TestState::Passed)
-        .count();
-    let failed = tests
-        .iter()
-        .filter(|t| t.state == TestState::Failed)
-        .count();
-    let errored = tests
-        .iter()
-        .filter(|t| t.state == TestState::Errored)
-        .count();
-    let skipped = tests
-        .iter()
-        .filter(|t| t.state == TestState::Skipped)
-        .count();
+pub fn render_test_results(suites: &[TestSuite]) -> String {
+    // Flatten for counting
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut errored = 0;
+    let mut skipped = 0;
+
+    for suite in suites {
+        for test in &suite.tests {
+            match test.state {
+                TestState::Passed => passed += 1,
+                TestState::Failed => failed += 1,
+                TestState::Errored => errored += 1,
+                TestState::Skipped => skipped += 1,
+            }
+        }
+    }
 
     // Count summary line
     let mut parts = Vec::new();
@@ -342,32 +342,36 @@ pub fn render_test_results(tests: &[TestResult]) -> String {
     let mut out = parts.join(", ");
 
     // Failed and errored tests with detail
-    for test in tests
-        .iter()
-        .filter(|t| matches!(t.state, TestState::Failed | TestState::Errored))
-    {
-        let symbol = test_state_symbol(&test.state);
-        let suite_suffix = match &test.suite {
-            Some(s) => format!(" ({})", s),
-            None => String::new(),
-        };
-        out.push_str(&format!("\n\n{} {}{}", symbol, test.name, suite_suffix));
+    for suite in suites {
+        for test in suite
+            .tests
+            .iter()
+            .filter(|t| matches!(t.state, TestState::Failed | TestState::Errored))
+        {
+            let symbol = test_state_symbol(&test.state);
+            let suite_suffix = format!(" ({})", suite.name);
+            out.push_str(&format!("\n\n{} {}{}", symbol, test.name, suite_suffix));
 
-        if let Some(ref file) = test.file {
-            match test.line {
-                Some(line) => out.push_str(&format!("\n  {}:{}", file, line)),
-                None => out.push_str(&format!("\n  {}", file)),
+            // File: per-test override, then suite-level
+            let file = test.file.as_ref().or(suite.file.as_ref());
+            if let Some(f) = file {
+                match test.line {
+                    Some(line) => out.push_str(&format!("\n  {}:{}", f, line)),
+                    None => out.push_str(&format!("\n  {}", f)),
+                }
             }
-        }
-        if let Some(ref msg) = test.message {
-            out.push_str(&format!("\n  {}", msg));
+            if let Some(ref msg) = test.message {
+                out.push_str(&format!("\n  {}", msg));
+            }
         }
     }
 
     // Skipped tests — compact list
-    for test in tests.iter().filter(|t| t.state == TestState::Skipped) {
-        let symbol = test_state_symbol(&test.state);
-        out.push_str(&format!("\n\n{} {} (skipped)", symbol, test.name));
+    for suite in suites {
+        for test in suite.tests.iter().filter(|t| t.state == TestState::Skipped) {
+            let symbol = test_state_symbol(&test.state);
+            out.push_str(&format!("\n\n{} {} (skipped)", symbol, test.name));
+        }
     }
 
     out
@@ -537,82 +541,94 @@ mod tests {
 
     #[test]
     fn test_render_test_results_all_passed() {
-        let tests = vec![
-            TestResult {
-                name: "test_create".into(),
-                suite: Some("db_spec".into()),
-                state: TestState::Passed,
-                file: None,
-                line: None,
-                duration_ms: None,
-                message: None,
-            },
-            TestResult {
-                name: "test_update".into(),
-                suite: Some("db_spec".into()),
-                state: TestState::Passed,
-                file: None,
-                line: None,
-                duration_ms: None,
-                message: None,
-            },
-        ];
-        let report = render_test_results(&tests);
+        use crate::models::TestResult;
+        let suites = vec![TestSuite {
+            name: "db_spec".into(),
+            file: None,
+            tests: vec![
+                TestResult {
+                    name: "test_create".into(),
+                    state: TestState::Passed,
+                    file: None,
+                    line: None,
+                    duration_ms: None,
+                    message: None,
+                },
+                TestResult {
+                    name: "test_update".into(),
+                    state: TestState::Passed,
+                    file: None,
+                    line: None,
+                    duration_ms: None,
+                    message: None,
+                },
+            ],
+        }];
+        let report = render_test_results(&suites);
         assert_eq!(report, "2 passed");
     }
 
     #[test]
     fn test_render_test_results_with_failures() {
-        let tests = vec![
-            TestResult {
-                name: "test_login".into(),
-                suite: Some("auth_spec".into()),
-                state: TestState::Passed,
+        use crate::models::TestResult;
+        let suites = vec![
+            TestSuite {
+                name: "auth_spec".into(),
                 file: None,
-                line: None,
-                duration_ms: None,
-                message: None,
+                tests: vec![
+                    TestResult {
+                        name: "test_login".into(),
+                        state: TestState::Passed,
+                        file: None,
+                        line: None,
+                        duration_ms: None,
+                        message: None,
+                    },
+                    TestResult {
+                        name: "test_login_expired_token".into(),
+                        state: TestState::Failed,
+                        file: Some("tests/auth_spec.rs".into()),
+                        line: Some(42),
+                        duration_ms: None,
+                        message: Some("Expected status 200, got 401".into()),
+                    },
+                ],
             },
-            TestResult {
-                name: "test_login_expired_token".into(),
-                suite: Some("auth_spec".into()),
-                state: TestState::Failed,
-                file: Some("tests/auth_spec.rs".into()),
-                line: Some(42),
-                duration_ms: None,
-                message: Some("Expected status 200, got 401".into()),
-            },
-            TestResult {
-                name: "test_rate_limit".into(),
-                suite: None,
-                state: TestState::Errored,
-                file: Some("tests/api_spec.rs".into()),
-                line: None,
-                duration_ms: None,
-                message: Some("Connection refused".into()),
-            },
-            TestResult {
-                name: "test_oauth_google".into(),
-                suite: None,
-                state: TestState::Skipped,
+            TestSuite {
+                name: "(default)".into(),
                 file: None,
-                line: None,
-                duration_ms: None,
-                message: None,
+                tests: vec![
+                    TestResult {
+                        name: "test_rate_limit".into(),
+                        state: TestState::Errored,
+                        file: Some("tests/api_spec.rs".into()),
+                        line: None,
+                        duration_ms: None,
+                        message: Some("Connection refused".into()),
+                    },
+                    TestResult {
+                        name: "test_oauth_google".into(),
+                        state: TestState::Skipped,
+                        file: None,
+                        line: None,
+                        duration_ms: None,
+                        message: None,
+                    },
+                ],
             },
         ];
-        let report = render_test_results(&tests);
+        let report = render_test_results(&suites);
 
         // Summary line
         assert!(report.starts_with("1 passed, 1 failed, 1 errored, 1 skipped"));
 
-        // Failed test with suite, file:line, and message
+        // Failed test with suite name in parentheses, file:line, and message
         assert!(report.contains("\u{2717} test_login_expired_token (auth_spec)"));
         assert!(report.contains("tests/auth_spec.rs:42"));
         assert!(report.contains("Expected status 200, got 401"));
 
-        // Errored test without suite, file without line
-        assert!(report.contains("! test_rate_limit\n"));
+        // Errored test with (default) suite, file without line
+        assert!(report.contains("! test_rate_limit ((default))"));
         assert!(report.contains("tests/api_spec.rs\n"));
         assert!(report.contains("Connection refused"));
 

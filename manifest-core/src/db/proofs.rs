@@ -24,7 +24,7 @@ impl Database {
         });
 
         let tests_json = input
-            .tests
+            .test_suites
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?;
@@ -60,7 +60,7 @@ impl Database {
             command: input.command,
             exit_code: input.exit_code,
             output,
-            tests: input.tests,
+            test_suites: input.test_suites,
             evidence: input.evidence,
             commit_sha: input.commit_sha,
             agent_type: input.agent_type,

@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use manifest_core::models::{TestResult, TestState};
+use manifest_core::models::{FlatTestResult, TestState};
 use mlua::{Lua, StdLib, Table, Value, VmState};
 
 use super::AdapterError;
@@ -54,7 +54,7 @@ fn create_sandbox() -> Result<Lua, AdapterError> {
 ///
 /// The script must define a `parse(output)` function that returns an array of
 /// test result tables.
-pub fn execute_adapter(script: &str, output: &str) -> Result<Vec<TestResult>, AdapterError> {
+pub fn execute_adapter(script: &str, output: &str) -> Result<Vec<FlatTestResult>, AdapterError> {
     let lua = create_sandbox()?;
 
     // Load and execute the adapter script
@@ -84,7 +84,7 @@ pub fn execute_adapter(script: &str, output: &str) -> Result<Vec<TestResult>, Ad
 }
 
 /// Convert a Lua table (array of test result tables) to Vec<TestResult>.
-fn table_to_test_results(table: &Table) -> Result<Vec<TestResult>, AdapterError> {
+fn table_to_test_results(table: &Table) -> Result<Vec<FlatTestResult>, AdapterError> {
     let mut results = Vec::new();
 
     for pair in table.pairs::<usize, Value>() {
@@ -109,7 +109,7 @@ fn table_to_test_results(table: &Table) -> Result<Vec<TestResult>, AdapterError>
 }
 
 /// Convert a single Lua table to a TestResult.
-fn table_to_test_result(entry: &Table, index: usize) -> Result<TestResult, AdapterError> {
+fn table_to_test_result(entry: &Table, index: usize) -> Result<FlatTestResult, AdapterError> {
     let name: String = entry.get("name").map_err(|_| {
         AdapterError::Script(format!("Entry {index}: missing required field 'name'"))
     })?;
@@ -140,7 +140,7 @@ fn table_to_test_result(entry: &Table, index: usize) -> Result<TestResult, Adapt
         .flatten()
         .map(|v| v as u64);
 
-    Ok(TestResult {
+    Ok(FlatTestResult {
         name,
         suite,
         state,

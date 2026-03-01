@@ -871,7 +871,10 @@ pub async fn prove_feature(
     req: ProveFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
     use crate::adapters;
-    use crate::models::{CreateProofInput, Evidence, TestResult, TestState};
+    use crate::models::{
+        group_into_suites, CreateProofInput, Evidence, FlatTestResult, TestResult, TestState,
+        TestSuite,
+    };
 
     // Resolve feature ID
     let feature_id = client
@@ -879,27 +882,52 @@ pub async fn prove_feature(
         .await
         .map_err(client_err)?;
 
-    // Convert agent-provided test results
-    let mut tests: Option<Vec<TestResult>> = req.tests.map(|test_inputs| {
-        test_inputs
+    // Priority: test_suites (new) > tests (flat, auto-grouped) > adapter fallback
+    let mut test_suites: Option<Vec<TestSuite>> = req.test_suites.map(|suite_inputs| {
+        suite_inputs
             .into_iter()
-            .map(|t| TestResult {
-                name: t.name,
-                suite: t.suite,
-                state: TestState::from_str(&t.state).unwrap_or(TestState::Errored),
-                file: t.file,
-                line: t.line,
-                duration_ms: t.duration_ms,
-                message: t.message,
+            .map(|s| TestSuite {
+                name: s.name,
+                file: s.file,
+                tests: s
+                    .tests
+                    .into_iter()
+                    .map(|t| TestResult {
+                        name: t.name,
+                        state: TestState::from_str(&t.state).unwrap_or(TestState::Errored),
+                        file: t.file,
+                        line: t.line,
+                        duration_ms: t.duration_ms,
+                        message: t.message,
+                    })
+                    .collect(),
             })
             .collect()
     });
 
+    // Fall back to flat test results (legacy) — auto-group into suites
+    if test_suites.is_none() {
+        test_suites = req.tests.map(|test_inputs| {
+            let flat: Vec<FlatTestResult> = test_inputs
+                .into_iter()
+                .map(|t| FlatTestResult {
+                    name: t.name,
+                    suite: t.suite,
+                    state: TestState::from_str(&t.state).unwrap_or(TestState::Errored),
+                    file: t.file,
+                    line: t.line,
+                    duration_ms: t.duration_ms,
+                    message: t.message,
+                })
+                .collect();
+            group_into_suites(flat)
+        });
+    }
+
     // Adapter fallback: when agent provides output but no structured tests,
     // try to parse via a Lua adapter
-    if tests.is_none() {
+    if test_suites.is_none() {
         if let Some(ref output) = req.output {
-            // Fetch project settings for adapter name and project directory
             let feature = client.get_feature(feature_id).await.map_err(client_err)?;
             let project_id: uuid::Uuid = feature.project_id.into();
             let project_with_dirs = client.get_project(project_id).await.map_err(client_err)?;
@@ -914,13 +942,13 @@ pub async fn prove_feature(
             if let Some(result) =
                 adapters::parse_test_output(&req.command, output, adapter_name, project_dir)
             {
-                if !result.tests.is_empty() {
+                if !result.test_suites.is_empty() {
                     tracing::info!(
-                        "Adapter '{}' parsed {} test results from output",
+                        "Adapter '{}' parsed test results into {} suites",
                         result.adapter_name,
-                        result.tests.len()
+                        result.test_suites.len()
                     );
-                    tests = Some(result.tests);
+                    test_suites = Some(result.test_suites);
                 }
             }
         }
@@ -942,7 +970,7 @@ pub async fn prove_feature(
         command: req.command,
         exit_code: req.exit_code,
         output: req.output,
-        tests,
+        test_suites,
         evidence,
         commit_sha: req.commit_sha,
         agent_type: Some("claude".to_string()),
@@ -954,8 +982,8 @@ pub async fn prove_feature(
         .map_err(client_err)?;
 
     // Build summary
-    let summary = if let Some(ref tests) = proof.tests {
-        let report = format::render_test_results(tests);
+    let summary = if let Some(ref suites) = proof.test_suites {
+        let report = format::render_test_results(suites);
         format!("Proof recorded — {report}")
     } else {
         format!("Proof recorded — exit code {}", proof.exit_code)

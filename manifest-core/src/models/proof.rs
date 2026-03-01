@@ -59,17 +59,26 @@ impl<'de> Deserialize<'de> for TestState {
     }
 }
 
-/// A single test result within a proof.
+/// A group of test results from a single suite/module.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestSuite {
+    /// Suite or module name (e.g., "db_blockers_spec").
+    pub name: String,
+    /// Source file path shared by all tests in the suite.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// Individual test results within this suite.
+    pub tests: Vec<TestResult>,
+}
+
+/// A single test result within a suite.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestResult {
     /// Name of the test (e.g., "creates a feature").
     pub name: String,
-    /// Test suite or module (e.g., "db_spec").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suite: Option<String>,
     /// Result state: passed, failed, errored, or skipped.
     pub state: TestState,
-    /// Source file path (relative to project root).
+    /// Per-test file override (rare — most tests inherit from suite).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
     /// Line number in the source file.
@@ -114,9 +123,9 @@ pub struct Proof {
     /// Raw stdout/stderr output, capped at 10K characters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
-    /// Structured test results for consistent rendering.
+    /// Structured test results grouped by suite.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tests: Option<Vec<TestResult>>,
+    pub test_suites: Option<Vec<TestSuite>>,
     /// Evidence file paths linked to this proof.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<Evidence>,
@@ -144,9 +153,9 @@ pub struct CreateProofInput {
     /// Raw stdout/stderr output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
-    /// Structured test results.
+    /// Structured test results grouped by suite.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tests: Option<Vec<TestResult>>,
+    pub test_suites: Option<Vec<TestSuite>>,
     /// Evidence file paths.
     #[serde(default)]
     pub evidence: Vec<Evidence>,
@@ -156,4 +165,85 @@ pub struct CreateProofInput {
     /// Agent type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<String>,
+}
+
+// ============================================================
+// Legacy flat format support
+// ============================================================
+
+/// Old flat test result shape (pre-TestSuite). Used for deserializing legacy
+/// DB rows and converting Lua adapter output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlatTestResult {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suite: Option<String>,
+    pub state: TestState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Group flat test results into suites. Tests with the same `suite` value are
+/// grouped together (preserving insertion order). When all tests in a suite
+/// share the same `file`, it's hoisted to the suite level. Tests without a
+/// suite go into "(default)".
+pub fn group_into_suites(flat: Vec<FlatTestResult>) -> Vec<TestSuite> {
+    // Preserve insertion order with (name, suite_file, tests) triples
+    let mut suites: Vec<(String, Option<String>, Vec<TestResult>)> = Vec::new();
+
+    for t in flat {
+        let suite_name = t.suite.unwrap_or_else(|| "(default)".to_string());
+
+        let pos = suites.iter().position(|(name, _, _)| name == &suite_name);
+        let idx = match pos {
+            Some(i) => i,
+            None => {
+                suites.push((suite_name, None, Vec::new()));
+                suites.len() - 1
+            }
+        };
+
+        let entry = &mut suites[idx];
+
+        // Track file at suite level — keep it if all tests agree
+        if entry.2.is_empty() {
+            entry.1 = t.file.clone();
+        } else if entry.1 != t.file {
+            entry.1 = None;
+        }
+
+        entry.2.push(TestResult {
+            name: t.name,
+            state: t.state,
+            file: t.file,
+            line: t.line,
+            duration_ms: t.duration_ms,
+            message: t.message,
+        });
+    }
+
+    suites
+        .into_iter()
+        .map(|(name, suite_file, mut tests)| {
+            // If suite has a shared file, remove per-test file to avoid redundancy
+            if suite_file.is_some() {
+                for test in &mut tests {
+                    if test.file == suite_file {
+                        test.file = None;
+                    }
+                }
+            }
+            TestSuite {
+                name,
+                file: suite_file,
+                tests,
+            }
+        })
+        .collect()
 }
