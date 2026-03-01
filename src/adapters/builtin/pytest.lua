@@ -47,21 +47,17 @@ function parse(output)
     end
 
     -- Parse test result lines (verbose format)
+    -- Lua patterns don't support alternation, so try each status separately
     for line in output:gmatch("[^\r\n]+") do
         -- Format: "tests/test_auth.py::TestClass::test_method PASSED [ 25%]"
         -- or:     "tests/test_auth.py::test_function FAILED [ 50%]"
-        local path_and_name, result = line:match("^(%S+::%S+)%s+(PASSED|FAILED|SKIPPED|ERROR|XFAIL|XPASS)")
-        if not path_and_name then
-            -- Try without percentage
-            path_and_name, result = line:match("^(%S+::%S+)%s+(PASSED)")
-            if not path_and_name then
-                path_and_name, result = line:match("^(%S+::%S+)%s+(FAILED)")
-            end
-            if not path_and_name then
-                path_and_name, result = line:match("^(%S+::%S+)%s+(SKIPPED)")
-            end
-            if not path_and_name then
-                path_and_name, result = line:match("^(%S+::%S+)%s+(ERROR)")
+        local path_and_name, result
+        for _, status in ipairs({"PASSED", "FAILED", "SKIPPED", "ERROR", "XFAIL", "XPASS"}) do
+            local p = line:match("^(%S+::%S+)%s+" .. status)
+            if p then
+                path_and_name = p
+                result = status
+                break
             end
         end
 

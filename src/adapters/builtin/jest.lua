@@ -14,7 +14,8 @@ function parse(output)
 
     for line in output:gmatch("[^\r\n]+") do
         -- Detect test file header: "PASS src/auth.test.ts" or "FAIL src/auth.test.ts"
-        local file_result, file_path = line:match("^%s*(PASS|FAIL)%s+(.+)$")
+        -- Lua patterns don't support alternation, so try each separately
+        local file_path = line:match("^%s*PASS%s+(.+)$") or line:match("^%s*FAIL%s+(.+)$")
         if file_path then
             current_file = file_path
             current_suite = nil

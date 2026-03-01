@@ -25,7 +25,17 @@ function parse(output)
         end
 
         -- Parse result lines: "--- PASS: TestName (0.01s)"
-        local result, name, dur = line:match("^%s*%-%-%-% (PASS|FAIL|SKIP): (.+) %(([%d%.]+)s%)")
+        -- Lua patterns don't support alternation, so try each status separately
+        local result, name, dur
+        for _, status in ipairs({"PASS", "FAIL", "SKIP"}) do
+            local n, d = line:match("^%s*%-%-%-% " .. status .. ": (.+) %(([%d%.]+)s%)")
+            if n then
+                result = status
+                name = n
+                dur = d
+                break
+            end
+        end
         if result and name then
             -- Flush current test output
             if current_test then
