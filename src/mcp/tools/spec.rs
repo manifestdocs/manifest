@@ -935,7 +935,10 @@ mod tests {
     #[test]
     fn no_testable_criteria_warns_with_advisory_policy() {
         let config = default_config(); // advisory
-        let spec = "Handle user login with appropriate validation and security measures.";
+                                       // Must be above sparse threshold (20 words for standard) to isolate the testable-criteria check
+        let spec = "Handle user login with appropriate validation and security measures. \
+                     The system should authenticate users against the database and manage \
+                     sessions correctly with proper error handling throughout.";
         let status = analyze_spec(Some(spec), false, false);
         assert_eq!(status.testable_criteria_count, 0);
         assert!(status.has_warnings(&config));
@@ -949,7 +952,10 @@ mod tests {
             testing_policy: TestingPolicy::None,
             ..default_config()
         };
-        let spec = "Handle user login with appropriate validation and security measures.";
+        // Must be above sparse threshold (20 words) to isolate the testable-criteria check
+        let spec = "Handle user login with appropriate validation and security measures. \
+                     The system should authenticate users against the database and manage \
+                     sessions correctly with proper error handling throughout.";
         let status = analyze_spec(Some(spec), false, false);
         assert_eq!(status.testable_criteria_count, 0);
         assert!(!status.has_warnings(&config));
@@ -959,8 +965,11 @@ mod tests {
     #[test]
     fn testable_criteria_present_no_warning() {
         let config = default_config(); // advisory
-        let spec =
-            "Handle user login.\n- [ ] returns JWT on success\n- [ ] rejects invalid credentials";
+                                       // Must be above sparse threshold (20 words) so only testable-criteria logic applies
+        let spec = "Handle user login with appropriate validation and security measures \
+                     for the authentication subsystem.\n\
+                     - [ ] returns JWT on success\n\
+                     - [ ] rejects invalid credentials";
         let status = analyze_spec(Some(spec), false, false);
         assert_eq!(status.testable_criteria_count, 2);
         assert!(!status.has_warnings(&config));
