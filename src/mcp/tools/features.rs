@@ -936,42 +936,12 @@ pub async fn prove_feature(
         .map_err(client_err)?;
 
     // Build summary
-    let test_summary = if let Some(ref tests) = proof.tests {
-        let passed = tests
-            .iter()
-            .filter(|t| t.state == TestState::Passed)
-            .count();
-        let failed = tests
-            .iter()
-            .filter(|t| t.state == TestState::Failed)
-            .count();
-        let errored = tests
-            .iter()
-            .filter(|t| t.state == TestState::Errored)
-            .count();
-        let skipped = tests
-            .iter()
-            .filter(|t| t.state == TestState::Skipped)
-            .count();
-        let mut parts = Vec::new();
-        if passed > 0 {
-            parts.push(format!("{passed} passed"));
-        }
-        if failed > 0 {
-            parts.push(format!("{failed} failed"));
-        }
-        if errored > 0 {
-            parts.push(format!("{errored} errored"));
-        }
-        if skipped > 0 {
-            parts.push(format!("{skipped} skipped"));
-        }
-        parts.join(", ")
+    let summary = if let Some(ref tests) = proof.tests {
+        let report = format::render_test_results(tests);
+        format!("Proof recorded — {report}")
     } else {
-        format!("exit code {}", proof.exit_code)
+        format!("Proof recorded — exit code {}", proof.exit_code)
     };
-
-    let summary = format!("Proof recorded — {test_summary}");
     Ok(CallToolResult::success(vec![Content::text(summary)]))
 }
 

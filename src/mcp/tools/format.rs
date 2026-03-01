@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::mcp::types::{BreadcrumbItemInfo, FeatureInfoWithContext};
-use crate::models::{FeatureWithContext, ProjectHistoryEntry};
+use crate::models::{FeatureWithContext, ProjectHistoryEntry, TestResult, TestState};
 
 /// Render a markdown table from headers and rows.
 ///
@@ -289,6 +289,90 @@ pub fn render_activity_timeline(entries: &[ProjectHistoryEntry]) -> String {
     out.trim_end().to_string()
 }
 
+/// Map a TestState to a compact symbol matching the web UI (EvidencePanel.svelte).
+pub fn test_state_symbol(state: &TestState) -> &'static str {
+    match state {
+        TestState::Passed => "\u{2713}", // ✓
+        TestState::Failed => "\u{2717}", // ✗
+        TestState::Errored => "!",
+        TestState::Skipped => "\u{2298}", // ⊘
+    }
+}
+
+/// Render structured test results into a text report for MCP responses.
+///
+/// Format:
+/// - First line: count summary (e.g., "45 passed, 2 failed, 1 skipped")
+/// - Failed/errored tests listed with symbol, name, file:line, and message
+/// - Skipped tests listed compactly
+/// - Passed tests omitted (too noisy for agents)
+pub fn render_test_results(tests: &[TestResult]) -> String {
+    let passed = tests
+        .iter()
+        .filter(|t| t.state == TestState::Passed)
+        .count();
+    let failed = tests
+        .iter()
+        .filter(|t| t.state == TestState::Failed)
+        .count();
+    let errored = tests
+        .iter()
+        .filter(|t| t.state == TestState::Errored)
+        .count();
+    let skipped = tests
+        .iter()
+        .filter(|t| t.state == TestState::Skipped)
+        .count();
+
+    // Count summary line
+    let mut parts = Vec::new();
+    if passed > 0 {
+        parts.push(format!("{passed} passed"));
+    }
+    if failed > 0 {
+        parts.push(format!("{failed} failed"));
+    }
+    if errored > 0 {
+        parts.push(format!("{errored} errored"));
+    }
+    if skipped > 0 {
+        parts.push(format!("{skipped} skipped"));
+    }
+
+    let mut out = parts.join(", ");
+
+    // Failed and errored tests with detail
+    for test in tests
+        .iter()
+        .filter(|t| matches!(t.state, TestState::Failed | TestState::Errored))
+    {
+        let symbol = test_state_symbol(&test.state);
+        let suite_suffix = match &test.suite {
+            Some(s) => format!(" ({})", s),
+            None => String::new(),
+        };
+        out.push_str(&format!("\n\n{} {}{}", symbol, test.name, suite_suffix));
+
+        if let Some(ref file) = test.file {
+            match test.line {
+                Some(line) => out.push_str(&format!("\n  {}:{}", file, line)),
+                None => out.push_str(&format!("\n  {}", file)),
+            }
+        }
+        if let Some(ref msg) = test.message {
+            out.push_str(&format!("\n  {}", msg));
+        }
+    }
+
+    // Skipped tests — compact list
+    for test in tests.iter().filter(|t| t.state == TestState::Skipped) {
+        let symbol = test_state_symbol(&test.state);
+        out.push_str(&format!("\n\n{} {} (skipped)", symbol, test.name));
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,5 +525,107 @@ mod tests {
         assert_eq!(state_symbol("implemented"), "\u{25cf}");
         assert_eq!(state_symbol("archived"), "\u{2717}");
         assert_eq!(state_symbol("unknown"), "?");
+    }
+
+    #[test]
+    fn test_state_symbol_for_tests() {
+        assert_eq!(super::test_state_symbol(&TestState::Passed), "\u{2713}");
+        assert_eq!(super::test_state_symbol(&TestState::Failed), "\u{2717}");
+        assert_eq!(super::test_state_symbol(&TestState::Errored), "!");
+        assert_eq!(super::test_state_symbol(&TestState::Skipped), "\u{2298}");
+    }
+
+    #[test]
+    fn test_render_test_results_all_passed() {
+        let tests = vec![
+            TestResult {
+                name: "test_create".into(),
+                suite: Some("db_spec".into()),
+                state: TestState::Passed,
+                file: None,
+                line: None,
+                duration_ms: None,
+                message: None,
+            },
+            TestResult {
+                name: "test_update".into(),
+                suite: Some("db_spec".into()),
+                state: TestState::Passed,
+                file: None,
+                line: None,
+                duration_ms: None,
+                message: None,
+            },
+        ];
+        let report = render_test_results(&tests);
+        assert_eq!(report, "2 passed");
+    }
+
+    #[test]
+    fn test_render_test_results_with_failures() {
+        let tests = vec![
+            TestResult {
+                name: "test_login".into(),
+                suite: Some("auth_spec".into()),
+                state: TestState::Passed,
+                file: None,
+                line: None,
+                duration_ms: None,
+                message: None,
+            },
+            TestResult {
+                name: "test_login_expired_token".into(),
+                suite: Some("auth_spec".into()),
+                state: TestState::Failed,
+                file: Some("tests/auth_spec.rs".into()),
+                line: Some(42),
+                duration_ms: None,
+                message: Some("Expected status 200, got 401".into()),
+            },
+            TestResult {
+                name: "test_rate_limit".into(),
+                suite: None,
+                state: TestState::Errored,
+                file: Some("tests/api_spec.rs".into()),
+                line: None,
+                duration_ms: None,
+                message: Some("Connection refused".into()),
+            },
+            TestResult {
+                name: "test_oauth_google".into(),
+                suite: None,
+                state: TestState::Skipped,
+                file: None,
+                line: None,
+                duration_ms: None,
+                message: None,
+            },
+        ];
+        let report = render_test_results(&tests);
+
+        // Summary line
+        assert!(report.starts_with("1 passed, 1 failed, 1 errored, 1 skipped"));
+
+        // Failed test with suite, file:line, and message
+        assert!(report.contains("\u{2717} test_login_expired_token (auth_spec)"));
+        assert!(report.contains("tests/auth_spec.rs:42"));
+        assert!(report.contains("Expected status 200, got 401"));
+
+        // Errored test without suite, file without line
+        assert!(report.contains("! test_rate_limit\n"));
+        assert!(report.contains("tests/api_spec.rs\n"));
+        assert!(report.contains("Connection refused"));
+
+        // Skipped test
+        assert!(report.contains("\u{2298} test_oauth_google (skipped)"));
+
+        // Passed tests NOT listed individually
+        assert!(!report.contains("test_login\n"));
+    }
+
+    #[test]
+    fn test_render_test_results_empty() {
+        let report = render_test_results(&[]);
+        assert_eq!(report, "");
     }
 }
