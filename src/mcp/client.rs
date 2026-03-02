@@ -462,8 +462,8 @@ impl ManifestClient {
     // Template Operations
     // ============================================================
 
-    /// Get the default spec template for a project.
-    /// Returns `None` if no default template is set.
+    /// Get the project's spec template.
+    /// Returns `None` if no template exists.
     pub async fn get_default_template(
         &self,
         project_id: Uuid,
@@ -471,12 +471,11 @@ impl ManifestClient {
         let response = self
             .request(
                 reqwest::Method::GET,
-                &format!("/projects/{}/templates", project_id),
+                &format!("/projects/{}/template", project_id),
             )
             .send()
             .await?;
-        let templates: Vec<crate::models::SpecTemplate> = self.handle_response(response).await?;
-        Ok(templates.into_iter().find(|t| t.is_default))
+        self.handle_response(response).await
     }
 
     // ============================================================

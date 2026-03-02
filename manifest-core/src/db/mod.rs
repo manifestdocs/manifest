@@ -1373,18 +1373,7 @@ impl Database {
 
     /// Add spec_templates table if it doesn't exist, insert default template for existing projects.
     async fn migrate_add_spec_templates(&self) -> Result<()> {
-        let table_exists_sql = self.dialect.table_exists_sql("spec_templates");
-        let count: i64 = sqlx::query_scalar(&table_exists_sql)
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or(0);
-
-        if count > 0 {
-            tracing::debug!("spec_templates migration already applied");
-            return Ok(());
-        }
-
-        tracing::info!("Creating spec_templates table");
+        // Create table if it doesn't exist
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS spec_templates (
                 id TEXT PRIMARY KEY,
@@ -1408,11 +1397,18 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // Insert default template for every existing project
+        // Insert default template for any project that doesn't have one yet
         let now = chrono::Utc::now().to_rfc3339();
-        let rows = sqlx::query("SELECT id FROM projects")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(
+            "SELECT p.id FROM projects p
+             WHERE NOT EXISTS (SELECT 1 FROM spec_templates st WHERE st.project_id = p.id)",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        if rows.is_empty() {
+            return Ok(());
+        }
 
         for row in &rows {
             let project_id: String = sqlx::Row::get(row, "id");
@@ -1431,7 +1427,7 @@ impl Database {
         }
 
         tracing::info!(
-            "Created default spec templates for {} existing projects",
+            "Created default spec templates for {} projects",
             rows.len()
         );
         Ok(())

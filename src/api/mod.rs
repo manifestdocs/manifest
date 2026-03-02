@@ -192,14 +192,10 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
             "/projects/{id}/focus",
             get(handlers::get_project_focus).put(handlers::set_project_focus),
         )
-        // Spec Templates
+        // Spec Template (one per project)
         .route(
-            "/projects/{id}/templates",
-            get(handlers::list_templates).post(handlers::create_template),
-        )
-        .route(
-            "/templates/{id}",
-            put(handlers::update_template).delete(handlers::delete_template),
+            "/projects/{id}/template",
+            get(handlers::get_project_template).put(handlers::update_project_template),
         )
         // Versions
         .route(

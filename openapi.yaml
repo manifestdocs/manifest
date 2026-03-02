@@ -537,52 +537,25 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /projects/{id}/templates:
+  /projects/{id}/template:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
     get:
       tags: [Templates]
-      summary: List spec templates for a project
-      operationId: listTemplates
+      summary: Get the project's spec template
+      operationId: getProjectTemplate
       responses:
         '200':
-          description: List of templates
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SpecTemplate'
-    post:
-      tags: [Templates]
-      summary: Create a spec template
-      operationId: createTemplate
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateTemplateInput'
-      responses:
-        '201':
-          description: Template created
+          description: The project's spec template (null if none)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SpecTemplate'
-
-  /templates/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
+                nullable: true
     put:
       tags: [Templates]
-      summary: Update a spec template
-      operationId: updateTemplate
+      summary: Update the project's spec template
+      operationId: updateProjectTemplate
       requestBody:
         required: true
         content:
@@ -596,15 +569,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SpecTemplate'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    delete:
-      tags: [Templates]
-      summary: Delete a spec template
-      operationId: deleteTemplate
-      responses:
-        '204':
-          description: Template deleted
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1770,23 +1734,6 @@ components:
           type: string
           format: date-time
 
-    CreateTemplateInput:
-      type: object
-      required: [name, content]
-      properties:
-        name:
-          type: string
-          example: 'Default'
-        description:
-          type: string
-          nullable: true
-        content:
-          type: string
-          description: Markdown template content
-        is_default:
-          type: boolean
-          default: false
-
     UpdateTemplateInput:
       type: object
       properties:
@@ -1797,8 +1744,6 @@ components:
           nullable: true
         content:
           type: string
-        is_default:
-          type: boolean
 
     ProjectDirectory:
       type: object
