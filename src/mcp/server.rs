@@ -70,9 +70,9 @@ impl McpServer {
     // Discovery Tools
     // ============================================================
 
-    #[tool(
-        description = "ORIENT: List projects. If directory_path is provided, finds the project containing that directory (useful for auto-discovery). Otherwise lists all projects."
-    )]
+    #[tool(description = "ORIENT: List projects. If directory_path is \
+            provided, finds the project containing that directory \
+            (useful for auto-discovery). Otherwise lists all projects.")]
     async fn list_projects(
         &self,
         params: Parameters<ListProjectsRequest>,
@@ -80,9 +80,10 @@ impl McpServer {
         tools::projects::list_projects(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "ORIENT: Get full project instructions (coding guidelines, conventions, architectural decisions). Use this when the breadcrumb summary indicates more context is available. Returns the complete root feature details."
-    )]
+    #[tool(description = "ORIENT: Get full project instructions (coding \
+            guidelines, conventions, architectural decisions). Use \
+            this when the breadcrumb summary indicates more context \
+            is available. Returns the complete root feature details.")]
     async fn get_project_instructions(
         &self,
         params: Parameters<GetProjectInstructionsRequest>,
@@ -90,9 +91,16 @@ impl McpServer {
         tools::projects::get_project_instructions(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "ORIENT: Get the feature the user is currently looking at in the Manifest app. This is your DEFAULT tool for resolving what the user means—call it first when they say \"this feature\", \"work on this\", \"implement it\", or give instructions without naming a specific feature. Requires project_id — call list_projects first if you don't have it. Returns null if no feature is selected. After calling, confirm by naming the feature in your response (e.g., \"I see you have 'OAuth Login' selected\")."
-    )]
+    #[tool(description = "ORIENT: Get the feature the user is currently \
+            looking at in the Manifest app. This is your DEFAULT tool \
+            for resolving what the user means—call it first when they \
+            say \"this feature\", \"work on this\", \"implement it\", \
+            or give instructions without naming a specific feature. \
+            Requires project_id — call list_projects first if you \
+            don't have it. Returns null if no feature is selected. \
+            After calling, confirm by naming the feature in your \
+            response (e.g., \"I see you have 'OAuth Login' \
+            selected\").")]
     async fn get_active_feature(
         &self,
         params: Parameters<GetActiveFeatureRequest>,
@@ -100,9 +108,10 @@ impl McpServer {
         tools::context::get_active_feature(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "ORIENT: Find features by project, state, or search query. Returns summaries only. Use get_feature for full details. Call this BEFORE create_feature to check if a similar feature already exists."
-    )]
+    #[tool(description = "ORIENT: Find features by project, state, or \
+            search query. Returns summaries only. Use get_feature for \
+            full details. Call this BEFORE create_feature to check if \
+            a similar feature already exists.")]
     async fn find_features(
         &self,
         params: Parameters<FindFeaturesRequest>,
@@ -110,9 +119,11 @@ impl McpServer {
         tools::features::find_features(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "ORIENT/BUILD: Get detailed feature spec with hierarchical context. Returns the feature details plus breadcrumb with ancestor context (architectural decisions, conventions). Set include_history=true to see past work. READ THIS before starting work."
-    )]
+    #[tool(description = "ORIENT/BUILD: Get detailed feature spec with \
+            hierarchical context. Returns the feature details plus \
+            breadcrumb with ancestor context (architectural decisions, \
+            conventions). Set include_history=true to see past work. \
+            READ THIS before starting work.")]
     async fn get_feature(
         &self,
         params: Parameters<GetFeatureRequest>,
@@ -120,9 +131,12 @@ impl McpServer {
         tools::features::get_feature(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current status (▣ project root, ▪ feature set, ◇ proposed, ○ in_progress, ● implemented, ✗ archived). Do NOT suggest changing parent feature states based on children's states."
-    )]
+    #[tool(description = "ORIENT: Render the feature tree as ASCII art. \
+            Essential for understanding project structure, hierarchy, \
+            and current status (▣ project root, ▪ feature set, \
+            ◇ proposed, ○ in_progress, ● implemented, ✗ archived). \
+            Do NOT suggest changing parent feature states based on \
+            children's states.")]
     async fn render_feature_tree(
         &self,
         params: Parameters<RenderFeatureTreeRequest>,
@@ -130,9 +144,13 @@ impl McpServer {
         tools::features::render_feature_tree(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "ORIENT: Get recent activity across a project or for a specific feature. Returns a pre-rendered ASCII timeline of completed work grouped by time — display it directly to the user WITHOUT summarizing, reformatting, or adding commentary. The output mirrors the web app's Activity tab. Use when the user asks for 'recent activity', 'what happened', or 'show history'."
-    )]
+    #[tool(description = "ORIENT: Get recent activity across a project \
+            or for a specific feature. Returns a pre-rendered ASCII \
+            timeline of completed work grouped by time — display it \
+            directly to the user WITHOUT summarizing, reformatting, \
+            or adding commentary. The output mirrors the web app's \
+            Activity tab. Use when the user asks for 'recent \
+            activity', 'what happened', or 'show history'.")]
     async fn get_project_history(
         &self,
         params: Parameters<GetProjectHistoryRequest>,
@@ -144,9 +162,12 @@ impl McpServer {
     // Setup Tools
     // ============================================================
 
-    #[tool(
-        description = "SETUP: Initialize a project from a directory. Analyzes codebase, creates project (or links to existing), and returns analysis. Typical setup sequence: init_project → generate_feature_tree (existing codebases) → plan (decompose PRD) → update_feature (distill root with project context) → create_version (define milestones)."
-    )]
+    #[tool(description = "SETUP: Initialize a project from a directory. \
+            Analyzes codebase, creates project (or links to existing), \
+            and returns analysis. Typical setup sequence: init_project \
+            → generate_feature_tree (existing codebases) → plan \
+            (decompose PRD) → update_feature (distill root with \
+            project context) → create_version (define milestones).")]
     async fn init_project(
         &self,
         params: Parameters<InitProjectRequest>,
@@ -154,9 +175,9 @@ impl McpServer {
         tools::projects::init_project(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "SETUP: Associate an additional directory with an existing project. Use this for monorepos. First directory should be added via `init_project`."
-    )]
+    #[tool(description = "SETUP: Associate an additional directory with \
+            an existing project. Use this for monorepos. First \
+            directory should be added via `init_project`.")]
     async fn add_project_directory(
         &self,
         params: Parameters<AddProjectDirectoryRequest>,
@@ -164,9 +185,11 @@ impl McpServer {
         tools::projects::add_project_directory(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "DISCOVER: Generate a feature tree from an existing codebase by analyzing code structure and git history. Use `since` to limit to recent commits (e.g., 'v1.0.0'). Returns a markdown document describing system capabilities."
-    )]
+    #[tool(description = "DISCOVER: Generate a feature tree from an \
+            existing codebase by analyzing code structure and git \
+            history. Use `since` to limit to recent commits (e.g., \
+            'v1.0.0'). Returns a markdown document describing system \
+            capabilities.")]
     async fn generate_feature_tree(
         &self,
         params: Parameters<GenerateFeatureTreeRequest>,
@@ -174,9 +197,21 @@ impl McpServer {
         tools::generate::generate_feature_tree(params.0).await
     }
 
-    #[tool(
-        description = "SETUP: Decompose a PRD or vision into a feature tree. BEFORE calling, use render_feature_tree to see existing structure — extend it rather than replacing. Parent features should have shared context in details (architecture, patterns, constraints); leaf features should have concise specifications. Always provide target_version_id so features land in a release — call list_versions first or create_version if none exist. Omitting it sends features to the Backlog. With confirm=false, returns a proposal. With confirm=true, creates the features. IMPORTANT: After confirming, use update_feature to distill the root feature — replace the full PRD with high-level project context (tech stack, conventions, architecture) since detailed content now lives in child features."
-    )]
+    #[tool(description = "SETUP: Decompose a PRD or vision into a \
+            feature tree. BEFORE calling, use render_feature_tree to \
+            see existing structure — extend it rather than replacing. \
+            Parent features should have shared context in details \
+            (architecture, patterns, constraints); leaf features \
+            should have concise specifications. Always provide \
+            target_version_id so features land in a release — call \
+            list_versions first or create_version if none exist. \
+            Omitting it sends features to the Backlog. With \
+            confirm=false, returns a proposal. With confirm=true, \
+            creates the features. IMPORTANT: After confirming, use \
+            update_feature to distill the root feature — replace the \
+            full PRD with high-level project context (tech stack, \
+            conventions, architecture) since detailed content now \
+            lives in child features.")]
     async fn plan(
         &self,
         params: Parameters<PlanFeaturesRequest>,
@@ -184,16 +219,31 @@ impl McpServer {
         tools::features::plan(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "DISCOVER: Reconcile the feature tree with codebase changes made outside Manifest. Analyzes git commit history, matches commits against existing features, and returns structured proposals: features to mark as implemented, features needing detail updates, and new capabilities to add. Does NOT modify anything — review the proposals and apply them using update_feature, complete_feature, or create_feature."
-    )]
+    #[tool(description = "DISCOVER: Reconcile the feature tree with \
+            codebase changes made outside Manifest. Analyzes git \
+            commit history, matches commits against existing features, \
+            and returns structured proposals: features to mark as \
+            implemented, features needing detail updates, and new \
+            capabilities to add. Does NOT modify anything — review \
+            the proposals and apply them using update_feature, \
+            complete_feature, or create_feature.")]
     async fn sync(&self, params: Parameters<SyncRequest>) -> Result<CallToolResult, McpError> {
         tools::sync::sync(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "SETUP: Create a single feature. BEFORE creating, call find_features to check for duplicates and render_feature_tree to find the right parent group. Features describe what the system CAN DO, not what you DID. They outlive the work that created them. Good: 'OAuth Login', 'CSV Export'. Bad: 'Fix login bug', 'Update icons', 'Add retry logic'. If the title describes a one-time action, update an existing feature instead of creating a new one. Use parent_id to place under an existing group. For leaf features, add a concise specification in details. For parent features, add shared context that applies to all children. Use `plan` for bulk creation."
-    )]
+    #[tool(description = "SETUP: Create a single feature. BEFORE \
+            creating, call find_features to check for duplicates and \
+            render_feature_tree to find the right parent group. \
+            Features describe what the system CAN DO, not what you \
+            DID. They outlive the work that created them. Good: \
+            'OAuth Login', 'CSV Export'. Bad: 'Fix login bug', \
+            'Update icons', 'Add retry logic'. If the title describes \
+            a one-time action, update an existing feature instead of \
+            creating a new one. Use parent_id to place under an \
+            existing group. For leaf features, add a concise \
+            specification in details. For parent features, add shared \
+            context that applies to all children. Use `plan` for bulk \
+            creation.")]
     async fn create_feature(
         &self,
         params: Parameters<CreateFeatureRequest>,
@@ -205,9 +255,26 @@ impl McpServer {
     // Work Tools
     // ============================================================
 
-    #[tool(
-        description = "CLAIM: Signal you are starting work. Transitions state to 'in_progress' and records your claim (agent_type + metadata). Returns full feature details—this is your spec to implement. IMPORTANT: You MUST call this tool when a user asks you to implement, work on, or build a feature—even if you just created the feature or already have context. Also handles implemented features with pending changes (desired_details set by a human edit)—transitions implemented → in_progress so you can implement the requested changes. Do not change the feature's target version during implementation.\n\nCONCURRENCY: If another agent has claimed this feature, returns a conflict warning with details (who claimed it, when, branch info). Use force=true to override the claim.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). If you need to work on an area that has children, start one of its child features instead."
-    )]
+    #[tool(description = "CLAIM: Signal you are starting work. \
+            Transitions state to 'in_progress' and records your \
+            claim (agent_type + metadata). Returns full feature \
+            details—this is your spec to implement. IMPORTANT: You \
+            MUST call this tool when a user asks you to implement, \
+            work on, or build a feature—even if you just created \
+            the feature or already have context. Also handles \
+            implemented features with pending changes \
+            (desired_details set by a human edit)—transitions \
+            implemented → in_progress so you can implement the \
+            requested changes. Do not change the feature's target \
+            version during implementation.\n\n\
+            CONCURRENCY: If another agent has claimed this feature, \
+            returns a conflict warning with details (who claimed it, \
+            when, branch info). Use force=true to override the \
+            claim.\n\n\
+            LEAF FEATURES ONLY: This tool rejects feature sets \
+            (parents with children). If you need to work on an area \
+            that has children, start one of its child features \
+            instead.")]
     async fn start_feature(
         &self,
         params: Parameters<StartFeatureRequest>,
@@ -215,9 +282,27 @@ impl McpServer {
         tools::features::start_feature(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "DOCUMENT: Mark work as done. Records a history entry with your summary and commits, sets state to 'implemented', and clears the agent claim. Automatically clears desired_details if present (pending change request fulfilled). Call only after verification.\n\nLEAF FEATURES ONLY: This tool rejects feature sets (parents with children). Only leaf features can be completed. If a parent's children are all implemented, the parent's status is derived automatically — do NOT attempt to complete the parent.\n\nYour summary becomes living documentation. Describe what was built, key decisions, and context for future agents. NEVER reference commits in the summary (e.g. 'Committed as abc1234') — commits are tracked separately via the commits parameter and displayed alongside the summary in the UI.\n\nWARNINGS: Returns advisory warnings when test evidence is missing (no prove_feature call) or when the feature spec was not updated after implementation (no update_feature call). Address these warnings before considering the feature complete."
-    )]
+    #[tool(description = "DOCUMENT: Mark work as done. Records a history \
+            entry with your summary and commits, sets state to \
+            'implemented', and clears the agent claim. Automatically \
+            clears desired_details if present (pending change request \
+            fulfilled). Call only after verification.\n\n\
+            LEAF FEATURES ONLY: This tool rejects feature sets \
+            (parents with children). Only leaf features can be \
+            completed. If a parent's children are all implemented, \
+            the parent's status is derived automatically — do NOT \
+            attempt to complete the parent.\n\n\
+            Your summary becomes living documentation. Describe what \
+            was built, key decisions, and context for future agents. \
+            NEVER reference commits in the summary (e.g. 'Committed \
+            as abc1234') — commits are tracked separately via the \
+            commits parameter and displayed alongside the summary \
+            in the UI.\n\n\
+            WARNINGS: Returns advisory warnings when test evidence \
+            is missing (no prove_feature call) or when the feature \
+            spec was not updated after implementation (no \
+            update_feature call). Address these warnings before \
+            considering the feature complete.")]
     async fn complete_feature(
         &self,
         params: Parameters<CompleteFeatureRequest>,
@@ -225,9 +310,21 @@ impl McpServer {
         tools::features::complete_feature(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "BUILD: Record test evidence for a feature. Creates a proof record with the test command, exit code, structured test results, and evidence file paths. Can be called multiple times during TDD (red/green cycle) or once after tests pass. Proof is separate from completion — call this to record evidence, then call complete_feature when done.\n\nThe agent is the universal adapter: run any test framework, parse its output, and produce structured results. Include { name, suite, state, file, line, duration_ms, message } for each test for consistent rendering in both CLI and web UI.\n\ncomplete_feature REQUIRES a passing proof (exit_code 0). If tests are failing, fix the implementation and call prove_feature again — repeat until green."
-    )]
+    #[tool(description = "BUILD: Record test evidence for a feature. \
+            Creates a proof record with the test command, exit code, \
+            structured test results, and evidence file paths. Can be \
+            called multiple times during TDD (red/green cycle) or \
+            once after tests pass. Proof is separate from \
+            completion — call this to record evidence, then call \
+            complete_feature when done.\n\n\
+            The agent is the universal adapter: run any test \
+            framework, parse its output, and produce structured \
+            results. Include { name, suite, state, file, line, \
+            duration_ms, message } for each test for consistent \
+            rendering in both CLI and web UI.\n\n\
+            complete_feature REQUIRES a passing proof (exit_code 0). \
+            If tests are failing, fix the implementation and call \
+            prove_feature again — repeat until green.")]
     async fn prove_feature(
         &self,
         params: Parameters<ProveFeatureRequest>,
@@ -235,9 +332,12 @@ impl McpServer {
         tools::features::prove_feature(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "UPDATE: Modify any feature field. Use it to change title, details, state, priority, parent, version assignment, or propose changes for human review via desired_details. Prefer updating existing features over creating duplicates. Use parent_id to reorganize scattered features under the right group."
-    )]
+    #[tool(description = "UPDATE: Modify any feature field. Use it to \
+            change title, details, state, priority, parent, version \
+            assignment, or propose changes for human review via \
+            desired_details. Prefer updating existing features over \
+            creating duplicates. Use parent_id to reorganize \
+            scattered features under the right group.")]
     async fn update_feature(
         &self,
         params: Parameters<UpdateFeatureRequest>,
@@ -245,9 +345,9 @@ impl McpServer {
         tools::features::update_feature(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "CLEANUP: Permanently delete a feature and all its descendants. Use this only for archived features that are no longer needed. This action cannot be undone."
-    )]
+    #[tool(description = "CLEANUP: Permanently delete a feature and all \
+            its descendants. Use this only for archived features that \
+            are no longer needed. This action cannot be undone.")]
     async fn delete_feature(
         &self,
         params: Parameters<DeleteFeatureRequest>,
@@ -255,9 +355,17 @@ impl McpServer {
         tools::features::delete_feature(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "ORIENT: Get the highest-priority workable feature. Returns the top 'proposed' feature from the next unreleased version (prefers proposed over in_progress). Use ONLY when the user explicitly asks for \"the next feature\", \"what's next\", or \"what should I work on\". Do NOT use this when the user references a specific feature—use get_active_feature instead.\n\nIf the returned feature is 'in_progress', another agent has already claimed it—skip it and call find_features with state='proposed' to find unclaimed work instead."
-    )]
+    #[tool(description = "ORIENT: Get the highest-priority workable \
+            feature. Returns the top 'proposed' feature from the \
+            next unreleased version (prefers proposed over \
+            in_progress). Use ONLY when the user explicitly asks \
+            for \"the next feature\", \"what's next\", or \"what \
+            should I work on\". Do NOT use this when the user \
+            references a specific feature—use get_active_feature \
+            instead.\n\n\
+            If the returned feature is 'in_progress', another agent \
+            has already claimed it—skip it and call find_features \
+            with state='proposed' to find unclaimed work instead.")]
     async fn get_next_feature(
         &self,
         params: Parameters<GetNextFeatureRequest>,
@@ -269,9 +377,12 @@ impl McpServer {
     // Verification Tools
     // ============================================================
 
-    #[tool(
-        description = "VERIFY: Assemble the feature spec + implementation diff so you can check the implementation against the spec. Returns spec context + filtered diff with instructions. After analyzing, call record_verification with your findings. No LLM is called server-side — you are the LLM."
-    )]
+    #[tool(description = "VERIFY: Assemble the feature spec + \
+            implementation diff so you can check the implementation \
+            against the spec. Returns spec context + filtered diff \
+            with instructions. After analyzing, call \
+            record_verification with your findings. No LLM is \
+            called server-side — you are the LLM.")]
     async fn verify_feature(
         &self,
         params: Parameters<VerifyFeatureRequest>,
@@ -279,9 +390,12 @@ impl McpServer {
         tools::features::verify_feature(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "VERIFY: Store verification comments produced by your analysis of verify_feature output. Pass an empty comments array if the implementation fully satisfies the spec. Severity levels: 'critical' (core requirement missing), 'major' (significant gap), 'minor' (style or polish drift)."
-    )]
+    #[tool(description = "VERIFY: Store verification comments produced \
+            by your analysis of verify_feature output. Pass an empty \
+            comments array if the implementation fully satisfies the \
+            spec. Severity levels: 'critical' (core requirement \
+            missing), 'major' (significant gap), 'minor' (style or \
+            polish drift).")]
     async fn record_verification(
         &self,
         params: Parameters<RecordVerificationRequest>,
@@ -293,9 +407,13 @@ impl McpServer {
     // Memory Tools
     // ============================================================
 
-    #[tool(
-        description = "LEARN: Store a project memory — a fact, decision, or architectural observation that should persist across sessions. Use this to record things the agent would otherwise forget when the context window resets: key constraints, architectural decisions, environment quirks, and cross-cutting patterns. Memories are searchable via recall."
-    )]
+    #[tool(description = "LEARN: Store a project memory — a fact, \
+            decision, or architectural observation that should \
+            persist across sessions. Use this to record things the \
+            agent would otherwise forget when the context window \
+            resets: key constraints, architectural decisions, \
+            environment quirks, and cross-cutting patterns. Memories \
+            are searchable via recall.")]
     async fn remember(
         &self,
         params: Parameters<RememberRequest>,
@@ -303,16 +421,18 @@ impl McpServer {
         tools::memories::remember(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "LEARN: Search or list project memories. Use this at the start of a session to recover context from previous work. Returns memories ranked by relevance (FTS5 on SQLite, LIKE fallback on PostgreSQL). Omit query to list all memories."
-    )]
+    #[tool(description = "LEARN: Search or list project memories. Use \
+            this at the start of a session to recover context from \
+            previous work. Returns memories ranked by relevance \
+            (FTS5 on SQLite, LIKE fallback on PostgreSQL). Omit \
+            query to list all memories.")]
     async fn recall(&self, params: Parameters<RecallRequest>) -> Result<CallToolResult, McpError> {
         tools::memories::recall(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "LEARN: Delete a project memory that is no longer accurate or relevant. Use recall first to find the memory_id."
-    )]
+    #[tool(description = "LEARN: Delete a project memory that is no \
+            longer accurate or relevant. Use recall first to find \
+            the memory_id.")]
     async fn forget(&self, params: Parameters<ForgetRequest>) -> Result<CallToolResult, McpError> {
         tools::memories::forget(&self.client, params.0).await
     }
@@ -321,9 +441,9 @@ impl McpServer {
     // Version Tools
     // ============================================================
 
-    #[tool(
-        description = "ORIENT: List versions. Returns release milestones with status indicators: 'next' (next to ship), 'planned' (upcoming), and 'released'."
-    )]
+    #[tool(description = "ORIENT: List versions. Returns release \
+            milestones with status indicators: 'next' (next to \
+            ship), 'planned' (upcoming), and 'released'.")]
     async fn list_versions(
         &self,
         params: Parameters<ListVersionsRequest>,
@@ -331,9 +451,10 @@ impl McpServer {
         tools::versions::list_versions(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "PLAN: Create a release milestone. Names must be semantic versions in MAJOR.MINOR.PATCH format (e.g., '0.2.0', 'v1.0.0'). Freeform text like 'MVP' or status labels like 'next' are rejected."
-    )]
+    #[tool(description = "PLAN: Create a release milestone. Names must \
+            be semantic versions in MAJOR.MINOR.PATCH format (e.g., \
+            '0.2.0', 'v1.0.0'). Freeform text like 'MVP' or status \
+            labels like 'next' are rejected.")]
     async fn create_version(
         &self,
         params: Parameters<CreateVersionRequest>,
@@ -341,9 +462,9 @@ impl McpServer {
         tools::versions::create_version(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "PLAN: Assign a feature to a release version. Only unreleased versions are valid targets. Pass null to unassign."
-    )]
+    #[tool(description = "PLAN: Assign a feature to a release version. \
+            Only unreleased versions are valid targets. Pass null \
+            to unassign.")]
     async fn set_feature_version(
         &self,
         params: Parameters<SetFeatureVersionRequest>,
@@ -351,9 +472,9 @@ impl McpServer {
         tools::versions::set_feature_version(&self.client, params.0).await
     }
 
-    #[tool(
-        description = "DOCUMENT: Mark a version as shipped. Sets released_at timestamp. Use this when a milestone is complete and deployed."
-    )]
+    #[tool(description = "DOCUMENT: Mark a version as shipped. Sets \
+            released_at timestamp. Use this when a milestone is \
+            complete and deployed.")]
     async fn release_version(
         &self,
         params: Parameters<ReleaseVersionRequest>,

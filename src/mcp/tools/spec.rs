@@ -144,9 +144,9 @@ impl SpecStatus {
             return Some(
                 "This feature has no specification. Use update_feature to add details before starting.\n\n\
                  Write a focused specification with:\n\
-                 1. User story: As a [user], I can [capability] so that [benefit].\n\
-                 2. Brief context: key behavior, constraints, or edge cases.\n\
-                 3. Acceptance criteria as checkbox items \u{2014} each verifiable in a test.\n\n\
+                 1. Goal: what this feature does and why it matters.\n\
+                 2. Rules: key behavior, business logic, constraints, or edge cases not obvious from code.\n\
+                 3. Acceptance criteria as checkbox items \u{2014} each a specific, verifiable outcome.\n\n\
                  Do NOT include: file paths, codebase structure, or implementation approach \u{2014} agents discover these from code."
                     .to_string(),
             );
@@ -313,7 +313,7 @@ mod tests {
 
     fn config_with_template() -> SpecConfig {
         SpecConfig {
-            default_template: Some("## User Story\n\nAs a [user], I can [capability].".to_string()),
+            default_template: Some("## Goal\n\n[What this feature does and why]".to_string()),
         }
     }
 
@@ -365,11 +365,11 @@ mod tests {
     }
 
     #[test]
-    fn no_details_guidance_mentions_user_story() {
+    fn no_details_guidance_mentions_goal() {
         let config = default_config();
         let status = analyze_spec(None, false, false);
         let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("User story"));
+        assert!(guidance.contains("Goal"));
     }
 
     #[test]
@@ -377,7 +377,7 @@ mod tests {
         let config = config_with_template();
         let status = analyze_spec(None, false, false);
         let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("## User Story"));
+        assert!(guidance.contains("## Goal"));
         assert!(guidance.contains("template"));
     }
 
