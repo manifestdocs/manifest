@@ -1,74 +1,31 @@
 //! Spec analysis for MCP tool responses.
 //!
 //! Pure analysis — no I/O, no database. Checks the `details` field for
-//! non-trivial content. Provides tier-aware, level-aware guidance for project,
+//! non-trivial content. Provides tier-aware guidance for project,
 //! feature set, and leaf features.
 
-use manifest_core::models::{AcFormat, GuidanceLevel, TestingPolicy};
-
-/// Project-level configuration that controls guidance text and thresholds.
-#[derive(Debug, Clone, Copy)]
+/// Project-level configuration for spec guidance.
+#[derive(Debug, Clone, Default)]
 pub struct SpecConfig {
-    /// Controls guidance for feature sets and project-level details.
-    pub detail_level: GuidanceLevel,
-    /// Controls guidance for leaf feature acceptance criteria.
-    pub ac_level: GuidanceLevel,
-    /// Controls the output format of acceptance criteria.
-    pub ac_format: AcFormat,
-    /// Controls the testing policy for this project.
-    pub testing_policy: TestingPolicy,
-}
-
-impl Default for SpecConfig {
-    fn default() -> Self {
-        Self {
-            detail_level: GuidanceLevel::Standard,
-            ac_level: GuidanceLevel::Standard,
-            ac_format: AcFormat::Checkbox,
-            testing_policy: TestingPolicy::Advisory,
-        }
-    }
+    /// The default template content for this project, if one exists.
+    pub default_template: Option<String>,
 }
 
 impl SpecConfig {
-    /// Generate testing guidance based on `testing_policy`, `ac_format`, and criteria count.
-    /// Returns `None` when policy is `None`.
+    /// Generate TDD guidance based on testable criteria count.
     pub fn testing_guidance(&self, testable_criteria_count: usize) -> Option<String> {
-        match self.testing_policy {
-            TestingPolicy::None => None,
-            TestingPolicy::Advisory => {
-                if testable_criteria_count > 0 {
-                    Some(format!(
-                        "Your first step: write tests for the {} testable criteria in the spec, then call prove_feature.",
-                        testable_criteria_count,
-                    ))
-                } else {
-                    Some(
-                        "Your first step: write tests that describe the expected behavior, then call prove_feature."
-                            .to_string(),
-                    )
-                }
-            }
-            TestingPolicy::Tdd => {
-                let criteria_term = if self.ac_format == AcFormat::Gherkin {
-                    "Gherkin scenarios"
-                } else {
-                    "testable criteria"
-                };
-                if testable_criteria_count > 0 {
-                    Some(format!(
-                        "REQUIRED: Write failing tests for the {} {} BEFORE writing any implementation. \
-                         Call prove_feature with the failing results, then implement to make them pass.",
-                        testable_criteria_count, criteria_term,
-                    ))
-                } else {
-                    Some(
-                        "REQUIRED: Write failing tests that encode the expected behavior BEFORE writing any implementation. \
-                         Call prove_feature with the failing results, then implement to make them pass."
-                            .to_string(),
-                    )
-                }
-            }
+        if testable_criteria_count > 0 {
+            Some(format!(
+                "REQUIRED: Write failing tests for the {} testable criteria BEFORE writing any implementation. \
+                 Call prove_feature with the failing results, then implement to make them pass.",
+                testable_criteria_count,
+            ))
+        } else {
+            Some(
+                "REQUIRED: Write failing tests that encode the expected behavior BEFORE writing any implementation. \
+                 Call prove_feature with the failing results, then implement to make them pass."
+                    .to_string(),
+            )
         }
     }
 }
@@ -109,42 +66,9 @@ impl SpecStatus {
         self.tier == FeatureTier::Leaf && !self.has_details
     }
 
-    /// True when details exist but are very sparse (leaf only).
-    /// Threshold adapts to `ac_level`.
-    pub fn is_sparse(&self, config: &SpecConfig) -> bool {
-        if self.tier != FeatureTier::Leaf || !self.has_details {
-            return false;
-        }
-        let threshold = match config.ac_level {
-            GuidanceLevel::Concise => 10,
-            GuidanceLevel::Standard => 20,
-            GuidanceLevel::Thorough => 40,
-        };
-        self.word_count < threshold
-    }
-
-    /// True when leaf spec is too long. Research shows comprehensive specs
-    /// degrade agent performance compared to focused ones (SkillsBench 2026).
-    pub fn is_verbose(&self, config: &SpecConfig) -> bool {
-        if self.tier != FeatureTier::Leaf || !self.has_details {
-            return false;
-        }
-        let threshold = match config.ac_level {
-            GuidanceLevel::Concise => 200,
-            GuidanceLevel::Standard => 400,
-            GuidanceLevel::Thorough => 600,
-        };
-        self.word_count > threshold
-    }
-
-    /// True when spec-level warnings apply (sparse, verbose, or missing testable criteria).
-    pub fn has_warnings(&self, config: &SpecConfig) -> bool {
-        self.is_sparse(config)
-            || self.is_verbose(config)
-            || (self.tier == FeatureTier::Leaf
-                && self.has_details
-                && self.testable_criteria_count == 0
-                && config.testing_policy != TestingPolicy::None)
+    /// True when spec-level warnings apply (missing testable criteria for leaves with details).
+    pub fn has_warnings(&self) -> bool {
+        self.tier == FeatureTier::Leaf && self.has_details && self.testable_criteria_count == 0
     }
 
     /// One-line status string for MCP responses.
@@ -175,131 +99,61 @@ impl SpecStatus {
     }
 
     /// Actionable guidance when the spec is incomplete. `None` when complete.
-    /// Text adapts to the project's configured guidance levels.
     pub fn guidance(&self, config: &SpecConfig) -> Option<String> {
         match self.tier {
-            FeatureTier::Project => self.project_guidance(config),
-            FeatureTier::FeatureSet => self.feature_set_guidance(config),
+            FeatureTier::Project => self.project_guidance(),
+            FeatureTier::FeatureSet => self.feature_set_guidance(),
             FeatureTier::Leaf => self.leaf_guidance(config),
         }
     }
 
-    fn project_guidance(&self, config: &SpecConfig) -> Option<String> {
+    fn project_guidance(&self) -> Option<String> {
         if self.has_details {
             return None;
         }
-        Some(match config.detail_level {
-            GuidanceLevel::Concise => {
-                "This is the project root. Consider adding a brief note on tech stack and key conventions."
-                    .to_string()
-            }
-            GuidanceLevel::Standard => {
-                "This is the project root \u{2014} all agents read this before working on any feature. \
-                 Add project-wide instructions: tech stack, conventions, architectural decisions, \
-                 and security boundaries."
-                    .to_string()
-            }
-            GuidanceLevel::Thorough => {
-                "This is the project root \u{2014} all agents read this before working on any feature. \
-                 Add comprehensive project instructions:\n\
-                 - Tech stack and key dependencies\n\
-                 - Architectural decisions with rationale and alternatives considered\n\
-                 - Coding conventions, patterns, and anti-patterns\n\
-                 - Security boundaries and constraints\n\
-                 - Testing expectations and coverage goals\n\
-                 - Domain terminology and glossary"
-                    .to_string()
-            }
-        })
+        Some(
+            "This is the project root \u{2014} all agents read this before working on any feature. \
+             Add project-wide instructions: tech stack, conventions, architectural decisions, \
+             and security boundaries."
+                .to_string(),
+        )
     }
 
-    fn feature_set_guidance(&self, config: &SpecConfig) -> Option<String> {
+    fn feature_set_guidance(&self) -> Option<String> {
         if self.has_details {
             return None;
         }
-        Some(match config.detail_level {
-            GuidanceLevel::Concise => {
-                "This feature set has no shared context. Consider adding a brief architectural note \u{2014} \
-                 key patterns or constraints that apply to child features."
-                    .to_string()
-            }
-            GuidanceLevel::Standard => {
-                "This feature set has no shared context. Consider adding architectural decisions, \
-                 shared patterns, or constraints that apply to all child features."
-                    .to_string()
-            }
-            GuidanceLevel::Thorough => {
-                "This feature set has no shared context. Consider adding detailed design rationale:\n\
-                 - Architectural decisions with alternatives considered\n\
-                 - Shared patterns and interfaces\n\
-                 - Cross-cutting constraints (security, performance, compatibility)\n\
-                 - Conventions for child features"
-                    .to_string()
-            }
-        })
+        Some(
+            "This feature set has no shared context. Consider adding architectural decisions, \
+             shared patterns, or constraints that apply to all child features."
+                .to_string(),
+        )
     }
 
     fn leaf_guidance(&self, config: &SpecConfig) -> Option<String> {
         if !self.has_details {
-            return Some(match config.ac_level {
-                GuidanceLevel::Concise => {
+            // No spec — provide template content or generic guidance
+            if let Some(template) = &config.default_template {
+                return Some(format!(
                     "This feature has no specification. Use update_feature to add details before starting.\n\n\
-                     Write a brief specification (~30-80 words):\n\
-                     1. User story: As a [user], I can [capability] so that [benefit].\n\
-                     2. Acceptance criteria (1-2 checkbox items): concrete assertions verifiable in tests.\n\
-                     - Do NOT include: file paths, directory structure, or implementation approach"
-                        .to_string()
-                }
-                GuidanceLevel::Standard => {
-                    "This feature has no specification. Use update_feature to add details before starting.\n\n\
-                     Write a focused specification (~50-150 words) with this structure:\n\n\
-                     1. User story: As a [user], I can [capability] so that [benefit].\n\
-                     2. Brief context (1-2 sentences): key behavior, constraints, or edge cases.\n\
-                     3. Acceptance criteria as checkbox items (3-5) — each should be verifiable in a spec or test:\n\
-                        - [ ] Concrete assertion verifiable in a test\n\
-                        - [ ] Another assertion verifiable in a test\n\n\
-                     Do NOT include: file paths, codebase structure, or implementation approach \u{2014} agents discover these from code."
-                        .to_string()
-                }
-                GuidanceLevel::Thorough => {
-                    "This feature has no specification. Use update_feature to add details before starting.\n\n\
-                     Write a detailed specification (~100-300 words) with this structure:\n\n\
-                     1. User story: As a [user], I can [capability] so that [benefit].\n\
-                     2. Context: business rules, domain-specific requirements, edge cases.\n\
-                     3. Acceptance criteria as checkbox items (5-8) — each should be verifiable in a spec or test.\n\n\
-                     Do NOT include: file paths, directory structure, codebase overviews, or step-by-step implementation plans \u{2014} agents discover code structure on their own."
-                        .to_string()
-                }
-            });
-        }
-
-        if self.is_sparse(config) {
+                     Use this template as a starting point:\n\n{}\n\n\
+                     Do NOT include: file paths, codebase structure, or implementation approach \u{2014} agents discover these from code.",
+                    template,
+                ));
+            }
             return Some(
-                "Specification exists but is too brief. A good spec needs:\n\
-                 1. A user story opening line: As a [user], I can [capability] so that [benefit].\n\
-                 2. Acceptance criteria as checkbox items — concrete assertions verifiable in specs and tests.\n\
-                 Consider fleshing out the spec before implementing."
+                "This feature has no specification. Use update_feature to add details before starting.\n\n\
+                 Write a focused specification with:\n\
+                 1. User story: As a [user], I can [capability] so that [benefit].\n\
+                 2. Brief context: key behavior, constraints, or edge cases.\n\
+                 3. Acceptance criteria as checkbox items \u{2014} each verifiable in a test.\n\n\
+                 Do NOT include: file paths, codebase structure, or implementation approach \u{2014} agents discover these from code."
                     .to_string(),
             );
         }
 
-        if self.is_verbose(config) {
-            let (target, limit) = match config.ac_level {
-                GuidanceLevel::Concise => ("30-80", 200),
-                GuidanceLevel::Standard => ("50-150", 400),
-                GuidanceLevel::Thorough => ("100-300", 600),
-            };
-            return Some(format!(
-                "Spec is ~{} words (over {} word limit). Research shows focused specs ({} words) \
-                 outperform comprehensive ones. Consider trimming to intent, constraints, and \
-                 acceptance criteria only. Remove file paths, implementation details, and \
-                 codebase descriptions \u{2014} agents discover these from code.",
-                self.word_count, limit, target,
-            ));
-        }
-
-        // Testable criteria warning (advisory/tdd only)
-        if self.testable_criteria_count == 0 && config.testing_policy != TestingPolicy::None {
+        // Warn when no testable criteria are present
+        if self.testable_criteria_count == 0 {
             return Some(
                 "No testable criteria detected. Consider adding acceptance criteria as \
                  checkbox items with concrete assertions verifiable in specs and tests \
@@ -421,8 +275,7 @@ fn strip_numbered_prefix(s: &str) -> Option<&str> {
 
 /// Analyze a feature's details for specification completeness.
 ///
-/// Uses word count as the primary heuristic. Warning thresholds adapt to
-/// the project's configured `ac_level`. Also counts testable criteria.
+/// Also counts testable criteria for leaf features.
 pub fn analyze_spec(details: Option<&str>, has_children: bool, is_root: bool) -> SpecStatus {
     let text = details.unwrap_or("").trim();
     let has_details = !text.is_empty();
@@ -458,32 +311,20 @@ mod tests {
         SpecConfig::default()
     }
 
-    fn concise_config() -> SpecConfig {
+    fn config_with_template() -> SpecConfig {
         SpecConfig {
-            detail_level: GuidanceLevel::Concise,
-            ac_level: GuidanceLevel::Concise,
-            ac_format: AcFormat::Checkbox,
-            testing_policy: TestingPolicy::Advisory,
+            default_template: Some("## User Story\n\nAs a [user], I can [capability].".to_string()),
         }
     }
 
-    fn thorough_config() -> SpecConfig {
-        SpecConfig {
-            detail_level: GuidanceLevel::Thorough,
-            ac_level: GuidanceLevel::Thorough,
-            ac_format: AcFormat::Checkbox,
-            testing_policy: TestingPolicy::Advisory,
-        }
-    }
-
-    // --- Leaf feature tests (standard) ---
+    // --- Leaf feature tests ---
 
     #[test]
     fn empty_details_should_block() {
         let config = default_config();
         let status = analyze_spec(None, false, false);
         assert!(status.should_block());
-        assert!(!status.has_warnings(&config));
+        assert!(!status.has_warnings());
         assert!(status.guidance(&config).is_some());
     }
 
@@ -494,27 +335,14 @@ mod tests {
     }
 
     #[test]
-    fn sparse_details_warns() {
-        let config = default_config();
-        let status = analyze_spec(Some("Handle login."), false, false);
-        assert!(!status.should_block());
-        assert!(status.has_warnings(&config));
-        assert!(status.guidance(&config).unwrap().contains("brief"));
-    }
-
-    #[test]
     fn sufficient_details_no_warnings() {
-        // Use testing_policy: None to isolate word-count warnings from testable criteria warnings
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::None,
-            ..default_config()
-        };
+        let config = default_config();
         let spec = "Accepts an email and password, validates credentials against the database, \
                      returns a JWT on success. Must rate-limit to 5 attempts per minute. \
-                     Returns 401 with generic error on failure.";
+                     Returns 401 with generic error on failure.\n- [ ] returns JWT on success";
         let status = analyze_spec(Some(spec), false, false);
         assert!(!status.should_block());
-        assert!(!status.has_warnings(&config));
+        assert!(!status.has_warnings());
         assert!(status.guidance(&config).is_none());
     }
 
@@ -537,12 +365,20 @@ mod tests {
     }
 
     #[test]
-    fn no_details_guidance_mentions_intent_and_constraints() {
+    fn no_details_guidance_mentions_user_story() {
         let config = default_config();
         let status = analyze_spec(None, false, false);
         let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("Intent"));
-        assert!(guidance.contains("Constraints"));
+        assert!(guidance.contains("User story"));
+    }
+
+    #[test]
+    fn no_details_guidance_with_template() {
+        let config = config_with_template();
+        let status = analyze_spec(None, false, false);
+        let guidance = status.guidance(&config).unwrap();
+        assert!(guidance.contains("## User Story"));
+        assert!(guidance.contains("template"));
     }
 
     #[test]
@@ -557,10 +393,9 @@ mod tests {
 
     #[test]
     fn feature_set_never_blocks() {
-        let config = default_config();
         let status = analyze_spec(None, true, false);
         assert!(!status.should_block());
-        assert!(!status.has_warnings(&config));
+        assert!(!status.has_warnings());
         assert_eq!(status.tier, FeatureTier::FeatureSet);
     }
 
@@ -596,10 +431,9 @@ mod tests {
 
     #[test]
     fn project_never_blocks() {
-        let config = default_config();
         let status = analyze_spec(None, true, true);
         assert!(!status.should_block());
-        assert!(!status.has_warnings(&config));
+        assert!(!status.has_warnings());
         assert_eq!(status.tier, FeatureTier::Project);
     }
 
@@ -657,197 +491,9 @@ mod tests {
         assert_eq!(status.tier, FeatureTier::Project);
     }
 
-    // --- Concise level tests ---
-
     #[test]
-    fn concise_leaf_lower_warning_threshold() {
-        // Use testing_policy: None to isolate word-count warnings from testable criteria warnings
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::None,
-            ..concise_config()
-        };
-        // 5 words — below concise threshold of 10
-        let status = analyze_spec(Some("Handle login with email"), false, false);
-        assert!(status.has_warnings(&config));
-
-        // 12 words — above concise threshold of 10
-        let status = analyze_spec(
-            Some("Handle login with email and password then return a JWT token"),
-            false,
-            false,
-        );
-        assert!(!status.has_warnings(&config));
-    }
-
-    #[test]
-    fn concise_no_details_guidance_shorter() {
-        let config = concise_config();
-        let status = analyze_spec(None, false, false);
-        let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("~30-80 words"));
-        assert!(guidance.contains("Key constraint"));
-    }
-
-    #[test]
-    fn concise_feature_set_guidance() {
-        let config = concise_config();
-        let status = analyze_spec(None, true, false);
-        let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("brief architectural note"));
-    }
-
-    #[test]
-    fn concise_project_guidance() {
-        let config = concise_config();
-        let status = analyze_spec(None, true, true);
-        let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("brief note"));
-    }
-
-    // --- Thorough level tests ---
-
-    #[test]
-    fn thorough_leaf_higher_warning_threshold() {
-        let config = thorough_config();
-        // 25 words — above standard (20) but below thorough (40)
-        let status = analyze_spec(
-            Some("Handle login with email and password. Validate credentials against the database. Return a JWT on success. Rate limit to five attempts per minute. Return 401 on failure."),
-            false,
-            false,
-        );
-        assert!(status.has_warnings(&config));
-    }
-
-    #[test]
-    fn thorough_no_details_guidance_structured() {
-        let config = thorough_config();
-        let status = analyze_spec(None, false, false);
-        let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("~100-300 words"));
-        assert!(guidance.contains("Story"));
-        assert!(guidance.contains("Acceptance criteria"));
-    }
-
-    #[test]
-    fn thorough_feature_set_guidance() {
-        let config = thorough_config();
-        let status = analyze_spec(None, true, false);
-        let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("detailed design rationale"));
-        assert!(guidance.contains("alternatives considered"));
-    }
-
-    #[test]
-    fn thorough_project_guidance() {
-        let config = thorough_config();
-        let status = analyze_spec(None, true, true);
-        let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("Domain terminology"));
-        assert!(guidance.contains("alternatives considered"));
-    }
-
-    // --- Verbose spec tests ---
-
-    #[test]
-    fn verbose_spec_warns_standard() {
+    fn testing_guidance_always_emits_required_before() {
         let config = default_config();
-        // Generate a spec over 400 words
-        let words: Vec<&str> = std::iter::repeat("word").take(410).collect();
-        let spec = words.join(" ");
-        let status = analyze_spec(Some(&spec), false, false);
-        assert!(status.is_verbose(&config));
-        assert!(status.has_warnings(&config));
-        let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("over 400 word limit"));
-        assert!(guidance.contains("focused specs"));
-    }
-
-    #[test]
-    fn verbose_spec_warns_concise() {
-        let config = concise_config();
-        let words: Vec<&str> = std::iter::repeat("word").take(210).collect();
-        let spec = words.join(" ");
-        let status = analyze_spec(Some(&spec), false, false);
-        assert!(status.is_verbose(&config));
-        assert!(status.has_warnings(&config));
-        let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("over 200 word limit"));
-    }
-
-    #[test]
-    fn verbose_spec_warns_thorough() {
-        let config = thorough_config();
-        let words: Vec<&str> = std::iter::repeat("word").take(610).collect();
-        let spec = words.join(" ");
-        let status = analyze_spec(Some(&spec), false, false);
-        assert!(status.is_verbose(&config));
-        let guidance = status.guidance(&config).unwrap();
-        assert!(guidance.contains("over 600 word limit"));
-    }
-
-    #[test]
-    fn under_verbose_threshold_no_warning() {
-        // Use testing_policy: None to isolate word-count warnings from testable criteria warnings
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::None,
-            ..default_config()
-        };
-        let words: Vec<&str> = std::iter::repeat("word").take(100).collect();
-        let spec = words.join(" ");
-        let status = analyze_spec(Some(&spec), false, false);
-        assert!(!status.is_verbose(&config));
-        assert!(!status.is_sparse(&config));
-        assert!(!status.has_warnings(&config));
-        assert!(status.guidance(&config).is_none());
-    }
-
-    #[test]
-    fn verbose_does_not_apply_to_feature_sets() {
-        let config = default_config();
-        let words: Vec<&str> = std::iter::repeat("word").take(500).collect();
-        let spec = words.join(" ");
-        let status = analyze_spec(Some(&spec), true, false);
-        assert!(!status.is_verbose(&config));
-        assert!(!status.has_warnings(&config));
-    }
-
-    #[test]
-    fn verbose_does_not_apply_to_projects() {
-        let config = default_config();
-        let words: Vec<&str> = std::iter::repeat("word").take(500).collect();
-        let spec = words.join(" ");
-        let status = analyze_spec(Some(&spec), true, true);
-        assert!(!status.is_verbose(&config));
-    }
-
-    // --- Testing guidance tests ---
-
-    #[test]
-    fn testing_guidance_none_returns_none() {
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::None,
-            ..default_config()
-        };
-        assert!(config.testing_guidance(0).is_none());
-    }
-
-    #[test]
-    fn testing_guidance_advisory_mentions_prove_feature() {
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::Advisory,
-            ..default_config()
-        };
-        let guidance = config.testing_guidance(0).unwrap();
-        assert!(guidance.contains("prove_feature"));
-        assert!(guidance.contains("Your first step"));
-    }
-
-    #[test]
-    fn testing_guidance_tdd_has_required_before() {
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::Tdd,
-            ..default_config()
-        };
         let guidance = config.testing_guidance(0).unwrap();
         assert!(guidance.contains("REQUIRED"));
         assert!(guidance.contains("BEFORE"));
@@ -855,43 +501,15 @@ mod tests {
     }
 
     #[test]
-    fn testing_guidance_tdd_gherkin_references_scenarios() {
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::Tdd,
-            ac_format: AcFormat::Gherkin,
-            ..default_config()
-        };
-        let guidance = config.testing_guidance(3).unwrap();
-        assert!(guidance.contains("Gherkin scenarios"));
-        assert!(!guidance.contains("testable criteria"));
-    }
-
-    #[test]
-    fn testing_guidance_advisory_includes_criteria_count() {
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::Advisory,
-            ..default_config()
-        };
-        let guidance = config.testing_guidance(3).unwrap();
-        assert!(guidance.contains("3 testable criteria"));
-    }
-
-    #[test]
-    fn testing_guidance_tdd_includes_criteria_count() {
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::Tdd,
-            ..default_config()
-        };
+    fn testing_guidance_includes_criteria_count() {
+        let config = default_config();
         let guidance = config.testing_guidance(5).unwrap();
         assert!(guidance.contains("5 testable criteria"));
     }
 
     #[test]
     fn testing_guidance_zero_criteria_no_count_in_text() {
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::Advisory,
-            ..default_config()
-        };
+        let config = default_config();
         let guidance = config.testing_guidance(0).unwrap();
         assert!(!guidance.contains("0 testable"));
     }
@@ -960,46 +578,28 @@ mod tests {
     }
 
     #[test]
-    fn no_testable_criteria_warns_with_advisory_policy() {
-        let config = default_config(); // advisory
-                                       // Must be above sparse threshold (20 words for standard) to isolate the testable-criteria check
+    fn no_testable_criteria_warns() {
+        let config = default_config();
         let spec = "Handle user login with appropriate validation and security measures. \
                      The system should authenticate users against the database and manage \
                      sessions correctly with proper error handling throughout.";
         let status = analyze_spec(Some(spec), false, false);
         assert_eq!(status.testable_criteria_count, 0);
-        assert!(status.has_warnings(&config));
+        assert!(status.has_warnings());
         let guidance = status.guidance(&config).unwrap();
         assert!(guidance.contains("No testable criteria"));
     }
 
     #[test]
-    fn no_testable_criteria_no_warning_with_none_policy() {
-        let config = SpecConfig {
-            testing_policy: TestingPolicy::None,
-            ..default_config()
-        };
-        // Must be above sparse threshold (20 words) to isolate the testable-criteria check
-        let spec = "Handle user login with appropriate validation and security measures. \
-                     The system should authenticate users against the database and manage \
-                     sessions correctly with proper error handling throughout.";
-        let status = analyze_spec(Some(spec), false, false);
-        assert_eq!(status.testable_criteria_count, 0);
-        assert!(!status.has_warnings(&config));
-        assert!(status.guidance(&config).is_none());
-    }
-
-    #[test]
     fn testable_criteria_present_no_warning() {
-        let config = default_config(); // advisory
-                                       // Must be above sparse threshold (20 words) so only testable-criteria logic applies
+        let config = default_config();
         let spec = "Handle user login with appropriate validation and security measures \
                      for the authentication subsystem.\n\
                      - [ ] returns JWT on success\n\
                      - [ ] rejects invalid credentials";
         let status = analyze_spec(Some(spec), false, false);
         assert_eq!(status.testable_criteria_count, 2);
-        assert!(!status.has_warnings(&config));
+        assert!(!status.has_warnings());
         assert!(status.guidance(&config).is_none());
     }
 }

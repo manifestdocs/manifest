@@ -313,7 +313,7 @@ pub struct PlanFeaturesRequest {
     #[serde(default)]
     pub target_version_id: Option<Uuid>,
     #[schemars(
-        description = "The proposed feature tree. Parent features should have shared context in details (architecture, patterns, constraints for children). Leaf features should have specifications (length guided by the project's ac_level setting) — goal, constraints, key interfaces."
+        description = "The proposed feature tree. Parent features should have shared context in details (architecture, patterns, constraints for children). Leaf features should have specifications — goal, constraints, key interfaces. Use the project's spec template if available."
     )]
     pub features: Vec<ProposedFeature>,
     #[schemars(
@@ -438,6 +438,15 @@ pub struct FeatureInfoWithContext {
     pub breadcrumb: Vec<BreadcrumbItemInfo>,
 }
 
+/// Info about a project's default spec template.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SpecTemplateInfo {
+    /// Template name.
+    pub name: String,
+    /// Template content (markdown).
+    pub content: String,
+}
+
 /// Response for start_feature MCP tool (serialized as YAML).
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct StartFeatureResponse {
@@ -448,16 +457,11 @@ pub struct StartFeatureResponse {
     pub spec_status: String,
     /// Feature tier (root, feature_set, leaf).
     pub feature_tier: String,
-    /// Acceptance criteria detail level.
-    pub ac_level: String,
-    /// Acceptance criteria format (checkbox, gherkin).
-    pub ac_format: String,
-    /// Testing policy (none, advisory, tdd).
-    pub testing_policy: String,
     /// Number of testable criteria detected in the spec.
     pub testable_criteria_count: usize,
-    /// Specification detail level.
-    pub detail_level: String,
+    /// Default spec template for this project (if one exists).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spec_template: Option<SpecTemplateInfo>,
 }
 
 /// Response for get_next_feature MCP tool (serialized as YAML).
@@ -470,22 +474,17 @@ pub struct NextFeatureResponse {
     pub spec_status: String,
     /// Feature tier (root, feature_set, leaf).
     pub feature_tier: String,
-    /// Acceptance criteria detail level.
-    pub ac_level: String,
-    /// Acceptance criteria format (checkbox, gherkin).
-    pub ac_format: String,
-    /// Testing policy (none, advisory, tdd).
-    pub testing_policy: String,
     /// Testing workflow guidance based on project policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub testing_guidance: Option<String>,
     /// Number of testable criteria detected in the spec.
     pub testable_criteria_count: usize,
-    /// Specification detail level.
-    pub detail_level: String,
     /// Guidance for improving spec (if needed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_guidance: Option<String>,
+    /// Default spec template for this project (if one exists).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spec_template: Option<SpecTemplateInfo>,
 }
 
 /// Get feature response with optional history (serialized as YAML).
@@ -574,8 +573,8 @@ pub struct ProposedFeature {
     /// Feature details — content depends on position in hierarchy.
     /// For parent features (those with children): shared architectural context, patterns,
     /// constraints that apply to all children.
-    /// For leaf features (no children): specification (length guided by project's ac_level
-    /// setting) — goal, constraints, key interfaces. Parents provide context; leaves provide specifications.
+    /// For leaf features (no children): specification — goal, constraints, key interfaces.
+    /// Use the project's spec template if available. Parents provide context; leaves provide specifications.
     /// IMPORTANT: Do not repeat the feature title in the details — the title is displayed separately.
     #[serde(default)]
     pub details: Option<String>,

@@ -7,7 +7,7 @@ use super::{Database, ManifestError};
 use crate::models::*;
 
 /// SELECT columns for the projects table.
-const PROJECT_COLS: &str = "id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, detail_level, ac_level, ac_format, testing_policy, test_adapter, key_prefix, created_at, updated_at";
+const PROJECT_COLS: &str = "id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, test_adapter, key_prefix, created_at, updated_at";
 
 impl Database {
     /// Get all projects ordered by name.
@@ -83,6 +83,22 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
+        // Create default spec template
+        let template_id = TemplateId::new();
+        sqlx::query(
+            "INSERT INTO spec_templates (id, project_id, name, description, content, is_default, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, 1, $6, $7)",
+        )
+        .bind(template_id.to_string())
+        .bind(project_id.to_string())
+        .bind("Default")
+        .bind("General-purpose feature specification template")
+        .bind(DEFAULT_TEMPLATE_CONTENT)
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
+
         tx.commit().await?;
 
         Ok(Project {
@@ -94,10 +110,6 @@ impl Database {
             current_version_id: None,
             root_feature_id: Some(root_feature_id),
             default_feature_destination: "backlog".to_string(),
-            detail_level: GuidanceLevel::Standard,
-            ac_level: GuidanceLevel::Standard,
-            ac_format: AcFormat::Checkbox,
-            testing_policy: TestingPolicy::Advisory,
             test_adapter: None,
             key_prefix,
             created_at: now,
@@ -127,15 +139,11 @@ impl Database {
         let default_feature_destination = input
             .default_feature_destination
             .unwrap_or(existing.default_feature_destination);
-        let detail_level = input.detail_level.unwrap_or(existing.detail_level);
-        let ac_level = input.ac_level.unwrap_or(existing.ac_level);
-        let ac_format = input.ac_format.unwrap_or(existing.ac_format);
-        let testing_policy = input.testing_policy.unwrap_or(existing.testing_policy);
         let test_adapter = input.test_adapter.or(existing.test_adapter);
         let key_prefix = input.key_prefix.unwrap_or(existing.key_prefix);
 
         sqlx::query(
-            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, detail_level = $7, ac_level = $8, ac_format = $9, testing_policy = $10, test_adapter = $11, key_prefix = $12, updated_at = $13 WHERE id = $14",
+            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, testing_policy = 'tdd', test_adapter = $7, key_prefix = $8, updated_at = $9 WHERE id = $10",
         )
         .bind(&slug)
         .bind(&name)
@@ -143,10 +151,6 @@ impl Database {
         .bind(&instructions)
         .bind(current_version_id.map(|u| u.to_string()))
         .bind(&default_feature_destination)
-        .bind(detail_level.as_str())
-        .bind(ac_level.as_str())
-        .bind(ac_format.as_str())
-        .bind(testing_policy.as_str())
         .bind(&test_adapter)
         .bind(&key_prefix)
         .bind(now.to_rfc3339())
@@ -175,10 +179,6 @@ impl Database {
             current_version_id,
             root_feature_id: existing.root_feature_id,
             default_feature_destination,
-            detail_level,
-            ac_level,
-            ac_format,
-            testing_policy,
             test_adapter,
             key_prefix,
             created_at: existing.created_at,
@@ -207,6 +207,12 @@ impl Database {
 
         // Delete directories
         sqlx::query("DELETE FROM project_directories WHERE project_id = $1")
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await?;
+
+        // Delete spec templates
+        sqlx::query("DELETE FROM spec_templates WHERE project_id = $1")
             .bind(id.to_string())
             .execute(&mut *tx)
             .await?;

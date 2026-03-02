@@ -25,6 +25,7 @@ mod project;
 mod proof;
 mod session;
 mod task;
+mod template;
 mod user;
 mod version;
 
@@ -42,5 +43,6 @@ pub use project::*;
 pub use proof::*;
 pub use session::*;
 pub use task::*;
+pub use template::*;
 pub use user::*;
 pub use version::*;

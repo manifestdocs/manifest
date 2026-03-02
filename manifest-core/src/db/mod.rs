@@ -15,6 +15,7 @@ mod memories;
 mod portfolio;
 mod projects;
 mod proofs;
+mod templates;
 mod users;
 mod versions;
 
@@ -380,10 +381,6 @@ impl Database {
         self.migrate_feature_destination_now_to_next().await?;
         // Migration: add details_summary column to features
         self.migrate_add_details_summary().await?;
-        // Migration: add guidance level columns to projects
-        self.migrate_add_guidance_levels().await?;
-        // Migration: rename spec_level → ac_level, add ac_format
-        self.migrate_rename_spec_to_ac().await?;
         // Migration: add project_focus table
         self.migrate_add_project_focus().await?;
         // Migration: add 'copilot' to tasks.agent_type CHECK constraint
@@ -404,6 +401,8 @@ impl Database {
         self.migrate_add_proofs_table().await?;
         // Migration: add test_adapter column to projects
         self.migrate_add_test_adapter().await?;
+        // Migration: add spec_templates table
+        self.migrate_add_spec_templates().await?;
         Ok(())
     }
 
@@ -742,100 +741,6 @@ impl Database {
             .execute(&self.pool)
             .await?;
 
-        Ok(())
-    }
-
-    /// Add detail_level and spec_level columns to projects table if they don't exist.
-    async fn migrate_add_guidance_levels(&self) -> Result<()> {
-        let has_column = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("detail_level"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'projects' AND column_name = 'detail_level'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_column {
-            tracing::debug!("Guidance levels migration already applied");
-            return Ok(());
-        }
-
-        tracing::info!("Adding detail_level and spec_level columns to projects table");
-        sqlx::query(
-            "ALTER TABLE projects ADD COLUMN detail_level TEXT NOT NULL DEFAULT 'standard'",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query("ALTER TABLE projects ADD COLUMN spec_level TEXT NOT NULL DEFAULT 'standard'")
-            .execute(&self.pool)
-            .await?;
-
-        Ok(())
-    }
-
-    /// Rename spec_level → ac_level and add ac_format column.
-    /// Leaves spec_level as a dead column (Rust code stops reading it).
-    async fn migrate_rename_spec_to_ac(&self) -> Result<()> {
-        let has_ac_level = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("ac_level"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'projects' AND column_name = 'ac_level'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_ac_level {
-            tracing::debug!("spec_level → ac_level migration already applied");
-            return Ok(());
-        }
-
-        tracing::info!("Renaming spec_level → ac_level and adding ac_format column");
-
-        // Add ac_level column
-        sqlx::query("ALTER TABLE projects ADD COLUMN ac_level TEXT NOT NULL DEFAULT 'standard'")
-            .execute(&self.pool)
-            .await?;
-
-        // Copy spec_level values into ac_level
-        sqlx::query("UPDATE projects SET ac_level = spec_level")
-            .execute(&self.pool)
-            .await?;
-
-        // Add ac_format column
-        sqlx::query("ALTER TABLE projects ADD COLUMN ac_format TEXT NOT NULL DEFAULT 'checkbox'")
-            .execute(&self.pool)
-            .await?;
-
-        tracing::info!("spec_level → ac_level migration complete");
         Ok(())
     }
 
@@ -1421,7 +1326,7 @@ impl Database {
 
         tracing::info!("Adding testing_policy column to projects table");
         sqlx::query(
-            "ALTER TABLE projects ADD COLUMN testing_policy TEXT NOT NULL DEFAULT 'advisory'",
+            "ALTER TABLE projects ADD COLUMN testing_policy TEXT NOT NULL DEFAULT 'tdd'",
         )
         .execute(&self.pool)
         .await?;
@@ -1463,6 +1368,72 @@ impl Database {
             .execute(&self.pool)
             .await?;
 
+        Ok(())
+    }
+
+    /// Add spec_templates table if it doesn't exist, insert default template for existing projects.
+    async fn migrate_add_spec_templates(&self) -> Result<()> {
+        let table_exists_sql = self.dialect.table_exists_sql("spec_templates");
+        let count: i64 = sqlx::query_scalar(&table_exists_sql)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+
+        if count > 0 {
+            tracing::debug!("spec_templates migration already applied");
+            return Ok(());
+        }
+
+        tracing::info!("Creating spec_templates table");
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS spec_templates (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                content TEXT NOT NULL,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CONSTRAINT fk_spec_templates_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE(project_id, name)
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_spec_templates_project ON spec_templates(project_id)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Insert default template for every existing project
+        let now = chrono::Utc::now().to_rfc3339();
+        let rows = sqlx::query("SELECT id FROM projects")
+            .fetch_all(&self.pool)
+            .await?;
+
+        for row in &rows {
+            let project_id: String = sqlx::Row::get(row, "id");
+            let template_id = uuid::Uuid::new_v4().to_string();
+            sqlx::query(
+                "INSERT INTO spec_templates (id, project_id, name, description, content, is_default, created_at, updated_at)
+                 VALUES ($1, $2, 'Default', 'General-purpose feature specification template', $3, 1, $4, $5)",
+            )
+            .bind(&template_id)
+            .bind(&project_id)
+            .bind(crate::models::DEFAULT_TEMPLATE_CONTENT)
+            .bind(&now)
+            .bind(&now)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        tracing::info!(
+            "Created default spec templates for {} existing projects",
+            rows.len()
+        );
         Ok(())
     }
 

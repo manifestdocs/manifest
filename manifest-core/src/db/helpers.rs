@@ -171,26 +171,24 @@ pub(crate) fn row_to_project(row: &AnyRow) -> Result<Project> {
         default_feature_destination: row
             .get::<Option<String>, _>("default_feature_destination")
             .unwrap_or_else(|| "backlog".to_string()),
-        detail_level: row
-            .get::<Option<String>, _>("detail_level")
-            .and_then(|s| GuidanceLevel::from_str(&s).ok())
-            .unwrap_or(GuidanceLevel::Standard),
-        ac_level: row
-            .get::<Option<String>, _>("ac_level")
-            .and_then(|s| GuidanceLevel::from_str(&s).ok())
-            .unwrap_or(GuidanceLevel::Standard),
-        ac_format: row
-            .get::<Option<String>, _>("ac_format")
-            .and_then(|s| AcFormat::from_str(&s).ok())
-            .unwrap_or(AcFormat::Checkbox),
-        testing_policy: row
-            .get::<Option<String>, _>("testing_policy")
-            .and_then(|s| TestingPolicy::from_str(&s).ok())
-            .unwrap_or(TestingPolicy::Advisory),
         test_adapter: row.get::<Option<String>, _>("test_adapter"),
         key_prefix: row
             .get::<Option<String>, _>("key_prefix")
             .unwrap_or_default(),
+        created_at: parse_datetime(row.get("created_at"))?,
+        updated_at: parse_datetime(row.get("updated_at"))?,
+    })
+}
+
+/// Map a database row to a [`SpecTemplate`].
+pub(crate) fn row_to_spec_template(row: &AnyRow) -> Result<SpecTemplate> {
+    Ok(SpecTemplate {
+        id: parse_id(row.get("id"))?,
+        project_id: parse_id(row.get("project_id"))?,
+        name: row.get("name"),
+        description: row.get("description"),
+        content: row.get("content"),
+        is_default: row.get::<i32, _>("is_default") != 0,
         created_at: parse_datetime(row.get("created_at"))?,
         updated_at: parse_datetime(row.get("updated_at"))?,
     })

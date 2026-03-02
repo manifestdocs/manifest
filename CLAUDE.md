@@ -128,7 +128,7 @@ Authentication/                 <- feature node with context
 
 - **Feature**: Self-referential tree via `parent_id`. States: Proposed → Blocked → InProgress → Implemented → Archived. Only leaf nodes can have sessions. Features can be `blocked` by other features via the `feature_blockers` junction table — they auto-transition to `proposed` when all blockers reach `implemented`.
 - **FeatureHistory**: Append-only log of work sessions + commit references.
-- **Project**: Container with directories, guidance settings (`ac_level`, `ac_format`).
+- **Project**: Container with directories and spec templates.
 - **Version**: Release milestones with semantic versioning. Lifecycle: next → planned → released.
 
 **Ephemeral entities (deleted when session completes):**

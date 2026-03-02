@@ -21,8 +21,7 @@ use chrono::Utc;
 
 use super::format;
 use crate::models::{
-    CommitRef, CreateFeatureInput, Feature, FeatureId, FeatureState, TestingPolicy,
-    UpdateFeatureInput, VersionId,
+    CommitRef, CreateFeatureInput, Feature, FeatureId, FeatureState, UpdateFeatureInput, VersionId,
 };
 
 use super::spec::SpecConfig;
@@ -501,14 +500,15 @@ pub async fn start_feature(
         ))]));
     }
 
-    // Fetch project settings for configurable guidance levels
+    // Fetch project settings and default template
     let project_id: uuid::Uuid = feature_with_context.feature.project_id.into();
     let project_with_dirs = client.get_project(project_id).await.map_err(client_err)?;
+    let default_template = client
+        .get_default_template(project_id)
+        .await
+        .map_err(client_err)?;
     let config = SpecConfig {
-        detail_level: project_with_dirs.project.detail_level,
-        ac_level: project_with_dirs.project.ac_level,
-        ac_format: project_with_dirs.project.ac_format,
-        testing_policy: project_with_dirs.project.testing_policy,
+        default_template: default_template.as_ref().map(|t| t.content.clone()),
     };
 
     // Spec gate: analyze specification completeness
@@ -619,11 +619,13 @@ pub async fn start_feature(
         feature: feature_info,
         spec_status: spec_status.summary().to_string(),
         feature_tier: spec_status.tier.as_str().to_string(),
-        ac_level: config.ac_level.as_str().to_string(),
-        ac_format: config.ac_format.as_str().to_string(),
-        testing_policy: config.testing_policy.as_str().to_string(),
         testable_criteria_count: spec_status.testable_criteria_count,
-        detail_level: config.detail_level.as_str().to_string(),
+        spec_template: default_template
+            .as_ref()
+            .map(|t| crate::mcp::types::SpecTemplateInfo {
+                name: t.name.clone(),
+                content: t.content.clone(),
+            }),
     };
 
     let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
@@ -653,8 +655,8 @@ pub async fn start_feature(
         ));
     }
 
-    // If spec is too sparse or too verbose, prepend a warning text block
-    if spec_status.has_warnings(&config) {
+    // If spec has warnings (e.g., no testable criteria), prepend a warning text block
+    if spec_status.has_warnings() {
         let warning = spec_status.guidance(&config).unwrap_or_default();
         content.push(Content::text(format!("\u{26a0} {}", warning)));
     }
@@ -666,18 +668,11 @@ pub async fn start_feature(
 
     content.push(Content::text(yaml));
 
-    let completion_contract = if config.testing_policy != TestingPolicy::None {
-        "COMPLETION CONTRACT: After implementing this feature, you MUST:\n\
+    let completion_contract = "COMPLETION CONTRACT: After implementing this feature, you MUST:\n\
          1. prove_feature — record test evidence (command, structured results, evidence files)\n\
          2. update_feature — set `details` to describe what was actually built\n\
          3. complete_feature — provide summary of work + commit SHAs\n\
-         Skipping these steps leaves stale documentation that misleads future agents."
-    } else {
-        "COMPLETION CONTRACT: After implementing this feature, you MUST:\n\
-         1. update_feature — set `details` to describe what was actually built\n\
-         2. complete_feature — provide summary of work + commit SHAs\n\
-         Skipping these steps leaves stale documentation that misleads future agents."
-    };
+         Skipping these steps leaves stale documentation that misleads future agents.";
     content.push(Content::text(completion_contract));
 
     Ok(CallToolResult::success(content))
@@ -1029,14 +1024,15 @@ pub async fn get_next_feature(
 
     match result {
         Some(feature_ctx) => {
-            // Fetch project settings for configurable guidance levels
+            // Fetch project settings and default template
             let project_id: uuid::Uuid = feature_ctx.feature.project_id.into();
             let project_with_dirs = client.get_project(project_id).await.map_err(client_err)?;
+            let default_template = client
+                .get_default_template(project_id)
+                .await
+                .map_err(client_err)?;
             let config = SpecConfig {
-                detail_level: project_with_dirs.project.detail_level,
-                ac_level: project_with_dirs.project.ac_level,
-                ac_format: project_with_dirs.project.ac_format,
-                testing_policy: project_with_dirs.project.testing_policy,
+                default_template: default_template.as_ref().map(|t| t.content.clone()),
             };
 
             let is_root = feature_ctx.feature.parent_id.is_none();
@@ -1069,13 +1065,15 @@ pub async fn get_next_feature(
                 feature: info,
                 spec_status: spec_status.summary().to_string(),
                 feature_tier: spec_status.tier.as_str().to_string(),
-                ac_level: config.ac_level.as_str().to_string(),
-                ac_format: config.ac_format.as_str().to_string(),
-                testing_policy: config.testing_policy.as_str().to_string(),
                 testing_guidance: config.testing_guidance(spec_status.testable_criteria_count),
                 testable_criteria_count: spec_status.testable_criteria_count,
-                detail_level: config.detail_level.as_str().to_string(),
                 spec_guidance: spec_status.guidance(&config),
+                spec_template: default_template.as_ref().map(|t| {
+                    crate::mcp::types::SpecTemplateInfo {
+                        name: t.name.clone(),
+                        content: t.content.clone(),
+                    }
+                }),
             };
 
             let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;

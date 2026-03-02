@@ -537,6 +537,77 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /projects/{id}/templates:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Templates]
+      summary: List spec templates for a project
+      operationId: listTemplates
+      responses:
+        '200':
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpecTemplate'
+    post:
+      tags: [Templates]
+      summary: Create a spec template
+      operationId: createTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateInput'
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecTemplate'
+
+  /templates/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      tags: [Templates]
+      summary: Update a spec template
+      operationId: updateTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTemplateInput'
+      responses:
+        '200':
+          description: Template updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecTemplate'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Templates]
+      summary: Delete a spec template
+      operationId: deleteTemplate
+      responses:
+        '204':
+          description: Template deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /projects/{id}/versions:
     parameters:
       - $ref: '#/components/parameters/ProjectId'
@@ -1590,21 +1661,6 @@ components:
           enum: [backlog, now]
           default: backlog
           description: Where new features go by default. "backlog" leaves them unassigned, "now" assigns to the current version.
-        detail_level:
-          type: string
-          enum: [concise, standard, thorough]
-          default: standard
-          description: How detailed guidance should be for feature sets and project context.
-        ac_level:
-          type: string
-          enum: [concise, standard, thorough]
-          default: standard
-          description: How detailed guidance should be for leaf feature specifications.
-        ac_format:
-          type: string
-          enum: [checkbox, gherkin]
-          default: checkbox
-          description: Output format for acceptance criteria.
         testing_policy:
           type: string
           enum: [none, advisory, tdd]
@@ -1675,18 +1731,6 @@ components:
           type: string
           enum: [backlog, now]
           description: Where new features go by default. "backlog" leaves them unassigned, "now" assigns to the current version.
-        detail_level:
-          type: string
-          enum: [concise, standard, thorough]
-          description: How detailed guidance should be for feature sets and project context.
-        ac_level:
-          type: string
-          enum: [concise, standard, thorough]
-          description: How detailed guidance should be for leaf feature specifications.
-        ac_format:
-          type: string
-          enum: [checkbox, gherkin]
-          description: Output format for acceptance criteria.
         testing_policy:
           type: string
           enum: [none, advisory, tdd]
@@ -1695,6 +1739,66 @@ components:
           type: string
           nullable: true
           description: Test output adapter name (e.g., "cargo-test", "pytest"). Overrides auto-detection.
+
+    SpecTemplate:
+      type: object
+      required: [id, project_id, name, content, is_default, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: 'Default'
+        description:
+          type: string
+          nullable: true
+          example: 'General-purpose feature specification template'
+        content:
+          type: string
+          description: Markdown template content
+        is_default:
+          type: boolean
+          default: false
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateTemplateInput:
+      type: object
+      required: [name, content]
+      properties:
+        name:
+          type: string
+          example: 'Default'
+        description:
+          type: string
+          nullable: true
+        content:
+          type: string
+          description: Markdown template content
+        is_default:
+          type: boolean
+          default: false
+
+    UpdateTemplateInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        content:
+          type: string
+        is_default:
+          type: boolean
 
     ProjectDirectory:
       type: object
@@ -1772,21 +1876,6 @@ components:
           enum: [backlog, now]
           default: backlog
           description: Where new features go by default. "backlog" leaves them unassigned, "now" assigns to the current version.
-        detail_level:
-          type: string
-          enum: [concise, standard, thorough]
-          default: standard
-          description: How detailed guidance should be for feature sets and project context.
-        ac_level:
-          type: string
-          enum: [concise, standard, thorough]
-          default: standard
-          description: How detailed guidance should be for leaf feature specifications.
-        ac_format:
-          type: string
-          enum: [checkbox, gherkin]
-          default: checkbox
-          description: Output format for acceptance criteria.
         testing_policy:
           type: string
           enum: [none, advisory, tdd]

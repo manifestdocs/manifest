@@ -106,3 +106,8 @@ define_id!(
     /// Unique identifier for a [`Proof`](super::Proof).
     ProofId
 );
+
+define_id!(
+    /// Unique identifier for a [`SpecTemplate`](super::SpecTemplate).
+    TemplateId
+);

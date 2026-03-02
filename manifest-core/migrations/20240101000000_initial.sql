@@ -29,9 +29,6 @@ CREATE TABLE IF NOT EXISTS projects (
     owner_id TEXT,
     visibility TEXT NOT NULL DEFAULT 'private',
     default_feature_destination TEXT NOT NULL DEFAULT 'backlog',
-    detail_level TEXT NOT NULL DEFAULT 'standard',
-    ac_level TEXT NOT NULL DEFAULT 'standard',
-    ac_format TEXT NOT NULL DEFAULT 'checkbox',
     testing_policy TEXT NOT NULL DEFAULT 'advisory',
     test_adapter TEXT,
     key_prefix TEXT NOT NULL DEFAULT '',
@@ -42,6 +39,21 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE INDEX IF NOT EXISTS idx_projects_root_feature ON projects(root_feature_id);
 CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
+
+CREATE TABLE IF NOT EXISTS spec_templates (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    content TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CONSTRAINT fk_spec_templates_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    UNIQUE(project_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spec_templates_project ON spec_templates(project_id);
 
 CREATE TABLE IF NOT EXISTS project_directories (
     id TEXT PRIMARY KEY,

@@ -217,7 +217,7 @@ impl Database {
     /// Get all projects a user can access (via membership).
     pub async fn get_user_projects(&self, user_id: UserId) -> Result<Vec<Project>> {
         let rows = sqlx::query(
-            "SELECT p.id, p.slug, p.name, p.description, p.instructions, p.current_version_id, p.root_feature_id, p.default_feature_destination, p.detail_level, p.ac_level, p.ac_format, p.created_at, p.updated_at
+            "SELECT p.id, p.slug, p.name, p.description, p.instructions, p.current_version_id, p.root_feature_id, p.default_feature_destination, p.test_adapter, p.key_prefix, p.created_at, p.updated_at
              FROM projects p
              INNER JOIN project_memberships pm ON p.id = pm.project_id
              WHERE pm.user_id = $1
@@ -292,6 +292,22 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
+        // Create default spec template
+        let template_id = TemplateId::new();
+        sqlx::query(
+            "INSERT INTO spec_templates (id, project_id, name, description, content, is_default, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, 1, $6, $7)",
+        )
+        .bind(template_id.to_string())
+        .bind(project_id.to_string())
+        .bind("Default")
+        .bind("General-purpose feature specification template")
+        .bind(DEFAULT_TEMPLATE_CONTENT)
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
+
         tx.commit().await?;
 
         Ok(Project {
@@ -303,10 +319,6 @@ impl Database {
             current_version_id: None,
             root_feature_id: Some(root_feature_id),
             default_feature_destination: "backlog".to_string(),
-            detail_level: GuidanceLevel::Standard,
-            ac_level: GuidanceLevel::Standard,
-            ac_format: AcFormat::Checkbox,
-            testing_policy: TestingPolicy::Advisory,
             test_adapter: None,
             key_prefix,
             created_at: now,
