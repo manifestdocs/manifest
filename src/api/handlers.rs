@@ -7,6 +7,7 @@ mod portfolio;
 mod projects;
 mod proofs;
 mod settings;
+mod templates;
 mod versions;
 
 pub use analysis::*;
@@ -18,6 +19,7 @@ pub use portfolio::*;
 pub use projects::*;
 pub use proofs::*;
 pub use settings::*;
+pub use templates::*;
 pub use versions::*;
 
 use crate::db::ManifestError;

@@ -226,7 +226,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "BUILD: Record test evidence for a feature. Creates a proof record with the test command, exit code, structured test results, and evidence file paths. Can be called multiple times during TDD (red/green cycle) or once after tests pass. Proof is separate from completion — call this to record evidence, then call complete_feature when done.\n\nThe agent is the universal adapter: run any test framework, parse its output, and produce structured results. Include { name, suite, state, file, line, duration_ms, message } for each test for consistent rendering in both CLI and web UI.\n\nIn TDD mode (testing_policy: tdd), complete_feature REQUIRES a passing proof (exit_code 0). If tests are failing, you must fix the implementation and call prove_feature again — repeat until green. In advisory mode, proof is encouraged but not blocking."
+        description = "BUILD: Record test evidence for a feature. Creates a proof record with the test command, exit code, structured test results, and evidence file paths. Can be called multiple times during TDD (red/green cycle) or once after tests pass. Proof is separate from completion — call this to record evidence, then call complete_feature when done.\n\nThe agent is the universal adapter: run any test framework, parse its output, and produce structured results. Include { name, suite, state, file, line, duration_ms, message } for each test for consistent rendering in both CLI and web UI.\n\ncomplete_feature REQUIRES a passing proof (exit_code 0). If tests are failing, fix the implementation and call prove_feature again — repeat until green."
     )]
     async fn prove_feature(
         &self,
@@ -544,20 +544,19 @@ When creating new features:
    - The feature details ARE your specification
    - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
    - If desired_details is present, this is a CHANGE REQUEST: compare desired_details with details
-   - Follow the testing guidance in the start_feature response — it tells you your first step
-   - If testing_policy is "tdd": write failing tests first, call prove_feature (red), implement, call prove_feature again (green)
-   - If testing_policy is "advisory": write tests alongside implementation, call prove_feature when tests pass
+   - Follow the testing guidance in the start_feature response — it tells you your first step: write failing tests BEFORE implementation
+   - Write failing tests first, call prove_feature (red), implement, call prove_feature again (green)
    - prove_feature records test evidence separately from completion — call it whenever you have test results
    - Include structured test results: { name, suite, state, file, line, duration_ms, message }
    - The agent is the universal adapter: run any test framework, parse its output into the structured format
-   - ITERATE until green: if tests fail after implementation, fix the code and call prove_feature again. Repeat until all tests pass. In TDD mode, complete_feature will reject if the latest proof has a non-zero exit code.
+   - ITERATE until green: if tests fail after implementation, fix the code and call prove_feature again. Repeat until all tests pass. complete_feature will reject if the latest proof has a non-zero exit code.
    - As you implement, update_feature details to reflect what you actually built
 
 4. DOCUMENT — MANDATORY after implementing:
    a) call update_feature to set details to what was actually built
-   b) call prove_feature to record test evidence — do this in ALL modes, not just TDD
+   b) call prove_feature to record test evidence
    c) call complete_feature with a summary of what you did + commit SHAs
-   NOTE: In TDD mode, complete_feature REQUIRES a passing proof (exit_code 0). In advisory mode, complete_feature returns warnings if prove_feature was not called or if the spec was not updated — address these before considering the feature done.
+   NOTE: complete_feature REQUIRES a passing proof (exit_code 0). Fix failing tests and call prove_feature again before completing.
 
 Common sequence: list_projects → get_active_feature → start_feature → [implement] → prove_feature → update_feature (details) → complete_feature
 </workflow>
@@ -565,9 +564,9 @@ Common sequence: list_projects → get_active_feature → start_feature → [imp
 <critical_rules>
 ALWAYS call start_feature before implementing — it checks spec completeness and returns your specification.
 ALWAYS call update_feature after implementing — details must reflect what was actually built.
-ALWAYS call prove_feature before complete_feature — in all modes. TDD mode blocks completion without proof; advisory mode returns warnings.
+ALWAYS call prove_feature before complete_feature. complete_feature blocks completion without a passing proof.
 ALWAYS call complete_feature with summary and commit SHAs — this records history and marks the feature done.
-In TDD mode: iterate until tests pass. If prove_feature records failing tests, fix the implementation and call prove_feature again. Do NOT call complete_feature until the latest proof has exit_code 0 — the server will reject it.
+Iterate until tests pass: if prove_feature records failing tests, fix the implementation and call prove_feature again. Do NOT call complete_feature until the latest proof has exit_code 0 — the server will reject it.
 NEVER change a feature's target version during implementation.
 NEVER call start_feature or complete_feature on a feature set (▪ symbol, has children). These tools reject non-leaf features. Work on leaf children instead.
 If a feature is already in_progress, skip it — another agent claimed it. Use find_features with state='proposed' to find unclaimed work instead.
