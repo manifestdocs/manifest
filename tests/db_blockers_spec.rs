@@ -604,6 +604,21 @@ mod feature_claims {
             .await
             .unwrap();
 
+        // Create a passing proof — TDD always requires proof before completion
+        db.create_proof(CreateProofInput {
+            feature_id: feature.id,
+            history_id: None,
+            command: "cargo test".to_string(),
+            exit_code: 0,
+            output: None,
+            test_suites: None,
+            evidence: vec![],
+            commit_sha: None,
+            agent_type: Some("claude".to_string()),
+        })
+        .await
+        .unwrap();
+
         let result = db
             .complete_feature(feature.id, "Implemented the feature", &[])
             .await
@@ -647,6 +662,21 @@ mod feature_claims {
 
         // Subscribe before completing
         let mut rx = db.subscribe();
+
+        // Create a passing proof — TDD always requires proof before completion
+        db.create_proof(CreateProofInput {
+            feature_id: feature.id,
+            history_id: None,
+            command: "cargo test".to_string(),
+            exit_code: 0,
+            output: None,
+            test_suites: None,
+            evidence: vec![],
+            commit_sha: None,
+            agent_type: Some("codex".to_string()),
+        })
+        .await
+        .unwrap();
 
         let _result = db.complete_feature(feature.id, "Done", &[]).await.unwrap();
 
@@ -886,30 +916,9 @@ mod feature_claims {
 mod proof_gate {
     use super::*;
 
-    /// Helper: create a project with a given testing policy and a leaf feature under root.
-    async fn setup_with_policy(db: &Database, policy: TestingPolicy) -> (Project, Feature) {
+    /// Helper: create a project and a leaf feature under root.
+    async fn setup_provable_feature(db: &Database) -> (Project, Feature) {
         let project = create_test_project(db).await;
-        // Update project to the desired testing policy
-        db.update_project(
-            project.id,
-            UpdateProjectInput {
-                name: None,
-                slug: None,
-                description: None,
-                instructions: None,
-                current_version_id: None,
-                default_feature_destination: None,
-                detail_level: None,
-                ac_level: None,
-                ac_format: None,
-                testing_policy: Some(policy),
-                test_adapter: None,
-                key_prefix: None,
-            },
-        )
-        .await
-        .unwrap();
-
         let root = db
             .get_feature(project.root_feature_id.unwrap())
             .await
@@ -934,9 +943,9 @@ mod proof_gate {
     }
 
     #[tokio::test]
-    async fn complete_feature_with_tdd_policy_requires_passing_proof() {
+    async fn complete_feature_requires_passing_proof() {
         let db = setup().await;
-        let (_project, feature) = setup_with_policy(&db, TestingPolicy::Tdd).await;
+        let (_project, feature) = setup_provable_feature(&db).await;
 
         // Try to complete without any proof — should be rejected
         let result = db
@@ -949,9 +958,9 @@ mod proof_gate {
     }
 
     #[tokio::test]
-    async fn complete_feature_with_tdd_policy_rejects_failing_proof() {
+    async fn complete_feature_rejects_failing_proof() {
         let db = setup().await;
-        let (_project, feature) = setup_with_policy(&db, TestingPolicy::Tdd).await;
+        let (_project, feature) = setup_provable_feature(&db).await;
 
         // Create a failing proof (exit_code != 0)
         db.create_proof(CreateProofInput {
@@ -979,9 +988,9 @@ mod proof_gate {
     }
 
     #[tokio::test]
-    async fn complete_feature_with_tdd_policy_succeeds_with_passing_proof() {
+    async fn complete_feature_succeeds_with_passing_proof() {
         let db = setup().await;
-        let (_project, feature) = setup_with_policy(&db, TestingPolicy::Tdd).await;
+        let (_project, feature) = setup_provable_feature(&db).await;
 
         // Create a passing proof (exit_code == 0)
         db.create_proof(CreateProofInput {
@@ -1006,37 +1015,5 @@ mod proof_gate {
 
         assert_eq!(result.feature.state, FeatureState::Implemented);
         assert_eq!(result.history.details.summary, "Done with passing tests");
-    }
-
-    #[tokio::test]
-    async fn complete_feature_with_advisory_policy_succeeds_without_proof() {
-        let db = setup().await;
-        let (_project, feature) = setup_with_policy(&db, TestingPolicy::Advisory).await;
-
-        // Complete without proof — advisory should not block (but should warn)
-        let result = db
-            .complete_feature(feature.id, "Done without proof (advisory)", &[])
-            .await
-            .unwrap();
-
-        assert_eq!(result.feature.state, FeatureState::Implemented);
-        assert!(
-            !result.warnings.is_empty(),
-            "advisory should produce warnings when proof is missing"
-        );
-    }
-
-    #[tokio::test]
-    async fn complete_feature_with_none_policy_succeeds_without_proof() {
-        let db = setup().await;
-        let (_project, feature) = setup_with_policy(&db, TestingPolicy::None).await;
-
-        // Complete without proof — none policy should not block or warn about proof
-        let result = db
-            .complete_feature(feature.id, "Done without proof (none)", &[])
-            .await
-            .unwrap();
-
-        assert_eq!(result.feature.state, FeatureState::Implemented);
     }
 }

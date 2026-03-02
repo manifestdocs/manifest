@@ -217,48 +217,6 @@ mod start_feature_tool {
     }
 
     #[tokio::test]
-    async fn none_testing_policy_omits_prove_feature_from_contract() {
-        let (server, client) = setup().await;
-        let project = create_project(&server).await;
-        let pid: Uuid = project.id.into();
-
-        // Set testing_policy to none
-        server
-            .put(&format!("/api/v1/projects/{}", pid))
-            .json(&serde_json::json!({ "testing_policy": "none" }))
-            .await;
-
-        let feature = create_feature(&server, pid, "User Login", Some(GOOD_SPEC)).await;
-        let fid: Uuid = feature.id.into();
-
-        let result = features::start_feature(
-            &client,
-            StartFeatureRequest {
-                feature_id: fid.to_string(),
-                agent_type: "claude".to_string(),
-                force: false,
-                claim_metadata: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        // Contract should NOT mention prove_feature
-        let texts = text_contents(&result);
-        let contract = texts
-            .iter()
-            .find(|t| t.contains("COMPLETION CONTRACT"))
-            .expect("completion contract missing");
-        assert!(!contract.contains("prove_feature"));
-
-        // No standalone testing guidance block
-        let has_testing_block = texts
-            .iter()
-            .any(|t| !t.contains("COMPLETION CONTRACT") && t.contains("prove_feature"));
-        assert!(!has_testing_block);
-    }
-
-    #[tokio::test]
     async fn tdd_policy_includes_required_before_guidance() {
         let (server, client) = setup().await;
         let project = create_project(&server).await;
@@ -402,6 +360,35 @@ mod start_feature_tool {
         assert!(has_text_containing(&result, "feature set"));
         assert!(has_text_containing(&result, "children"));
     }
+
+    #[tokio::test]
+    async fn warns_when_spec_has_no_testable_criteria() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+        // Spec with prose but no checkbox acceptance criteria
+        let spec = "As a user, I can log in so that I can access my account.\n\n\
+                     The system should authenticate users against the database and manage \
+                     sessions correctly with proper error handling throughout.";
+        let feature = create_feature(&server, pid, "Login", Some(spec)).await;
+        let fid: Uuid = feature.id.into();
+
+        let result = features::start_feature(
+            &client,
+            StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Should succeed but warn about missing testable criteria
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(has_text_containing(&result, "No testable criteria"));
+    }
 }
 
 mod complete_feature_tool {
@@ -424,6 +411,23 @@ mod complete_feature_tool {
                 agent_type: "claude".to_string(),
                 force: false,
                 claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Prove first
+        features::prove_feature(
+            &client,
+            manifest::mcp::types::ProveFeatureRequest {
+                feature_id: fid.to_string(),
+                command: "cargo test".to_string(),
+                exit_code: 0,
+                output: None,
+                test_suites: None,
+                tests: None,
+                evidence: vec![],
+                commit_sha: None,
             },
         )
         .await
@@ -473,6 +477,23 @@ mod complete_feature_tool {
         .await
         .unwrap();
 
+        // Prove first
+        features::prove_feature(
+            &client,
+            manifest::mcp::types::ProveFeatureRequest {
+                feature_id: fid.to_string(),
+                command: "cargo test".to_string(),
+                exit_code: 0,
+                output: None,
+                test_suites: None,
+                tests: None,
+                evidence: vec![],
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+
         let result = features::complete_feature(
             &client,
             CompleteFeatureRequest {
@@ -484,8 +505,8 @@ mod complete_feature_tool {
         .await
         .unwrap();
 
-        // Without prove_feature called, should say "Verification: none"
-        assert!(has_text_containing(&result, "Verification: none"));
+        // Should succeed and include verification status since proof was provided
+        assert!(has_text_containing(&result, "Verification: exit code 0"));
     }
 
     #[tokio::test]
@@ -508,6 +529,23 @@ mod complete_feature_tool {
         .await
         .unwrap();
 
+        // Prove first
+        features::prove_feature(
+            &client,
+            manifest::mcp::types::ProveFeatureRequest {
+                feature_id: fid.to_string(),
+                command: "cargo test".to_string(),
+                exit_code: 0,
+                output: None,
+                test_suites: None,
+                tests: None,
+                evidence: vec![],
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+
         let result = features::complete_feature(
             &client,
             CompleteFeatureRequest {
@@ -521,6 +559,151 @@ mod complete_feature_tool {
 
         // JSON block should show implemented state
         assert!(has_text_containing(&result, "implemented"));
+    }
+
+    #[tokio::test]
+    async fn blocks_completion_without_proof() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+        let feature = create_feature(&server, pid, "Unproven Feature", Some(GOOD_SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        // Start but do NOT call prove_feature
+        features::start_feature(
+            &client,
+            StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Attempt to complete without proof — should fail
+        let result = features::complete_feature(
+            &client,
+            CompleteFeatureRequest {
+                feature_id: fid.to_string(),
+                summary: "Done without tests".to_string(),
+                commits: vec![],
+            },
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "complete_feature should fail without proof"
+        );
+    }
+
+    #[tokio::test]
+    async fn blocks_completion_with_failing_proof() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+        let feature = create_feature(&server, pid, "Failing Feature", Some(GOOD_SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        features::start_feature(
+            &client,
+            StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Record a failing proof (exit_code != 0)
+        features::prove_feature(
+            &client,
+            manifest::mcp::types::ProveFeatureRequest {
+                feature_id: fid.to_string(),
+                command: "cargo test".to_string(),
+                exit_code: 1,
+                output: Some("test failed".to_string()),
+                test_suites: None,
+                tests: None,
+                evidence: vec![],
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Attempt to complete with failing proof — should fail
+        let result = features::complete_feature(
+            &client,
+            CompleteFeatureRequest {
+                feature_id: fid.to_string(),
+                summary: "Done with failing tests".to_string(),
+                commits: vec![],
+            },
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "complete_feature should fail with failing proof"
+        );
+    }
+
+    #[tokio::test]
+    async fn warns_when_spec_not_updated_since_claiming() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+        let feature = create_feature(&server, pid, "Stale Spec", Some(GOOD_SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        features::start_feature(
+            &client,
+            StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Prove (passing) but do NOT update the feature spec
+        features::prove_feature(
+            &client,
+            manifest::mcp::types::ProveFeatureRequest {
+                feature_id: fid.to_string(),
+                command: "cargo test".to_string(),
+                exit_code: 0,
+                output: None,
+                test_suites: None,
+                tests: None,
+                evidence: vec![],
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let result = features::complete_feature(
+            &client,
+            CompleteFeatureRequest {
+                feature_id: fid.to_string(),
+                summary: "Done".to_string(),
+                commits: vec![],
+            },
+        )
+        .await
+        .unwrap();
+
+        // Should succeed but include warning about stale spec
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(has_text_containing(&result, "spec not updated"));
     }
 }
 
@@ -811,6 +994,23 @@ mod get_feature_tool {
                 agent_type: "claude".to_string(),
                 force: false,
                 claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Prove First
+        features::prove_feature(
+            &client,
+            manifest::mcp::types::ProveFeatureRequest {
+                feature_id: fid.to_string(),
+                command: "cargo test".to_string(),
+                exit_code: 0,
+                output: None,
+                test_suites: None,
+                tests: None,
+                evidence: vec![],
+                commit_sha: None,
             },
         )
         .await
