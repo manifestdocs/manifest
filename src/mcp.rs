@@ -3,9 +3,9 @@
 pub mod client;
 pub mod git;
 mod server;
-mod tools;
+pub mod tools;
 mod tree_render;
-mod types;
+pub mod types;
 pub mod version_check;
 
 pub use client::ManifestClient;

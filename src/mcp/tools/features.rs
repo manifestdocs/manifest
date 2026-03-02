@@ -21,7 +21,8 @@ use chrono::Utc;
 
 use super::format;
 use crate::models::{
-    CommitRef, CreateFeatureInput, Feature, FeatureId, FeatureState, UpdateFeatureInput, VersionId,
+    CommitRef, CreateFeatureInput, Feature, FeatureId, FeatureState, TestingPolicy,
+    UpdateFeatureInput, VersionId,
 };
 
 use super::spec::SpecConfig;
@@ -665,13 +666,19 @@ pub async fn start_feature(
 
     content.push(Content::text(yaml));
 
-    content.push(Content::text(
+    let completion_contract = if config.testing_policy != TestingPolicy::None {
         "COMPLETION CONTRACT: After implementing this feature, you MUST:\n\
          1. prove_feature — record test evidence (command, structured results, evidence files)\n\
          2. update_feature — set `details` to describe what was actually built\n\
          3. complete_feature — provide summary of work + commit SHAs\n\
-         Skipping these steps leaves stale documentation that misleads future agents.",
-    ));
+         Skipping these steps leaves stale documentation that misleads future agents."
+    } else {
+        "COMPLETION CONTRACT: After implementing this feature, you MUST:\n\
+         1. update_feature — set `details` to describe what was actually built\n\
+         2. complete_feature — provide summary of work + commit SHAs\n\
+         Skipping these steps leaves stale documentation that misleads future agents."
+    };
+    content.push(Content::text(completion_contract));
 
     Ok(CallToolResult::success(content))
 }
