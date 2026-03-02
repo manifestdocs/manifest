@@ -187,7 +187,7 @@ fn generate_feature_hints(
 /// Combines:
 /// - Static code analysis (modules, directories, frameworks)
 /// - Git history analysis (feat: commits, deletions)
-/// - Optional RocketIndex symbols
+/// - Optional external symbol data
 ///
 /// Returns the markdown document and statistics.
 pub fn generate_feature_tree(

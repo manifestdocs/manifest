@@ -3,7 +3,7 @@
 //! Synthesizes features from multiple sources:
 //! - Existing project analysis (modules, directories, hints)
 //! - Git history (feat: commits, deletions)
-//! - RocketIndex symbols (if available)
+//! - External symbol data (if available)
 
 use std::collections::HashMap;
 
@@ -42,7 +42,7 @@ pub struct Chapter {
 pub enum ChapterSource {
     /// Detected from module structure (src/api/, etc.)
     Module,
-    /// Detected from hub symbols (RocketIndex)
+    /// Detected from hub symbols (external indexer)
     Symbol,
     /// Inferred from framework (axum → HTTP API)
     Framework,
@@ -151,7 +151,7 @@ pub struct TreeStats {
     pub commits_analyzed: u32,
 }
 
-/// RocketIndex symbol data (optional enrichment).
+/// External symbol data for optional enrichment.
 #[derive(Debug, Clone)]
 pub struct SymbolData {
     /// Symbol name.
@@ -278,7 +278,7 @@ pub fn extract_features(
         }
     }
 
-    // 6. Enrich with RocketIndex symbols if available
+    // 6. Enrich with external symbols if available
     if let Some(symbols) = symbols {
         enrich_with_symbols(&mut chapters, symbols, &mut warnings);
     }
@@ -482,7 +482,7 @@ fn titlecase(s: &str) -> String {
     result
 }
 
-/// Enrich chapters with RocketIndex symbol data.
+/// Enrich chapters with external symbol data.
 fn enrich_with_symbols(
     chapters: &mut [Chapter],
     symbols: &[SymbolData],
@@ -492,7 +492,7 @@ fn enrich_with_symbols(
     let hub_symbols: Vec<_> = symbols.iter().filter(|s| s.reference_count >= 5).collect();
 
     if hub_symbols.is_empty() {
-        warnings.push("No hub symbols found from RocketIndex".to_string());
+        warnings.push("No hub symbols found in symbol data".to_string());
         return;
     }
 

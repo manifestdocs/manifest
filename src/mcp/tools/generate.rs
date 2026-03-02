@@ -62,12 +62,11 @@ pub async fn generate_feature_tree(
         .to_string();
 
     // Generate the feature tree
-    // Note: RocketIndex integration would be added here in the future
     let (document, stats) = analysis::generate_feature_tree(
         path,
         &project_name,
         req.since.as_deref(),
-        None, // No RocketIndex symbols for now
+        None, // No external symbol data
     );
 
     let response = GenerateFeatureTreeResponse {
