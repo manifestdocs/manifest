@@ -295,10 +295,21 @@ pub async fn plan(
         if count == 1 { "" } else { "s" }
     );
 
-    Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(json),
-    ]))
+    let mut blocks = vec![Content::text(summary), Content::text(json)];
+
+    if let Some(template) = client
+        .get_default_template(req.project_id)
+        .await
+        .ok()
+        .flatten()
+    {
+        blocks.push(Content::text(format!(
+            "\u{1f4dd} Spec Template — leaf feature details should follow this structure:\n\n{}",
+            template.content
+        )));
+    }
+
+    Ok(CallToolResult::success(blocks))
 }
 
 /// Create a feature within a project.
@@ -316,9 +327,12 @@ pub async fn create_feature(
         )
     })?;
 
+    let has_details = req.details.is_some();
+    let project_id = req.project_id;
+
     let feature = client
         .create_feature(
-            req.project_id,
+            project_id,
             &CreateFeatureInput {
                 id: None,
                 parent_id: req.parent_id.map(FeatureId::from),
@@ -338,10 +352,18 @@ pub async fn create_feature(
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(json),
-    ]))
+    let mut blocks = vec![Content::text(summary), Content::text(json)];
+
+    if !has_details {
+        if let Some(template) = client.get_default_template(project_id).await.ok().flatten() {
+            blocks.push(Content::text(format!(
+                "This feature has no specification. Use update_feature to add details following this template:\n\n{}",
+                template.content
+            )));
+        }
+    }
+
+    Ok(CallToolResult::success(blocks))
 }
 
 /// Update any field on a feature.
@@ -380,6 +402,8 @@ pub async fn update_feature(
         req.target_version_id.map(|v| Some(VersionId::from(v))) // Set to provided value, or None if not provided
     };
 
+    let has_details = req.details.is_some();
+
     let input = UpdateFeatureInput {
         parent_id: req.parent_id.map(FeatureId::from),
         title: req.title,
@@ -405,10 +429,19 @@ pub async fn update_feature(
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(json),
-    ]))
+    let mut blocks = vec![Content::text(summary), Content::text(json)];
+
+    if has_details {
+        let project_id: uuid::Uuid = feature.project_id.into();
+        if let Some(template) = client.get_default_template(project_id).await.ok().flatten() {
+            blocks.push(Content::text(format!(
+                "\u{1f4dd} Spec Template — verify details follow this project's template:\n\n{}",
+                template.content
+            )));
+        }
+    }
+
+    Ok(CallToolResult::success(blocks))
 }
 
 /// Permanently delete a feature and its descendants.
