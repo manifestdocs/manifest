@@ -144,26 +144,30 @@ pub async fn init_project(
             }
         }
     } else {
-        // Create new project from analysis
-        let name = analysis.name.clone().unwrap_or_else(|| {
-            // Derive from directory name
-            std::path::Path::new(&req.directory_path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("Untitled")
-                .to_string()
-        });
+        // Check if directory is already linked to a project
+        if let Ok(pwd) = client.get_project_by_directory(&req.directory_path).await {
+            pwd.project
+        } else {
+            // Create new project from analysis
+            let name = analysis.name.clone().unwrap_or_else(|| {
+                std::path::Path::new(&req.directory_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Untitled")
+                    .to_string()
+            });
 
-        client
-            .create_project(&CreateProjectInput {
-                name,
-                slug: None,
-                description: analysis.description.clone(),
-                instructions: None,
-                key_prefix: None,
-            })
-            .await
-            .map_err(client_err)?
+            client
+                .create_project(&CreateProjectInput {
+                    name,
+                    slug: None,
+                    description: analysis.description.clone(),
+                    instructions: None,
+                    key_prefix: None,
+                })
+                .await
+                .map_err(client_err)?
+        }
     };
 
     // Add directory to project

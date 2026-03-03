@@ -169,10 +169,11 @@ impl SpecStatus {
 
 /// Count testable criteria in a spec's text.
 ///
-/// Detects three patterns:
+/// Detects four patterns:
 /// 1. Gherkin `Given`/`When`/`Then` lines — each `Then` counts as one criterion
-/// 2. Markdown checkbox items with assertion language (returns, creates, rejects, etc.)
-/// 3. Numbered list items with measurable outcomes
+/// 2. Markdown checkbox items (`- [ ]` / `- [x]`) — always counted as testable
+/// 3. Numbered list items with assertion verbs (returns, creates, etc.)
+/// 4. Plain dash list items with assertion verbs
 ///
 /// Returns the total count of testable criteria found.
 pub fn count_testable_criteria(text: &str) -> usize {
@@ -227,11 +228,9 @@ pub fn count_testable_criteria(text: &str) -> usize {
             continue;
         }
 
-        // Pattern 2: Checkbox items with assertion verbs
-        // Matches: - [ ] returns 200, - [x] creates a record
-        if (trimmed.starts_with("- [ ] ") || trimmed.starts_with("- [x] "))
-            && assertion_verbs.iter().any(|v| lower.contains(v))
-        {
+        // Pattern 2: Checkbox items — always testable criteria
+        // If someone writes a checkbox, they intend it as a verifiable criterion.
+        if trimmed.starts_with("- [ ] ") || trimmed.starts_with("- [x] ") {
             count += 1;
             continue;
         }
@@ -561,6 +560,19 @@ mod tests {
                      - Use bcrypt for hashing\n\
                      - [ ] rejects expired tokens";
         assert_eq!(count_testable_criteria(spec), 2);
+    }
+
+    #[test]
+    fn checkbox_items_always_testable_regardless_of_verb() {
+        let spec = "- [ ] POST /pets creates a pet with name, status, category, tags, photo_urls\n\
+                     - [ ] PUT /pets/:id replaces all pet fields\n\
+                     - [ ] PATCH /pets/:id updates only name and/or status\n\
+                     - [ ] GET /pets/:id returns pet with nested category and tags\n\
+                     - [ ] DELETE /pets/:id removes the pet (204)\n\
+                     - [ ] Validation: name required, status must be valid enum\n\
+                     - [ ] 422 returned with error details on validation failure\n\
+                     - [ ] write:pets scope required for mutations, read:pets for reads";
+        assert_eq!(count_testable_criteria(spec), 8);
     }
 
     #[test]

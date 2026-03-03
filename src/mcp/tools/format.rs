@@ -65,11 +65,11 @@ pub fn short_id(uuid: &uuid::Uuid) -> String {
 }
 
 /// Format a human-friendly display ID like "MAN-42".
-/// Falls back to short UUID prefix if feature_number is not available.
+/// Falls back to short UUID prefix if feature_number or key_prefix is not available.
 pub fn display_id(feature_number: Option<i32>, key_prefix: &str, uuid: &uuid::Uuid) -> String {
     match feature_number {
-        Some(num) => format!("{}-{}", key_prefix, num),
-        None => short_id(uuid),
+        Some(num) if !key_prefix.is_empty() => format!("{}-{}", key_prefix, num),
+        _ => short_id(uuid),
     }
 }
 
