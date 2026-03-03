@@ -1,4 +1,4 @@
-/// Built-in Lua adapter scripts, embedded at compile time.
+//! Built-in Lua adapter scripts, embedded at compile time.
 
 const CARGO_TEST: &str = include_str!("cargo_test.lua");
 const PYTEST: &str = include_str!("pytest.lua");
