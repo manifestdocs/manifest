@@ -1592,6 +1592,13 @@ impl Database {
             return Err(ManifestError::invalid_state("Cannot complete a non-leaf feature").into());
         }
 
+        // Hard gate: require specification (details)
+        if feature.details.as_ref().is_none_or(|d| d.trim().is_empty()) {
+            return Err(ManifestError::invalid_state(
+                "Cannot complete feature: no specification. Call update_feature to add details describing what was built."
+            ).into());
+        }
+
         // Check proof requirements based on project testing policy
         let project = self
             .get_project(feature.project_id)

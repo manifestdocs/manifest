@@ -380,7 +380,7 @@ pub async fn update_feature(
 
     // Parse state if provided
     let state = if let Some(ref state_str) = req.state {
-        Some(FeatureState::from_str(state_str).map_err(|_| {
+        let parsed = FeatureState::from_str(state_str).map_err(|_| {
             McpError::invalid_params(
                 format!(
                     "Invalid state '{}'. Must be: proposed, blocked, in_progress, implemented, or archived",
@@ -388,7 +388,20 @@ pub async fn update_feature(
                 ),
                 None,
             )
-        })?)
+        })?;
+
+        // Block setting state to 'implemented' via update_feature — use complete_feature instead.
+        // complete_feature enforces proof requirements, records history, and clears claims.
+        if parsed == FeatureState::Implemented {
+            return Err(McpError::invalid_params(
+                "Cannot set state to 'implemented' via update_feature. Use complete_feature instead \
+                 — it records history, enforces proof requirements, and clears claims."
+                    .to_string(),
+                None,
+            ));
+        }
+
+        Some(parsed)
     } else {
         None
     };
