@@ -487,7 +487,7 @@ impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             server_info: rmcp::model::Implementation {
-                name: "manifest".into(),
+                name: "mcp".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
                 title: None,
                 icons: None,
