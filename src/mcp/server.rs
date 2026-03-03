@@ -202,16 +202,17 @@ impl McpServer {
             see existing structure — extend it rather than replacing. \
             Parent features should have shared context in details \
             (architecture, patterns, constraints); leaf features \
-            should have concise specifications. Always provide \
-            target_version_id so features land in a release — call \
-            list_versions first or create_version if none exist. \
-            Omitting it sends features to the Backlog. With \
-            confirm=false, returns a proposal. With confirm=true, \
-            creates the features. IMPORTANT: After confirming, use \
+            should have concise specifications. target_version_id \
+            assigns ALL features to one version — omit it to send \
+            features to the Backlog, then use set_feature_version to \
+            distribute features across multiple versions (0.1.0, \
+            0.2.0, etc.) based on delivery phase. With confirm=false, \
+            returns a proposal. With confirm=true, creates the \
+            features. IMPORTANT: After confirming, (1) use \
             update_feature to distill the root feature — replace the \
-            full PRD with high-level project context (tech stack, \
-            conventions, architecture) since detailed content now \
-            lives in child features.")]
+            full PRD with high-level project context, and (2) create \
+            versions with create_version and assign features to them \
+            with set_feature_version.")]
     async fn plan(
         &self,
         params: Parameters<PlanFeaturesRequest>,
@@ -623,11 +624,17 @@ When asked to break down, plan, or decompose a project into features:
 1. Call get_project_instructions to read the root feature content
 2. Call render_feature_tree to see existing features — plan ADDITIONS to the tree, not a replacement
 3. If the root has content (PRD, spec, or description), use that as input — do NOT explore the filesystem or ask the user what the project is about
-4. Call list_versions to find the target version (use the "next" unreleased version)
-5. Design the feature tree, merging into existing groups where possible
-6. Call plan with confirm=false to propose
-7. After user confirms, call plan with confirm=true
-8. Distill the root — replace the verbatim PRD with high-level project context using update_feature
+4. Design the feature tree, merging into existing groups where possible
+5. Call plan with confirm=false to propose the tree structure
+6. After user confirms, call plan with confirm=true
+7. Distill the root — replace the verbatim PRD with high-level project context using update_feature
+8. Create versions and distribute features across them:
+   a) Create semantic versions with create_version (e.g., 0.1.0, 0.2.0, 0.3.0)
+   b) Assign features to versions using set_feature_version — group by delivery phase:
+      - 0.1.0: foundational features (setup, core models, basic CRUD)
+      - 0.2.0: features that build on 0.1.0 (validation, relationships, business logic)
+      - 0.3.0+: advanced features (optimization, integrations, polish)
+   c) Each version should be a shippable increment — avoid splitting tightly-coupled features across versions
 </planning>
 
 <organization>
