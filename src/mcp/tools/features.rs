@@ -616,16 +616,22 @@ pub async fn start_feature(
         .or_else(|| project_with_dirs.directories.first());
     if let Some(dir) = primary_dir {
         if crate::mcp::git::is_git_repo(&dir.path) {
-            let slug = crate::mcp::git::slugify(&feature_with_context.feature.title);
-            let branch_name = format!("feature/{slug}");
-            match crate::mcp::git::create_and_checkout(&dir.path, &branch_name) {
-                Ok(()) => {
-                    branch_message =
-                        Some(format!("Branch: created and switched to `{branch_name}`"));
+            if crate::mcp::git::has_commits(&dir.path) {
+                let slug = crate::mcp::git::slugify(&feature_with_context.feature.title);
+                let branch_name = format!("feature/{slug}");
+                match crate::mcp::git::create_and_checkout(&dir.path, &branch_name) {
+                    Ok(()) => {
+                        branch_message =
+                            Some(format!("Branch: created and switched to `{branch_name}`"));
+                    }
+                    Err(e) => {
+                        branch_message = Some(format!("warning: could not create branch — {e}"));
+                    }
                 }
-                Err(e) => {
-                    branch_message = Some(format!("warning: could not create branch — {e}"));
-                }
+            } else {
+                branch_message = Some(
+                    "Branch: skipped — no commits yet. Make an initial commit first, then branches will be created automatically.".to_string()
+                );
             }
         }
     }

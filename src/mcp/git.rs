@@ -16,6 +16,19 @@ pub fn is_git_repo(dir: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Check if a git repo has at least one commit (HEAD exists).
+///
+/// Returns false for freshly-initialized repos with no commits yet.
+/// Branch operations require at least one commit to work reliably.
+pub fn has_commits(dir: &str) -> bool {
+    Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Get the current branch name.
 pub fn current_branch(dir: &str) -> Result<String, String> {
     run_git(dir, &["rev-parse", "--abbrev-ref", "HEAD"])

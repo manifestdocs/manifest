@@ -661,6 +661,8 @@ When creating new features:
    - If the feature has no details, start_feature will refuse — write a spec first using update_feature
    - If details are very sparse, you will see a warning — flesh out the spec before implementing
 
+   **Greenfield projects**: For new codebases with no existing code, scaffold the project and make an initial commit BEFORE calling start_feature. Scaffolders like `rails new`, `create-react-app`, or `cargo init` often run `git init` internally, which can interfere with branches. Sequence: scaffold → initial commit → start_feature → implement.
+
 3. BUILD — implement against the spec:
    - The feature details ARE your specification
    - Check breadcrumb for parent context (architectural decisions, conventions, constraints)
