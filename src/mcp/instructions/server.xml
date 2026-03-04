@@ -178,6 +178,9 @@ When creating new features:
    - ITERATE until green: if tests fail after implementation, fix the code and call prove_feature again. Repeat
      until all tests pass. complete_feature will reject if the latest proof has a non-zero exit code.
    - As you implement, update_feature details to reflect what you actually built
+   - **Live progress**: When the spec has acceptance criteria checkboxes (`- [ ]`), tick them off
+     individually as you complete each one (`- [x]`). Each update_feature call triggers a real-time
+     UI refresh, so the user sees progress as it happens.
 
 4. DOCUMENT — MANDATORY after implementing:
    a) call update_feature to set details to what was actually built

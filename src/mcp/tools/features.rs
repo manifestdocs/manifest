@@ -718,9 +718,12 @@ pub async fn start_feature(
 
     let completion_contract = "COMPLETION CONTRACT: After implementing this feature, you MUST:\n\
          1. prove_feature — record test evidence (command, structured results, evidence files)\n\
-         2. update_feature — set `details` to describe what was actually built\n\
+         2. update_feature — set `details` to describe what was actually built \
+            (if you haven't already been ticking off acceptance criteria checkboxes during implementation)\n\
          3. complete_feature — provide summary of work + commit SHAs\n\
-         Skipping these steps leaves stale documentation that misleads future agents.";
+         Skipping these steps leaves stale documentation that misleads future agents.\n\n\
+         TIP: For the best user experience, call update_feature after completing each acceptance \
+         criterion to tick its checkbox (- [ ] → - [x]). This shows real-time progress in the UI.";
     content.push(Content::text(completion_contract));
 
     Ok(CallToolResult::success(content))
