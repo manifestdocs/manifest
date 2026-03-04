@@ -1,0 +1,3 @@
+SETUP: Initialize a project from a directory. Analyzes codebase, creates project (or links to existing), and returns
+analysis. Typical setup sequence: init_project → generate_feature_tree (existing codebases) → plan (decompose PRD)
+→ update_feature (distill root with project context) → create_version (define milestones).

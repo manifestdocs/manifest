@@ -1,4 +1,8 @@
 //! ASCII tree rendering for feature hierarchies.
+//!
+//! Converts a [`FeatureTreeNode`] tree into box-drawing ASCII art with Unicode
+//! state symbols (◇ proposed, ○ in progress, ● implemented, ✗ archived).
+//! Supports depth limiting for large trees.
 
 use crate::models::{FeatureState, FeatureTreeNode};
 

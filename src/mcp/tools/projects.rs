@@ -1,3 +1,9 @@
+//! Project management tools for AI agents.
+//!
+//! Provides project discovery, initialization, directory association, history
+//! retrieval, and project instructions. When filtered by `directory_path`,
+//! returns context for the agent's current working directory.
+
 use std::collections::HashSet;
 use std::str::FromStr;
 

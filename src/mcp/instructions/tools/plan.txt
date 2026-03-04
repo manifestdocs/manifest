@@ -1,0 +1,8 @@
+SETUP: Decompose a PRD or vision into a feature tree. BEFORE calling, use render_feature_tree to see existing
+structure; extend it rather than replacing. Parent features should have shared context in details (architecture,
+patterns, constraints); leaf features should have concise specifications. target_version_id assigns ALL features to
+one version; omit it to send features to the Backlog, then use set_feature_version to distribute features across
+multiple versions (0.1.0, 0.2.0, etc.) based on delivery phase. With confirm=false, returns a proposal. With
+confirm=true, creates the features. IMPORTANT: After confirming, (1) use update_feature to distill the root
+feature, replacing the full PRD with high-level project context, and (2) create versions with create_version and
+assign features to them with set_feature_version.

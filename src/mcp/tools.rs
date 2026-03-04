@@ -1,3 +1,9 @@
+//! MCP tool implementations grouped by resource.
+//!
+//! Each submodule provides the tool functions that [`McpServer`](super::server::McpServer)
+//! dispatches to. The [`client_err`] helper converts [`ClientError`] variants
+//! into MCP-protocol error codes.
+
 use crate::mcp::client::ClientError;
 use rmcp::ErrorData as McpError;
 
@@ -5,7 +11,6 @@ pub mod context;
 pub mod features;
 pub mod format;
 pub mod generate;
-pub mod memories;
 pub mod projects;
 pub mod spec;
 pub mod sync;

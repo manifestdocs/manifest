@@ -330,59 +330,21 @@ pub(crate) fn row_to_project_history_entry(row: &AnyRow) -> Result<ProjectHistor
     })
 }
 
-/// Map a database row to a [`User`].
-pub(crate) fn row_to_user(row: &AnyRow) -> Result<User> {
-    Ok(User {
-        id: parse_id(row.get("id"))?,
-        email: row.get("email"),
-        email_verified_at: row
-            .get::<Option<String>, _>("email_verified_at")
-            .map(parse_datetime)
-            .transpose()?,
-        display_name: row.get("display_name"),
-        avatar_url: row.get("avatar_url"),
-        created_at: parse_datetime(row.get("created_at"))?,
-        updated_at: parse_datetime(row.get("updated_at"))?,
-    })
-}
-
-/// Map a database row to an [`OAuthIdentity`].
-pub(crate) fn row_to_oauth_identity(row: &AnyRow) -> Result<OAuthIdentity> {
-    Ok(OAuthIdentity {
-        id: parse_id(row.get("id"))?,
-        user_id: parse_id(row.get("user_id"))?,
-        provider: row.get("provider"),
-        provider_user_id: row.get("provider_user_id"),
-        provider_email: row.get("provider_email"),
-        access_token: row.get("access_token"),
-        refresh_token: row.get("refresh_token"),
-        token_expires_at: row
-            .get::<Option<String>, _>("token_expires_at")
-            .map(parse_datetime)
-            .transpose()?,
-        created_at: parse_datetime(row.get("created_at"))?,
-    })
-}
-
 /// Map a database row to a [`Proof`].
 ///
 /// The `tests` column may contain either the new `Vec<TestSuite>` format or
 /// the legacy flat `Vec<FlatTestResult>` format. Try new format first, then
 /// fall back to flat and group into suites.
 pub(crate) fn row_to_proof(row: &AnyRow) -> Result<Proof> {
-    let test_suites: Option<Vec<TestSuite>> = row
-        .get::<Option<String>, _>("tests")
-        .and_then(|s| {
-            // Try new TestSuite format first (has `tests` array inside each object)
-            serde_json::from_str::<Vec<TestSuite>>(&s)
+    let test_suites: Option<Vec<TestSuite>> = row.get::<Option<String>, _>("tests").and_then(|s| {
+        // Try new TestSuite format first (has `tests` array inside each object)
+        serde_json::from_str::<Vec<TestSuite>>(&s).ok().or_else(|| {
+            // Fall back to legacy flat format (has `state` on each object)
+            serde_json::from_str::<Vec<FlatTestResult>>(&s)
                 .ok()
-                .or_else(|| {
-                    // Fall back to legacy flat format (has `state` on each object)
-                    serde_json::from_str::<Vec<FlatTestResult>>(&s)
-                        .ok()
-                        .map(group_into_suites)
-                })
-        });
+                .map(group_into_suites)
+        })
+    });
 
     let evidence: Vec<Evidence> = row
         .get::<Option<String>, _>("evidence")
@@ -403,22 +365,6 @@ pub(crate) fn row_to_proof(row: &AnyRow) -> Result<Proof> {
         evidence,
         commit_sha: row.get("commit_sha"),
         agent_type: row.get("agent_type"),
-        created_at: parse_datetime(row.get("created_at"))?,
-    })
-}
-
-/// Map a database row to a [`ProjectMembership`].
-pub(crate) fn row_to_project_membership(row: &AnyRow) -> Result<ProjectMembership> {
-    Ok(ProjectMembership {
-        id: parse_id(row.get("id"))?,
-        project_id: parse_id(row.get("project_id"))?,
-        user_id: parse_id(row.get("user_id"))?,
-        role: MembershipRole::from_str(&row.get::<String, _>("role"))
-            .unwrap_or(MembershipRole::Viewer),
-        invited_by: row
-            .get::<Option<String>, _>("invited_by")
-            .map(parse_id)
-            .transpose()?,
         created_at: parse_datetime(row.get("created_at"))?,
     })
 }

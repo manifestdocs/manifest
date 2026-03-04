@@ -1,3 +1,9 @@
+//! Version CRUD and release lifecycle endpoints.
+//!
+//! Manages semantic versions for projects. Detecting a release transition
+//! (unreleased → released) records a history entry and ensures a minimum pool
+//! of unreleased versions remains available.
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,

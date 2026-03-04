@@ -1,0 +1,2 @@
+ORIENT: Get full project instructions (coding guidelines, conventions, architectural decisions). Use this when the
+breadcrumb summary indicates more context is available. Returns the complete root feature details.

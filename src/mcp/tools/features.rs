@@ -1,3 +1,10 @@
+//! Feature lifecycle tools for AI agents.
+//!
+//! The largest tool module — covers the full feature workflow: planning, creation,
+//! starting, completing, updating, deletion, search, tree rendering, and test
+//! evidence (prove/verify). Includes a [`stale_warning`] helper that flags
+//! features claimed for more than 24 hours.
+
 use std::str::FromStr;
 
 use rmcp::{
@@ -58,6 +65,16 @@ pub(crate) fn stale_warning(feature: &Feature) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Look up the primary directory path for a project.
+async fn get_primary_dir_path(client: &ManifestClient, project_id: uuid::Uuid) -> Option<String> {
+    let pwd = client.get_project(project_id).await.ok()?;
+    pwd.directories
+        .iter()
+        .find(|d| d.is_primary)
+        .or(pwd.directories.first())
+        .map(|d| d.path.clone())
 }
 
 /// Find features by project, state, or search query.
@@ -589,29 +606,8 @@ pub async fn start_feature(
         .await
     {
         if let crate::mcp::client::ClientError::Conflict(ref body) = e {
-            // Parse the structured conflict response for a clear agent message
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) {
-                if parsed.get("error").and_then(|v| v.as_str()) == Some("claim_conflict") {
-                    let conflict = &parsed["conflict"];
-                    let agent = conflict["agent_type"].as_str().unwrap_or("unknown");
-                    let claimed_at = conflict["claimed_at"].as_str().unwrap_or("unknown time");
-                    let feature_id_str = conflict["feature_id"].as_str().unwrap_or("unknown");
-                    let metadata_info = conflict["claim_metadata"]
-                        .as_str()
-                        .map(|m| format!("\nClaim metadata: {}", m))
-                        .unwrap_or_default();
-
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "CONFLICT: Feature '{}' is already claimed by '{}' (since {}, feature_id: {}).{}\n\
-                         To override, call start_feature with force=true.\n\
-                         Otherwise, pick a different feature — use get_next_feature or find_features with state='proposed'.",
-                        feature_with_context.feature.title,
-                        agent,
-                        claimed_at,
-                        feature_id_str,
-                        metadata_info,
-                    ))]));
-                }
+            if let Some(msg) = format_claim_conflict(body, &feature_with_context.feature.title) {
+                return Ok(CallToolResult::error(vec![Content::text(msg)]));
             }
         }
         return Err(client_err(e));
@@ -827,54 +823,10 @@ pub async fn complete_feature(
     let warnings = response.warnings;
 
     // Git: merge feature branch back into default branch (best-effort)
-    let mut merge_message: Option<String> = None;
     let project_id: uuid::Uuid = feature.project_id.into();
-    if let Ok(project_with_dirs) = client.get_project(project_id).await {
-        let primary_dir = project_with_dirs
-            .directories
-            .iter()
-            .find(|d| d.is_primary)
-            .or_else(|| project_with_dirs.directories.first());
-        if let Some(dir) = primary_dir {
-            if crate::mcp::git::is_git_repo(&dir.path) {
-                if let Ok(current) = crate::mcp::git::current_branch(&dir.path) {
-                    if current.starts_with("feature/") {
-                        if let Ok(default) = crate::mcp::git::default_branch(&dir.path) {
-                            if current != default {
-                                match crate::mcp::git::checkout(&dir.path, &default) {
-                                    Ok(()) => {
-                                        match crate::mcp::git::merge_branch(&dir.path, &current) {
-                                            Ok(()) => {
-                                                let _ = crate::mcp::git::delete_branch(
-                                                    &dir.path, &current,
-                                                );
-                                                merge_message = Some(format!(
-                                                    "Merged `{current}` into `{default}` and deleted branch"
-                                                ));
-                                            }
-                                            Err(e) => {
-                                                // Merge failed — go back to feature branch
-                                                let _ =
-                                                    crate::mcp::git::checkout(&dir.path, &current);
-                                                merge_message = Some(format!(
-                                                    "warning: merge failed — {e}. Still on `{current}`"
-                                                ));
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        merge_message = Some(format!(
-                                            "warning: could not checkout {default} — {e}. Still on `{current}`"
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let merge_message = get_primary_dir_path(client, project_id)
+        .await
+        .and_then(|p| try_merge_feature_branch(&p));
 
     // Fetch latest proof for display (best-effort)
     let latest_proof = client
@@ -940,7 +892,6 @@ pub async fn prove_feature(
     client: &ManifestClient,
     req: ProveFeatureRequest,
 ) -> Result<CallToolResult, McpError> {
-    use crate::adapters;
     use crate::models::{
         group_into_suites, CreateProofInput, Evidence, FlatTestResult, TestResult, TestState,
         TestSuite,
@@ -998,29 +949,7 @@ pub async fn prove_feature(
     // try to parse via a Lua adapter
     if test_suites.is_none() {
         if let Some(ref output) = req.output {
-            let feature = client.get_feature(feature_id).await.map_err(client_err)?;
-            let project_id: uuid::Uuid = feature.project_id.into();
-            let project_with_dirs = client.get_project(project_id).await.map_err(client_err)?;
-            let adapter_name = project_with_dirs.project.test_adapter.as_deref();
-            let project_dir = project_with_dirs
-                .directories
-                .iter()
-                .find(|d| d.is_primary)
-                .or(project_with_dirs.directories.first())
-                .map(|d| d.path.as_str());
-
-            if let Some(result) =
-                adapters::parse_test_output(&req.command, output, adapter_name, project_dir)
-            {
-                if !result.test_suites.is_empty() {
-                    tracing::info!(
-                        "Adapter '{}' parsed test results into {} suites",
-                        result.adapter_name,
-                        result.test_suites.len()
-                    );
-                    test_suites = Some(result.test_suites);
-                }
-            }
+            test_suites = try_parse_via_adapter(client, feature_id, &req.command, output).await;
         }
     }
 
@@ -1162,28 +1091,15 @@ pub async fn verify_feature(
     let project_id: uuid::Uuid = feature.project_id.into();
 
     // Attempt to get a diff from the project's primary directory
-    let diff = if let Ok(project_with_dirs) = client.get_project(project_id).await {
-        let primary_dir = project_with_dirs
-            .directories
-            .iter()
-            .find(|d| d.is_primary)
-            .or_else(|| project_with_dirs.directories.first());
-
-        if let Some(dir) = primary_dir {
-            if crate::mcp::git::is_git_repo(&dir.path) {
-                let commit_range = req.commit_range.as_deref();
-                match crate::mcp::git::get_diff(&dir.path, commit_range) {
-                    Ok(d) if !d.is_empty() => Some(d),
-                    _ => None,
-                }
-            } else {
-                None
+    let diff = match get_primary_dir_path(client, project_id).await {
+        Some(dir) if crate::mcp::git::is_git_repo(&dir) => {
+            let commit_range = req.commit_range.as_deref();
+            match crate::mcp::git::get_diff(&dir, commit_range) {
+                Ok(d) if !d.is_empty() => Some(d),
+                _ => None,
             }
-        } else {
-            None
         }
-    } else {
-        None
+        _ => None,
     };
 
     // Call the API to assemble spec context + filter diff
@@ -1289,4 +1205,95 @@ pub async fn record_verification(
     };
 
     Ok(CallToolResult::success(vec![Content::text(summary)]))
+}
+
+/// Try to parse test output via a Lua adapter for the feature's project.
+async fn try_parse_via_adapter(
+    client: &ManifestClient,
+    feature_id: uuid::Uuid,
+    command: &str,
+    output: &str,
+) -> Option<Vec<crate::models::TestSuite>> {
+    use crate::adapters;
+
+    let feature = client.get_feature(feature_id).await.ok()?;
+    let project_id: uuid::Uuid = feature.project_id.into();
+    let pwd = client.get_project(project_id).await.ok()?;
+    let adapter_name = pwd.project.test_adapter.as_deref();
+    let project_dir = pwd
+        .directories
+        .iter()
+        .find(|d| d.is_primary)
+        .or(pwd.directories.first())
+        .map(|d| d.path.as_str());
+
+    let result = adapters::parse_test_output(command, output, adapter_name, project_dir)?;
+    if result.test_suites.is_empty() {
+        return None;
+    }
+    tracing::info!(
+        "Adapter '{}' parsed test results into {} suites",
+        result.adapter_name,
+        result.test_suites.len()
+    );
+    Some(result.test_suites)
+}
+
+/// Parse a claim-conflict JSON body into a human-readable error message.
+fn format_claim_conflict(body: &str, feature_title: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
+    if parsed.get("error").and_then(|v| v.as_str()) != Some("claim_conflict") {
+        return None;
+    }
+    let conflict = &parsed["conflict"];
+    let agent = conflict["agent_type"].as_str().unwrap_or("unknown");
+    let claimed_at = conflict["claimed_at"].as_str().unwrap_or("unknown time");
+    let feature_id_str = conflict["feature_id"].as_str().unwrap_or("unknown");
+    let metadata_info = conflict["claim_metadata"]
+        .as_str()
+        .map(|m| format!("\nClaim metadata: {}", m))
+        .unwrap_or_default();
+
+    Some(format!(
+        "CONFLICT: Feature '{}' is already claimed by '{}' (since {}, feature_id: {}).{}\n\
+         To override, call start_feature with force=true.\n\
+         Otherwise, pick a different feature — use get_next_feature or find_features with state='proposed'.",
+        feature_title, agent, claimed_at, feature_id_str, metadata_info,
+    ))
+}
+
+/// Attempt to merge the current feature branch into the default branch.
+///
+/// Returns a human-readable message describing what happened, or `None` if
+/// the directory isn't a git repo or isn't on a feature branch.
+fn try_merge_feature_branch(dir_path: &str) -> Option<String> {
+    if !crate::mcp::git::is_git_repo(dir_path) {
+        return None;
+    }
+    let current = crate::mcp::git::current_branch(dir_path).ok()?;
+    if !current.starts_with("feature/") {
+        return None;
+    }
+    let default = crate::mcp::git::default_branch(dir_path).ok()?;
+    if current == default {
+        return None;
+    }
+
+    if let Err(e) = crate::mcp::git::checkout(dir_path, &default) {
+        return Some(format!(
+            "warning: could not checkout {default} — {e}. Still on `{current}`"
+        ));
+    }
+    match crate::mcp::git::merge_branch(dir_path, &current) {
+        Ok(()) => {
+            let _ = crate::mcp::git::delete_branch(dir_path, &current);
+            Some(format!(
+                "Merged `{current}` into `{default}` and deleted branch"
+            ))
+        }
+        Err(e) => {
+            let _ = crate::mcp::git::checkout(dir_path, &current);
+            Some(format!("warning: merge failed — {e}. Still on `{current}`"))
+        }
+    }
 }

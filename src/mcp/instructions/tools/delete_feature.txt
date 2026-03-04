@@ -1,0 +1,2 @@
+CLEANUP: Permanently delete a feature and all its descendants. Use this only for archived features that are no
+longer needed. This action cannot be undone.

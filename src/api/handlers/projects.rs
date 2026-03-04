@@ -1,3 +1,9 @@
+//! Project CRUD and related endpoints.
+//!
+//! Manages projects, their directory associations, history timeline, and focus
+//! tracking. Creating a project bootstraps initial versions so agents and the
+//! web UI have release targets from the start.
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,

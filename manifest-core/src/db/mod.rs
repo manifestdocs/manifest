@@ -8,15 +8,14 @@ use tokio::sync::broadcast;
 use crate::models::ProjectId;
 
 mod features;
-pub use features::CompletionResult;
 mod helpers;
 mod history;
-mod memories;
 mod portfolio;
+
+pub use features::CompletionResult;
 mod projects;
 mod proofs;
 mod templates;
-mod users;
 mod versions;
 
 // ============================================================
@@ -362,10 +361,6 @@ impl Database {
 
         // Run embedded schema directly (sqlx::migrate! has issues with the any driver)
         self.run_schema().await?;
-        // Create SQLite-specific FTS5 index for project_memories
-        if self.dialect.is_sqlite() {
-            self.create_project_memories_fts().await?;
-        }
         Ok(())
     }
 
@@ -391,8 +386,6 @@ impl Database {
         self.migrate_add_blocked_state().await?;
         // Migration: add verification_result and verified_at to features
         self.migrate_add_verification_columns().await?;
-        // Migration: add project_memories table and FTS5 index
-        self.migrate_add_project_memories_table().await?;
         // Migration: add claim tracking columns to features
         self.migrate_add_claim_columns().await?;
         // Migration: add testing_policy column to projects
@@ -965,86 +958,6 @@ impl Database {
         Ok(())
     }
 
-    /// Add project_memories table if it doesn't exist (for existing installs).
-    /// Also creates the FTS5 virtual table on SQLite.
-    async fn migrate_add_project_memories_table(&self) -> Result<()> {
-        let has_table = {
-            let count: i64 = sqlx::query_scalar(&self.dialect.table_exists_sql("project_memories"))
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or(0);
-            count > 0
-        };
-
-        if !has_table {
-            tracing::info!("Creating project_memories table");
-            sqlx::query(
-                "CREATE TABLE IF NOT EXISTS project_memories (
-                    id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    tags TEXT NOT NULL DEFAULT '[]',
-                    source_feature_id TEXT,
-                    created_by TEXT NOT NULL DEFAULT 'agent',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    CONSTRAINT fk_memories_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                    CONSTRAINT fk_memories_feature FOREIGN KEY (source_feature_id) REFERENCES features(id) ON DELETE SET NULL
-                )",
-            )
-            .execute(&self.pool)
-            .await?;
-
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS idx_memories_project ON project_memories(project_id)",
-            )
-            .execute(&self.pool)
-            .await?;
-
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS idx_memories_created ON project_memories(created_at DESC)",
-            )
-            .execute(&self.pool)
-            .await?;
-        }
-
-        // Create FTS5 virtual table for SQLite (idempotent)
-        if self.dialect.is_sqlite() {
-            self.create_project_memories_fts().await?;
-        }
-
-        Ok(())
-    }
-
-    /// Create the FTS5 virtual table for project_memories (SQLite only).
-    async fn create_project_memories_fts(&self) -> Result<()> {
-        let has_fts = {
-            let count: i64 =
-                sqlx::query_scalar(&self.dialect.table_exists_sql("project_memories_fts"))
-                    .fetch_one(&self.pool)
-                    .await
-                    .unwrap_or(0);
-            count > 0
-        };
-
-        if has_fts {
-            return Ok(());
-        }
-
-        tracing::info!("Creating project_memories_fts FTS5 virtual table");
-        sqlx::query(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS project_memories_fts USING fts5(
-                content,
-                tags,
-                content_rowid='rowid'
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
     /// Execute the initial schema SQL.
     async fn run_schema(&self) -> Result<()> {
         let schema = include_str!("../../migrations/20240101000000_initial.sql");
@@ -1325,11 +1238,9 @@ impl Database {
         }
 
         tracing::info!("Adding testing_policy column to projects table");
-        sqlx::query(
-            "ALTER TABLE projects ADD COLUMN testing_policy TEXT NOT NULL DEFAULT 'tdd'",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("ALTER TABLE projects ADD COLUMN testing_policy TEXT NOT NULL DEFAULT 'tdd'")
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }
@@ -1426,10 +1337,7 @@ impl Database {
             .await?;
         }
 
-        tracing::info!(
-            "Created default spec templates for {} projects",
-            rows.len()
-        );
+        tracing::info!("Created default spec templates for {} projects", rows.len());
         Ok(())
     }
 

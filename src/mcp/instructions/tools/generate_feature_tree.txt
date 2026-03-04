@@ -1,0 +1,2 @@
+DISCOVER: Generate a feature tree from an existing codebase by analyzing code structure and git history. Use `since`
+to limit to recent commits (e.g., 'v1.0.0'). Returns a markdown document describing system capabilities.

@@ -8,7 +8,7 @@
 use axum_test::TestServer;
 use manifest::api::create_router;
 use manifest::db::Database;
-use manifest::mcp::tools::{features, memories, versions};
+use manifest::mcp::tools::{features, versions};
 use manifest::mcp::ManifestClient;
 use manifest::models::*;
 use rmcp::model::{CallToolResult, RawContent};
@@ -1375,75 +1375,3 @@ mod release_version_tool {
         assert!(texts[0].contains(&format!("Released '{}'", vname)));
     }
 }
-
-mod remember_tool {
-    use super::*;
-    use manifest::mcp::types::RememberRequest;
-
-    #[tokio::test]
-    async fn confirms_memory_storage() {
-        let (server, client) = setup().await;
-        let project = create_project(&server).await;
-        let pid: Uuid = project.id.into();
-
-        let result = memories::remember(
-            &client,
-            RememberRequest {
-                project_id: pid,
-                content: "Use pnpm, not npm".to_string(),
-                tags: vec!["tooling".to_string()],
-                source_feature_id: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        assert!(result.is_error.is_none() || result.is_error == Some(false));
-        assert!(has_text_containing(&result, "pnpm"));
-    }
-}
-
-mod recall_tool {
-    use super::*;
-    use manifest::mcp::types::{RecallRequest, RememberRequest};
-
-    #[tokio::test]
-    async fn returns_matching_memories() {
-        let (server, client) = setup().await;
-        let project = create_project(&server).await;
-        let pid: Uuid = project.id.into();
-
-        // Store a memory first
-        memories::remember(
-            &client,
-            RememberRequest {
-                project_id: pid,
-                content: "Always use snake_case for variables".to_string(),
-                tags: vec!["conventions".to_string()],
-                source_feature_id: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        let result = memories::recall(
-            &client,
-            RecallRequest {
-                project_id: pid,
-                query: Some("snake_case".to_string()),
-                limit: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        assert!(result.is_error.is_none() || result.is_error == Some(false));
-        assert!(has_text_containing(&result, "snake_case"));
-    }
-}
-
-// NOTE: `memories::forget` is not tested here because DELETE requests hang
-// against axum-test's HTTP transport (both via reqwest and axum-test's own
-// server.delete()). The function is trivial (calls delete_memory, returns
-// JSON `{ deleted: true, memory_id }`). DELETE is covered in api_spec.rs
-// via mock transport (feature_cascade_delete).

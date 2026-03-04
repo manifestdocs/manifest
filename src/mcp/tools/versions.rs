@@ -1,3 +1,9 @@
+//! Version lifecycle tools for AI agents.
+//!
+//! Manages semantic versions: listing with feature counts, creating milestones,
+//! assigning features to versions, and releasing. Renders version tables as
+//! markdown for agent-friendly output.
+
 use rmcp::{
     model::{CallToolResult, Content},
     ErrorData as McpError,

@@ -1,0 +1,21 @@
+DOCUMENT: Mark work as done. Records a history entry with your summary and commits, sets state to 'implemented',
+and clears the agent claim. Automatically clears desired_details if present (pending change request fulfilled). Call
+only after verification.
+
+GIT MERGE: Best-effort merge of the `feature/*` branch back into the default branch, then deletes the feature
+branch. If merge conflicts occur, stays on the feature branch and returns a warning.
+
+LEAF FEATURES ONLY: This tool rejects feature sets (parents with children). Only leaf features can be completed. If
+a parent's children are all implemented, the parent's status is derived automatically; do NOT attempt to complete
+the parent.
+
+Your summary becomes living documentation. Describe what was built, key decisions, and context for future agents.
+NEVER reference commits in the summary (e.g. 'Committed as abc1234'); commits are tracked separately via the
+commits parameter and displayed alongside the summary in the UI.
+
+VERIFICATION SUMMARY: The response includes a rendered test tree from the latest proof, showing pass/fail status
+for all test suites.
+
+WARNINGS: Returns advisory warnings when test evidence is missing (no prove_feature call) or when the feature spec
+was not updated after implementation (no update_feature call). Address these warnings before considering the feature
+complete.

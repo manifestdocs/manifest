@@ -1,3 +1,9 @@
+//! Cross-project portfolio endpoints.
+//!
+//! Returns an aggregated health snapshot across all projects and an SSE stream
+//! for real-time updates (feature completions, mutations). Used by the
+//! dashboard to show system-wide progress.
+
 use axum::{
     extract::State,
     response::sse::{Event, KeepAlive, Sse},

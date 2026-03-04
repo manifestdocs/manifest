@@ -1,0 +1,3 @@
+SETUP: Associate an additional directory with an existing project. Use this when a project spans multiple
+directories (e.g., separate API and frontend repos, monorepos). The first directory should be added via
+`init_project`.

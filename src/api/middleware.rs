@@ -277,29 +277,31 @@ fn extract_client_ip(request: &Request<Body>) -> IpAddr {
     });
 
     if trust_proxy {
-        // Try X-Forwarded-For header first (for proxied requests)
-        if let Some(forwarded) = request.headers().get("X-Forwarded-For") {
-            if let Ok(value) = forwarded.to_str() {
-                if let Some(ip_str) = value.split(',').next() {
-                    if let Ok(ip) = ip_str.trim().parse() {
-                        return ip;
-                    }
-                }
-            }
-        }
-
-        // Try X-Real-IP header
-        if let Some(real_ip) = request.headers().get("X-Real-IP") {
-            if let Ok(value) = real_ip.to_str() {
-                if let Ok(ip) = value.trim().parse() {
-                    return ip;
-                }
-            }
+        if let Some(ip) =
+            parse_forwarded_for(request.headers()).or_else(|| parse_real_ip(request.headers()))
+        {
+            return ip;
         }
     }
 
     // Default to localhost for local development
     "127.0.0.1".parse().unwrap()
+}
+
+fn parse_forwarded_for(headers: &axum::http::HeaderMap) -> Option<IpAddr> {
+    headers
+        .get("X-Forwarded-For")?
+        .to_str()
+        .ok()?
+        .split(',')
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+fn parse_real_ip(headers: &axum::http::HeaderMap) -> Option<IpAddr> {
+    headers.get("X-Real-IP")?.to_str().ok()?.trim().parse().ok()
 }
 
 #[cfg(test)]

@@ -1,0 +1,5 @@
+ORIENT: Get the feature the user is currently looking at in the Manifest app. This is your DEFAULT tool for
+resolving what the user means; call it first when they say "this feature", "work on this", "implement it", or give
+instructions without naming a specific feature. Requires project_id, so call list_projects first if you don't have
+it. Returns null if no feature is selected. After calling, confirm by naming the feature in your response (e.g.,
+"I see you have 'OAuth Login' selected").

@@ -1,0 +1,21 @@
+BUILD: Record test evidence for a feature. Creates a proof record with the test command, exit code, structured test
+results, and evidence file paths. Can be called multiple times during TDD (red/green cycle) or once after tests
+pass. Proof is separate from completion; call this to record evidence, then call complete_feature when done.
+
+TWO INPUT FORMATS for structured test results:
+- test_suites (preferred): Pre-grouped suites, each with a name, optional file, and array of test results.
+- tests (flat, legacy): Flat array of { name, suite, state, file, line, duration_ms, message }. Auto-grouped into
+  suites by the `suite` field.
+
+ADAPTER FALLBACK: If only `output` is provided (no structured test results), the server tries to auto-parse the
+output using the project's configured test adapter (Lua-based parsers). Structured results are always preferred.
+
+Additional parameters:
+- evidence: Array of { path, note } for non-test evidence (e.g., screenshots, logs).
+- commit_sha: Git commit SHA at the time of proving.
+
+The agent is the universal adapter: run any test framework, parse its output, and produce structured results for
+consistent rendering in both CLI and web UI.
+
+complete_feature REQUIRES a passing proof (exit_code 0). If tests are failing, fix the implementation and call
+prove_feature again; repeat until green.

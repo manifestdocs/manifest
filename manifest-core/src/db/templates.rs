@@ -6,19 +6,6 @@ use super::Database;
 use crate::models::*;
 
 impl Database {
-    /// Get all spec templates for a project, ordered by name.
-    pub async fn get_templates(&self, project_id: ProjectId) -> Result<Vec<SpecTemplate>> {
-        let rows = sqlx::query(
-            "SELECT id, project_id, name, description, content, is_default, created_at, updated_at
-             FROM spec_templates WHERE project_id = $1 ORDER BY is_default DESC, name",
-        )
-        .bind(project_id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
-
-        rows.iter().map(row_to_spec_template).collect()
-    }
-
     /// Get a spec template by ID.
     pub async fn get_template(&self, id: TemplateId) -> Result<Option<SpecTemplate>> {
         let row = sqlx::query(
@@ -156,15 +143,5 @@ impl Database {
             created_at: existing.created_at,
             updated_at: now,
         }))
-    }
-
-    /// Delete a spec template by ID.
-    #[must_use = "check whether the template existed"]
-    pub async fn delete_template(&self, id: TemplateId) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM spec_templates WHERE id = $1")
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await?;
-        Ok(result.rows_affected() > 0)
     }
 }

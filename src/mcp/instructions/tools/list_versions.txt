@@ -1,0 +1,2 @@
+ORIENT: List versions. Returns release milestones with status indicators: 'next' (next to ship), 'planned'
+(upcoming), and 'released'.

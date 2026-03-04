@@ -1,0 +1,2 @@
+DOCUMENT: Mark a version as shipped. Sets released_at timestamp. Use this when a milestone is complete and
+deployed.

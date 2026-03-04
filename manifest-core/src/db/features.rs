@@ -71,9 +71,7 @@ impl Database {
         offset: Option<u32>,
     ) -> Result<Vec<Feature>> {
         let mut next_param = 2u32;
-        let mut sql = format!(
-            "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1"
-        );
+        let mut sql = format!("SELECT {FEATURE_COLS} FROM features WHERE project_id = $1");
         if version_id.is_some() {
             sql.push_str(&format!(" AND target_version_id = ${next_param}"));
             next_param += 1;
@@ -515,12 +513,8 @@ impl Database {
                     .into());
                 }
                 // Validate: no self-references, all in same project
-                for bid in blocker_ids {
-                    if *bid == id {
-                        return Err(
-                            ManifestError::validation("A feature cannot block itself.").into()
-                        );
-                    }
+                if blocker_ids.contains(&id) {
+                    return Err(ManifestError::validation("A feature cannot block itself.").into());
                 }
                 let blocker_id_strs: Vec<String> =
                     blocker_ids.iter().map(|b| b.to_string()).collect();
@@ -1095,9 +1089,7 @@ impl Database {
         }
 
         // Fetch latest proof for this feature
-        let latest_proof = self
-            .get_latest_proof_for_feature(feature.id)
-            .await?;
+        let latest_proof = self.get_latest_proof_for_feature(feature.id).await?;
 
         Ok(Some(FeatureWithContext {
             feature,

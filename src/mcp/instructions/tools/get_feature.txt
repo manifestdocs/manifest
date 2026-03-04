@@ -1,0 +1,3 @@
+ORIENT/BUILD: Get detailed feature spec with hierarchical context. Returns the feature details plus breadcrumb with
+ancestor context (architectural decisions, conventions). Set include_history=true to see past work. READ THIS before
+starting work.

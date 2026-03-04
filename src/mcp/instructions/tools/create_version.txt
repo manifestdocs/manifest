@@ -1,0 +1,2 @@
+PLAN: Create a release milestone. Names must be semantic versions in MAJOR.MINOR.PATCH format (e.g., '0.2.0',
+'v1.0.0'). Freeform text like 'MVP' or status labels like 'next' are rejected.

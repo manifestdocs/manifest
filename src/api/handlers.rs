@@ -1,8 +1,13 @@
+//! Request handlers for the HTTP API.
+//!
+//! Each submodule groups handlers by resource (features, projects, versions, etc.)
+//! and is wildcard re-exported so callers see a flat namespace. This module also
+//! defines [`ApiError`] and the [`internal_error`] helper used across all handlers.
+
 mod analysis;
 mod features;
 mod filesystem;
 mod health;
-mod memories;
 mod portfolio;
 mod projects;
 mod proofs;
@@ -14,7 +19,6 @@ pub use analysis::*;
 pub use features::*;
 pub use filesystem::*;
 pub use health::*;
-pub use memories::*;
 pub use portfolio::*;
 pub use projects::*;
 pub use proofs::*;

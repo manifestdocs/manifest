@@ -1,3 +1,9 @@
+//! Feature CRUD and lifecycle endpoints.
+//!
+//! Handles creation, retrieval, update, deletion, and state transitions for
+//! features and their tree hierarchy. Also provides SSE subscriptions for
+//! real-time change notifications.
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -399,24 +405,13 @@ pub async fn resolve_feature(
     }
 
     // 2. Try display ID format (LETTERS-DIGITS)
-    if prefix.contains('-') {
-        let has_display_format = prefix
-            .rsplit_once('-')
-            .map(|(p, n)| {
-                !p.is_empty()
-                    && p.chars().all(|c| c.is_ascii_alphabetic())
-                    && !n.is_empty()
-                    && n.chars().all(|c| c.is_ascii_digit())
-            })
-            .unwrap_or(false);
-        if has_display_format {
-            if let Some(f) = db
-                .resolve_feature_by_display_id(prefix)
-                .await
-                .map_err(internal_error)?
-            {
-                return Ok(Json(f));
-            }
+    if prefix.contains('-') && is_display_id_format(prefix) {
+        if let Some(f) = db
+            .resolve_feature_by_display_id(prefix)
+            .await
+            .map_err(internal_error)?
+        {
+            return Ok(Json(f));
         }
     }
 
@@ -429,6 +424,18 @@ pub async fn resolve_feature(
             StatusCode::NOT_FOUND,
             format!("No feature found matching '{}'", prefix),
         )))
+}
+
+/// Check if a string matches the display ID format: `LETTERS-DIGITS` (e.g. "AUTH-42").
+fn is_display_id_format(s: &str) -> bool {
+    s.rsplit_once('-')
+        .map(|(p, n)| {
+            !p.is_empty()
+                && p.chars().all(|c| c.is_ascii_alphabetic())
+                && !n.is_empty()
+                && n.chars().all(|c| c.is_ascii_digit())
+        })
+        .unwrap_or(false)
 }
 
 // ============================================================
@@ -824,32 +831,38 @@ pub async fn subscribe_project_features(
     let project_id: ProjectId = project_id.into();
     let rx = db.subscribe();
 
-    let stream = BroadcastStream::new(rx).filter_map(move |result| {
-        let val = match result {
-            Ok(event) if event.project_id() == project_id => {
-                use crate::db::FeatureEvent;
-                match event {
-                    FeatureEvent::Completed {
-                        feature_title,
-                        agent_type,
-                        ..
-                    } => {
-                        let payload = serde_json::json!({
-                            "feature_title": feature_title,
-                            "agent_type": agent_type,
-                        });
-                        Some(Ok(Event::default()
-                            .event("feature_completed")
-                            .data(payload.to_string())))
-                    }
-                    _ => Some(Ok(Event::default().event("change").data("feature_changed"))),
-                }
-            }
-            Ok(_) => None,  // Different project, ignore
-            Err(_) => None, // Lagged, ignore (client will catch up on next event)
-        };
-        std::future::ready(val)
-    });
+    let stream = BroadcastStream::new(rx)
+        .filter_map(move |result| std::future::ready(feature_event_to_sse(result, project_id)));
 
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn feature_event_to_sse(
+    result: Result<
+        crate::db::FeatureEvent,
+        tokio_stream::wrappers::errors::BroadcastStreamRecvError,
+    >,
+    project_id: ProjectId,
+) -> Option<Result<Event, Infallible>> {
+    let event = result.ok()?;
+    if event.project_id() != project_id {
+        return None;
+    }
+    use crate::db::FeatureEvent;
+    match event {
+        FeatureEvent::Completed {
+            feature_title,
+            agent_type,
+            ..
+        } => {
+            let payload = serde_json::json!({
+                "feature_title": feature_title,
+                "agent_type": agent_type,
+            });
+            Some(Ok(Event::default()
+                .event("feature_completed")
+                .data(payload.to_string())))
+        }
+        _ => Some(Ok(Event::default().event("change").data("feature_changed"))),
+    }
 }

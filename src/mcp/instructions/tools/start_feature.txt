@@ -1,0 +1,25 @@
+CLAIM: Signal you are starting work. Transitions state to 'in_progress' and records your claim (agent_type +
+metadata). Returns full feature details; this is your spec to implement. IMPORTANT: You MUST call this tool when a
+user asks you to implement, work on, or build a feature, even if you just created the feature or already have
+context. Also handles implemented features with pending changes (desired_details set by a human edit), transitioning
+implemented → in_progress so you can implement the requested changes. Do not change the feature's target version
+during implementation.
+
+SPEC GATE: Blocks if a leaf feature has no `details`; you must write a spec first using update_feature. This is
+the most common failure mode. If details exist but lack acceptance criteria, returns a warning to flesh out the spec.
+
+BLOCKED GUARD: Rejects features in `blocked` state and features whose ancestor feature set is blocked. Returns the
+list of blocking features that must reach 'implemented' before this feature can be started.
+
+CONCURRENCY: If another agent has claimed this feature, returns a conflict warning with details (who claimed it,
+when, branch info). Use force=true to override the claim.
+
+GIT BRANCH: Auto-creates and checks out a `feature/{slug}` branch based on the feature title. Best-effort; does
+not fail if no git repo or no commits exist yet.
+
+LEAF FEATURES ONLY: This tool rejects feature sets (parents with children). If you need to work on an area that has
+children, start one of its child features instead.
+
+COMPLETION CONTRACT: The response includes a reminder of the mandatory sequence after implementing:
+prove_feature → update_feature → complete_feature. It also includes testing guidance based on the project's
+spec template and testable acceptance criteria count.

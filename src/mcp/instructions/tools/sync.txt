@@ -1,0 +1,4 @@
+DISCOVER: Reconcile the feature tree with codebase changes made outside Manifest. Analyzes git commit history,
+matches commits against existing features, and returns structured proposals: features to mark as implemented,
+features needing detail updates, and new capabilities to add. Does NOT modify anything; review the proposals and
+apply them using update_feature, complete_feature, or create_feature.

@@ -58,20 +58,6 @@ impl Database {
         row.as_ref().map(row_to_version).transpose()
     }
 
-    /// Get the latest unreleased version for a project (for new feature assignment).
-    /// Returns None if no unreleased versions exist.
-    pub async fn get_latest_version(&self, project_id: ProjectId) -> Result<Option<Version>> {
-        let sql = format!(
-            "SELECT {VERSION_COLS} FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at DESC LIMIT 1"
-        );
-        let row = sqlx::query(&sql)
-            .bind(project_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
-
-        row.as_ref().map(row_to_version).transpose()
-    }
-
     /// Ensure at least `min_count` unreleased versions exist for a project.
     /// Auto-creates versions with incremented minor version numbers as needed.
     pub async fn ensure_minimum_versions(

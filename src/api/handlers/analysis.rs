@@ -1,3 +1,9 @@
+//! Codebase analysis endpoint for project discovery.
+//!
+//! Scans a directory to detect languages, frameworks, and modules. Used by
+//! AI agents before `plan_features` to understand what capabilities exist
+//! in a codebase.
+
 use axum::{
     extract::{Query, State},
     http::StatusCode,

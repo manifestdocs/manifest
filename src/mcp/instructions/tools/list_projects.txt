@@ -1,0 +1,2 @@
+ORIENT: List projects. If directory_path is provided, finds the project containing that directory (useful for
+auto-discovery). Otherwise lists all projects.

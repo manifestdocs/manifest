@@ -1,0 +1,7 @@
+ORIENT: Get the highest-priority workable feature. Returns the top 'proposed' feature from the next unreleased
+version (prefers proposed over in_progress). Use ONLY when the user explicitly asks for "the next feature", "what's
+next", or "what should I work on". Do NOT use this when the user references a specific feature; use
+get_active_feature instead.
+
+If the returned feature is 'in_progress', another agent has already claimed it; skip it and call find_features with
+state='proposed' to find unclaimed work instead.

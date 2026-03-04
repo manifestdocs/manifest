@@ -1,0 +1,2 @@
+ORIENT: Find features by project, state, or search query. Returns summaries only. Use get_feature for full details.
+Call this BEFORE create_feature to check if a similar feature already exists.

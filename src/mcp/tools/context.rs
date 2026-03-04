@@ -1,3 +1,9 @@
+//! Active feature detection via web UI focus tracking.
+//!
+//! Resolves the feature currently selected in the Manifest web app so agents
+//! can act on "this feature" without the user specifying an ID. Includes
+//! staleness warnings for features claimed longer than 24 hours.
+
 use rmcp::{
     model::{CallToolResult, Content},
     ErrorData as McpError,

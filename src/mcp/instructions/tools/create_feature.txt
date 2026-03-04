@@ -1,0 +1,6 @@
+SETUP: Create a single feature. BEFORE creating, call find_features to check for duplicates and render_feature_tree
+to find the right parent group. Features describe what the system CAN DO, not what you DID. They outlive the work
+that created them. Good: 'OAuth Login', 'CSV Export'. Bad: 'Fix login bug', 'Update icons', 'Add retry logic'. If
+the title describes a one-time action, update an existing feature instead of creating a new one. Use parent_id to
+place under an existing group. For leaf features, add a concise specification in details. For parent features, add
+shared context that applies to all children. Use `plan` for bulk creation.

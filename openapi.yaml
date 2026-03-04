@@ -42,8 +42,6 @@ tags:
     description: Multi-project dashboard — aggregated health snapshots for all projects
   - name: Verification
     description: Feature implementation verification
-  - name: Memories
-    description: Project memory storage for AI agents
   - name: Settings
     description: Server configuration management
   - name: Analysis
@@ -1326,78 +1324,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Proof'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  # ============================================================
-  # Memories
-  # ============================================================
-  /projects/{id}/memories:
-    parameters:
-      - $ref: '#/components/parameters/ProjectId'
-    get:
-      tags: [Memories]
-      summary: Search or list project memories
-      operationId: listMemories
-      parameters:
-        - name: q
-          in: query
-          required: false
-          schema:
-            type: string
-          description: Search query (full-text on SQLite, LIKE fallback on PostgreSQL). Omit to list all.
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 10
-            maximum: 100
-          description: Maximum results to return.
-      responses:
-        '200':
-          description: List of project memories
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ProjectMemory'
-    post:
-      tags: [Memories]
-      summary: Create a project memory
-      operationId: createMemory
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateMemoryInput'
-      responses:
-        '201':
-          description: Memory created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProjectMemory'
-
-  /projects/{id}/memories/{memory_id}:
-    parameters:
-      - $ref: '#/components/parameters/ProjectId'
-      - name: memory_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: Memory UUID
-    delete:
-      tags: [Memories]
-      summary: Delete a project memory
-      operationId: deleteMemory
-      responses:
-        '204':
-          description: Memory deleted
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -2811,66 +2737,6 @@ components:
           type: string
           nullable: true
           description: Affected file path if the gap is localized.
-
-    # ============================================================
-    # Memory schemas
-    # ============================================================
-    ProjectMemory:
-      type: object
-      required: [id, project_id, content, tags, created_by, created_at, updated_at]
-      description: A project memory entry for AI agent recall.
-      properties:
-        id:
-          type: string
-          format: uuid
-        project_id:
-          type: string
-          format: uuid
-        content:
-          type: string
-          description: Plain text or markdown content.
-        tags:
-          type: array
-          items:
-            type: string
-          description: Tags for categorisation.
-        source_feature_id:
-          type: string
-          format: uuid
-          nullable: true
-          description: Feature this memory originated from.
-        created_by:
-          type: string
-          description: "Who created this: 'agent' or 'human'."
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
-    CreateMemoryInput:
-      type: object
-      required: [content]
-      properties:
-        content:
-          type: string
-          description: Plain text or markdown content to remember.
-        tags:
-          type: array
-          default: []
-          items:
-            type: string
-          description: Tags for categorisation.
-        source_feature_id:
-          type: string
-          format: uuid
-          nullable: true
-          description: Feature this memory is associated with.
-        created_by:
-          type: string
-          default: 'agent'
-          description: "Who created this: 'agent' or 'human'."
 
     # ============================================================
     # Analysis schemas

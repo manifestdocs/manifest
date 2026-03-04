@@ -1,0 +1,3 @@
+VERIFY: Assemble the feature spec + implementation diff so you can check the implementation against the spec.
+Returns spec context + filtered diff with instructions. After analyzing, call record_verification with your
+findings. No LLM is called server-side; you are the LLM.

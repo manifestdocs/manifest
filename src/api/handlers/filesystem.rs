@@ -1,3 +1,9 @@
+//! Directory browsing endpoints for project setup.
+//!
+//! Provides a filesystem tree browser filtered to directories only, skipping
+//! noise directories like `node_modules` and `.git`. Used by the web UI when
+//! associating directories with projects.
+
 use axum::{extract::Query, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path};

@@ -1,3 +1,9 @@
+//! HTTP API layer for Manifest.
+//!
+//! Builds the Axum router with public routes (health, SSE subscriptions) and
+//! protected CRUD routes under `/api/v1`. Applies middleware for CORS, security
+//! headers, and optional API-key authentication.
+
 pub mod auth;
 pub mod config;
 mod handlers;
@@ -270,15 +276,6 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
             get(handlers::list_proofs_for_feature).post(handlers::create_proof_for_feature),
         )
         .route("/proofs/{id}", get(handlers::get_proof))
-        // Memories
-        .route(
-            "/projects/{id}/memories",
-            get(handlers::list_memories).post(handlers::create_memory),
-        )
-        .route(
-            "/projects/{id}/memories/{memory_id}",
-            delete(handlers::delete_memory),
-        )
         // Portfolio
         .route("/portfolio", get(handlers::get_portfolio))
         // Server settings

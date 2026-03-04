@@ -1,0 +1,12 @@
+UPDATE: Modify any feature field. Use it to change title, details, state, priority, parent, version assignment, or
+propose changes for human review via desired_details. Prefer updating existing features over creating duplicates.
+Use parent_id to reorganize scattered features under the right group.
+
+STATE GUARD: Setting state to 'implemented' is rejected; use complete_feature instead, which enforces proof
+requirements, records history, and clears claims.
+
+Additional parameters:
+- blocked_by: Array of feature IDs that block this feature. The feature auto-transitions to 'proposed' when all
+  blockers reach 'implemented'.
+- clear_version: Set to true to explicitly unassign a feature from its current version (move to Backlog).
+- details_summary: A short summary for root/project features (displayed in tree views).

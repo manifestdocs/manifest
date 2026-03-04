@@ -1,3 +1,9 @@
+//! Test evidence storage endpoints.
+//!
+//! Records and retrieves [`Proof`](manifest_core::models::Proof) entries that
+//! capture test results for a feature. Proofs gate feature completion — the MCP
+//! layer requires a passing proof before marking a feature as implemented.
+
 use axum::extract::{Path, State};
 use axum::Json;
 use uuid::Uuid;

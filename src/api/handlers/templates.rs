@@ -1,3 +1,9 @@
+//! Spec template management endpoints.
+//!
+//! Each project can have one [`SpecTemplate`](manifest_core::models::SpecTemplate)
+//! that provides default content for new feature specifications. Supports
+//! get and upsert operations.
+
 use axum::{
     extract::{Path, State},
     Json,

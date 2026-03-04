@@ -1,0 +1,4 @@
+ORIENT: Render the feature tree as ASCII art. Essential for understanding project structure, hierarchy, and current
+status (▣ project root, ◇ proposed, ⊘ blocked, ○ in_progress, ● implemented, ✗ archived). Feature sets (parents
+with children) render using their derived state symbol. Do NOT suggest changing parent feature states based on
+children's states.

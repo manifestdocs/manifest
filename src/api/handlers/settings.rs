@@ -1,3 +1,9 @@
+//! Server configuration management endpoints.
+//!
+//! Exposes the current server settings (database path, default agent) and
+//! supports partial updates. Changing the database path triggers a server
+//! restart. Path restrictions prevent writing to sensitive directories.
+
 use std::path::PathBuf;
 
 use axum::{http::StatusCode, response::IntoResponse, Json};
@@ -43,32 +49,7 @@ pub async fn update_settings(
         })
         .unwrap_or(None);
 
-    // Validate default_agent if provided
-    const ALLOWED_AGENTS: &[&str] = &["claude", "gemini", "copilot", "codex"];
-    let new_agent = if let Some(agent_val) = body.get("default_agent") {
-        if agent_val.is_null() {
-            Some(None) // Reset to default
-        } else if let Some(agent) = agent_val.as_str() {
-            if !ALLOWED_AGENTS.contains(&agent) {
-                return Err(ApiError::from((
-                    StatusCode::BAD_REQUEST,
-                    format!(
-                        "Invalid default_agent '{}'. Allowed values: {}",
-                        agent,
-                        ALLOWED_AGENTS.join(", ")
-                    ),
-                )));
-            }
-            Some(Some(agent.to_string()))
-        } else {
-            return Err(ApiError::from((
-                StatusCode::BAD_REQUEST,
-                "default_agent must be a string".to_string(),
-            )));
-        }
-    } else {
-        None // Not provided in request, leave unchanged
-    };
+    let new_agent = parse_agent_value(&body)?;
 
     // Validate database path is not in a restricted directory
     if let Some(ref path) = new_db_path {
@@ -263,27 +244,28 @@ fn has_manifest_mcp_entry(path: &PathBuf) -> bool {
         None => return false,
     };
 
-    for (_name, server) in servers {
-        // HTTP transport: url contains localhost:17010/mcp
-        if let Some(url) = server.get("url").and_then(|u| u.as_str()) {
-            if url.contains("localhost:17010/mcp") {
-                return true;
-            }
-        }
+    servers.values().any(is_manifest_mcp_server)
+}
 
-        // Stdio transport (legacy): command is "manifest" and args contains "mcp"
-        if let Some(cmd) = server.get("command").and_then(|c| c.as_str()) {
-            if cmd == "manifest" || cmd.ends_with("/manifest") {
-                if let Some(args) = server.get("args").and_then(|a| a.as_array()) {
-                    if args.iter().any(|a| a.as_str() == Some("mcp")) {
-                        return true;
-                    }
-                }
-            }
+/// Check if a single MCP server entry points to Manifest.
+fn is_manifest_mcp_server(server: &serde_json::Value) -> bool {
+    // HTTP transport: url contains localhost:17010/mcp
+    if let Some(url) = server.get("url").and_then(|u| u.as_str()) {
+        if url.contains("localhost:17010/mcp") {
+            return true;
         }
     }
 
-    false
+    // Stdio transport (legacy): command is "manifest" and args contains "mcp"
+    let cmd = match server.get("command").and_then(|c| c.as_str()) {
+        Some(c) if c == "manifest" || c.ends_with("/manifest") => c,
+        _ => return false,
+    };
+    let _ = cmd; // used only for the guard above
+    server
+        .get("args")
+        .and_then(|a| a.as_array())
+        .is_some_and(|args| args.iter().any(|a| a.as_str() == Some("mcp")))
 }
 
 /// Write the manifest MCP entry into Claude Code's global config.
@@ -354,6 +336,38 @@ fn configure_claude_mcp() -> Result<impl IntoResponse, ApiError> {
         "success": true,
         "config_file": config_path.display().to_string(),
     })))
+}
+
+/// Parse and validate the `default_agent` field from a settings update body.
+///
+/// Returns `Ok(None)` if not present, `Ok(Some(None))` to reset, `Ok(Some(Some(agent)))` if valid.
+fn parse_agent_value(body: &serde_json::Value) -> Result<Option<Option<String>>, ApiError> {
+    const ALLOWED_AGENTS: &[&str] = &["claude", "gemini", "copilot", "codex"];
+
+    let agent_val = match body.get("default_agent") {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+    if agent_val.is_null() {
+        return Ok(Some(None));
+    }
+    let agent = agent_val.as_str().ok_or_else(|| {
+        ApiError::from((
+            StatusCode::BAD_REQUEST,
+            "default_agent must be a string".to_string(),
+        ))
+    })?;
+    if !ALLOWED_AGENTS.contains(&agent) {
+        return Err(ApiError::from((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Invalid default_agent '{}'. Allowed values: {}",
+                agent,
+                ALLOWED_AGENTS.join(", ")
+            ),
+        )));
+    }
+    Ok(Some(Some(agent.to_string())))
 }
 
 /// Resolve the effective database path given the current config and environment.

@@ -1,0 +1,3 @@
+VERIFY: Store verification comments produced by your analysis of verify_feature output. Pass an empty comments
+array if the implementation fully satisfies the spec. Severity levels: 'critical' (core requirement missing),
+'major' (significant gap), 'minor' (style or polish drift).

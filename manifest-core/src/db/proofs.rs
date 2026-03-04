@@ -17,7 +17,9 @@ impl Database {
         let output = input.output.map(|o| {
             if o.len() > PROOF_OUTPUT_MAX_CHARS {
                 let truncated = &o[..PROOF_OUTPUT_MAX_CHARS];
-                format!("{truncated}\n\n... (output truncated at {PROOF_OUTPUT_MAX_CHARS} characters)")
+                format!(
+                    "{truncated}\n\n... (output truncated at {PROOF_OUTPUT_MAX_CHARS} characters)"
+                )
             } else {
                 o
             }
@@ -108,14 +110,5 @@ impl Database {
         .await?;
 
         row.as_ref().map(row_to_proof).transpose()
-    }
-
-    /// Delete all proofs for a feature.
-    pub async fn delete_proofs_for_feature(&self, feature_id: FeatureId) -> Result<u64> {
-        let result = sqlx::query("DELETE FROM proofs WHERE feature_id = $1")
-            .bind(feature_id.to_string())
-            .execute(&self.pool)
-            .await?;
-        Ok(result.rows_affected())
     }
 }

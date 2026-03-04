@@ -1,3 +1,7 @@
+//! Health check and version information endpoints.
+//!
+//! Stateless endpoints that require no authentication or database access.
+
 use axum::{response::IntoResponse, Json};
 
 /// Health check endpoint returning server status.
