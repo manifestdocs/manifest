@@ -38,8 +38,9 @@ pub async fn get_active_feature(
 
             // Check for stale in_progress features
             if state == FeatureState::InProgress.as_str() {
-                if let Ok(feature) = client.get_feature(feature_id).await {
-                    if let Some(warning) = super::features::stale_warning(&feature) {
+                if let Ok(ctx) = client.get_feature_with_context(feature_id).await {
+                    let is_leaf = ctx.children.is_empty();
+                    if let Some(warning) = super::features::stale_warning(&ctx.feature, is_leaf) {
                         content.push(Content::text(warning));
                     }
                 }

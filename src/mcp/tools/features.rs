@@ -35,11 +35,13 @@ use super::spec::SpecConfig;
 
 use super::client_err;
 
-/// Check if an in_progress feature is stale (no update for >24h).
+/// Check if an in_progress leaf feature is stale (no update for >24h).
 /// Uses `claimed_at` when available (more accurate — not reset by metadata changes),
 /// falls back to `updated_at` for features claimed before this field existed.
-pub(crate) fn stale_warning(feature: &Feature) -> Option<String> {
-    if feature.state != FeatureState::InProgress {
+/// Pass `is_leaf = false` for feature sets — their in_progress state is derived
+/// from children and the warning would be misleading.
+pub(crate) fn stale_warning(feature: &Feature, is_leaf: bool) -> Option<String> {
+    if !is_leaf || feature.state != FeatureState::InProgress {
         return None;
     }
     let reference_time = feature.claimed_at.unwrap_or(feature.updated_at);
@@ -247,8 +249,9 @@ pub async fn get_feature(
         feature_with_context.feature.state.as_str(),
         tier.as_str(),
     );
+    let is_leaf = feature_with_context.children.is_empty();
     let mut content = vec![Content::text(summary)];
-    if let Some(warning) = stale_warning(&feature_with_context.feature) {
+    if let Some(warning) = stale_warning(&feature_with_context.feature, is_leaf) {
         content.push(Content::text(warning));
     }
     content.push(Content::text(yaml));
@@ -582,11 +585,16 @@ pub async fn start_feature(
         is_root,
     );
 
-    if spec_status.should_block() {
+    if spec_status.should_block() && !req.force {
         let guidance = spec_status.guidance(&config).unwrap_or_default();
+        let reason = if !spec_status.has_details {
+            "specification required"
+        } else {
+            "testable acceptance criteria required"
+        };
         return Ok(CallToolResult::error(vec![Content::text(format!(
-            "Cannot start '{}' — specification required.\n\n{}",
-            feature_with_context.feature.title, guidance
+            "Cannot start '{}' — {}.\n\n{}\n\nTo override, call start_feature with force=true.",
+            feature_with_context.feature.title, reason, guidance
         ))]));
     }
 
@@ -1130,8 +1138,9 @@ pub async fn get_next_feature(
             };
 
             let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
+            let is_leaf = feature_ctx.children.is_empty();
             let mut content = vec![Content::text(summary)];
-            if let Some(warning) = stale_warning(&feature_ctx.feature) {
+            if let Some(warning) = stale_warning(&feature_ctx.feature, is_leaf) {
                 content.push(Content::text(warning));
             }
             content.push(Content::text(yaml));
