@@ -120,12 +120,14 @@ When asked to break down, plan, or decompose a project into features:
 6. After user confirms, call plan with confirm=true
 7. Distill the root — replace the verbatim PRD with high-level project context using update_feature
 8. Create versions and distribute features across them:
-   a) Create semantic versions with create_version (e.g., 0.1.0, 0.2.0, 0.3.0)
-   b) Assign features to versions using set_feature_version — group by delivery phase:
-      - 0.1.0: foundational features (setup, core models, basic CRUD)
-      - 0.2.0: features that build on 0.1.0 (validation, relationships, business logic)
-      - 0.3.0+: advanced features (optimization, integrations, polish)
-   c) Each version should be a shippable increment — avoid splitting tightly-coupled features across versions
+   a) Call list_versions first — if versions already exist, build on them rather than starting from scratch
+   b) Assess scope: a simple app (1-10 features) may need just one version; a complex app needs multiple
+      versions that build incrementally from MVP to full-featured
+   c) Create versions with create_version using semantic versioning. For new projects, start at 0.1.0.
+      For existing projects, continue from the latest version.
+   d) Assign features to versions using set_feature_version. Think about dependency order — features that
+      others depend on must ship first. Group tightly-coupled features in the same version.
+   e) Each version should be a shippable increment that delivers usable value on its own
 </planning>
 
 <organization>
@@ -145,6 +147,15 @@ When creating new features:
 </organization>
 
 <workflow>
+0. TRACK — ensure work is captured in Manifest:
+   - When the user asks for non-trivial work (new features, multi-file changes, anything that would trigger
+     planning mode), ALWAYS check Manifest first: call find_features to see if a matching feature exists.
+   - If no matching feature exists, ask the user: "Should I create a feature in Manifest to track this work?"
+   - If the user agrees, call create_feature with a descriptive title under the appropriate parent, then
+     write a spec using update_feature before proceeding.
+   - If the user declines, proceed without Manifest tracking — but still mention they can add it later.
+   - Skip this step for trivial tasks (typo fixes, one-line changes, quick questions).
+
 1. ORIENT — understand what exists and what's needed:
    - list_projects (filter by directory_path to find project for your CWD)
    - render_feature_tree — see the full picture
