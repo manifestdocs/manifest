@@ -783,6 +783,15 @@ impl ManifestClient {
         self.handle_response(response).await
     }
 
+    /// Get the latest proof for a feature (most recent first).
+    pub async fn get_latest_proof_for_feature(
+        &self,
+        feature_id: Uuid,
+    ) -> Result<Option<Proof>, ClientError> {
+        let proofs = self.get_proofs_for_feature(feature_id).await?;
+        Ok(proofs.into_iter().next())
+    }
+
     /// Get all proofs for a feature, ordered by most recent first.
     pub async fn get_proofs_for_feature(
         &self,

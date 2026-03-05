@@ -10,7 +10,7 @@ use super::tools;
 use super::types::{
     AddProjectDirectoryRequest, CompleteFeatureRequest, CreateFeatureRequest, CreateVersionRequest,
     DeleteFeatureRequest, FindFeaturesRequest, GenerateFeatureTreeRequest, GetActiveFeatureRequest,
-    GetFeatureRequest, GetNextFeatureRequest, GetProjectHistoryRequest,
+    GetFeatureProofRequest, GetFeatureRequest, GetNextFeatureRequest, GetProjectHistoryRequest,
     GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
     PlanFeaturesRequest, ProveFeatureRequest, RecordVerificationRequest, ReleaseVersionRequest,
     RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest, SyncRequest,
@@ -209,6 +209,14 @@ impl McpServer {
         tools::features::prove_feature(&self.client, params.0).await
     }
 
+    #[tool(description = "Get feature proof")]
+    async fn get_feature_proof(
+        &self,
+        params: Parameters<GetFeatureProofRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::features::get_feature_proof(&self.client, params.0).await
+    }
+
     #[tool(description = "Update feature")]
     async fn update_feature(
         &self,
@@ -365,6 +373,7 @@ fn tool_description(name: &str) -> Option<&'static str> {
         "start_feature" => include_str!("instructions/tools/start_feature.txt"),
         "complete_feature" => include_str!("instructions/tools/complete_feature.txt"),
         "prove_feature" => include_str!("instructions/tools/prove_feature.txt"),
+        "get_feature_proof" => include_str!("instructions/tools/get_feature_proof.txt"),
         "update_feature" => include_str!("instructions/tools/update_feature.txt"),
         "delete_feature" => include_str!("instructions/tools/delete_feature.txt"),
         "get_next_feature" => include_str!("instructions/tools/get_next_feature.txt"),

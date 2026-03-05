@@ -16,10 +16,10 @@ use crate::mcp::{
     tree_render,
     types::{
         CommitInfo, CompleteFeatureRequest, CreateFeatureRequest, DeleteFeatureRequest,
-        FeatureInfo, FeatureInfoWithContext, FindFeaturesRequest, GetFeatureRequest,
-        GetNextFeatureRequest, HistoryEntryInfo, PlanFeaturesRequest, ProveFeatureRequest,
-        RecordVerificationRequest, RenderFeatureTreeRequest, StartFeatureRequest,
-        UpdateFeatureRequest, VerifyFeatureRequest,
+        FeatureInfo, FeatureInfoWithContext, FindFeaturesRequest, GetFeatureProofRequest,
+        GetFeatureRequest, GetNextFeatureRequest, HistoryEntryInfo, PlanFeaturesRequest,
+        ProveFeatureRequest, RecordVerificationRequest, RenderFeatureTreeRequest,
+        StartFeatureRequest, UpdateFeatureRequest, VerifyFeatureRequest,
     },
     ManifestClient,
 };
@@ -993,6 +993,75 @@ pub async fn prove_feature(
         format!("Verification recorded — exit code {}", proof.exit_code)
     };
     Ok(CallToolResult::success(vec![Content::text(summary)]))
+}
+
+/// Get the latest proof and verification status for a feature.
+pub async fn get_feature_proof(
+    client: &ManifestClient,
+    req: GetFeatureProofRequest,
+) -> Result<CallToolResult, McpError> {
+    let feature_id = client
+        .resolve_feature_id(&req.feature_id, None)
+        .await
+        .map_err(client_err)?;
+
+    let feature = client.get_feature(feature_id).await.map_err(client_err)?;
+
+    let latest_proof = client
+        .get_latest_proof_for_feature(feature_id)
+        .await
+        .map_err(client_err)?;
+
+    let mut content = Vec::new();
+
+    // Proof section
+    match latest_proof {
+        Some(proof) => {
+            let status = if proof.exit_code == 0 {
+                "\u{2713} passing"
+            } else {
+                "\u{2717} failing"
+            };
+            let date = proof.created_at.format("%Y-%m-%d");
+            content.push(Content::text(format!(
+                "Proof: {} (exit code {}) \u{2014} {}\nCommand: {}",
+                status, proof.exit_code, date, proof.command
+            )));
+
+            // Render test checklist if available
+            if let Some(ref suites) = proof.test_suites {
+                if !suites.is_empty() {
+                    content.push(Content::text(format::render_proof_checklist(suites)));
+                }
+            }
+        }
+        None => {
+            content.push(Content::text("No proof recorded."));
+        }
+    }
+
+    // Acceptance criteria from spec
+    if let Some(ref details) = feature.details {
+        let checkboxes = format::extract_checkboxes(details);
+        if !checkboxes.is_empty() {
+            let mut section = String::from("Acceptance criteria:\n");
+            for line in &checkboxes {
+                section.push_str(&format!("  {}\n", line));
+            }
+            content.push(Content::text(section.trim_end().to_string()));
+        }
+    }
+
+    // Verification section
+    if let Some(ref verified_at) = feature.verified_at {
+        let comments = feature.verification_result.as_deref().unwrap_or(&[]);
+        content.push(Content::text(format::render_verification(
+            comments,
+            verified_at,
+        )));
+    }
+
+    Ok(CallToolResult::success(content))
 }
 
 /// Get the next workable feature for a project.

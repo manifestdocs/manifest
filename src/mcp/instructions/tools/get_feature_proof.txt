@@ -1,0 +1,1 @@
+ORIENT: Get the latest proof (test evidence) and verification status for a feature, rendered as a vitest/rspec-style checklist. Shows proof status, test command, structured test results with pass/fail symbols, acceptance criteria from the spec, and verification comments. Read-only.

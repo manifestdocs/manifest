@@ -9,7 +9,10 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::mcp::types::{BreadcrumbItemInfo, FeatureInfoWithContext};
-use crate::models::{FeatureWithContext, ProjectHistoryEntry, TestState, TestSuite};
+use crate::models::{
+    FeatureWithContext, ProjectHistoryEntry, TestState, TestSuite, VerificationComment,
+    VerificationSeverity,
+};
 
 /// Render a markdown table from headers and rows.
 ///
@@ -365,6 +368,136 @@ pub fn render_test_tree(suites: &[TestSuite]) -> String {
     }
     out.push_str(&parts.join(", "));
     out
+}
+
+/// Render a proof's test results as a vitest/rspec-style checklist.
+///
+/// Uses suite name (not file path) as header, always shows duration,
+/// and explicitly shows "0 failed" when all pass.
+///
+/// ```text
+/// Store Inventory
+///   ✓ returns pet counts grouped by status (12ms)
+///   ✓ counts are accurate after updates (8ms)
+///
+/// 4 passed, 0 failed
+/// ```
+pub fn render_proof_checklist(suites: &[TestSuite]) -> String {
+    let mut out = String::new();
+    let mut passed = 0u32;
+    let mut failed = 0u32;
+    let mut errored = 0u32;
+    let mut skipped = 0u32;
+
+    for suite in suites {
+        // Use suite name (not file path) for proof checklist
+        out.push_str(&suite.name);
+        out.push('\n');
+
+        for test in &suite.tests {
+            match test.state {
+                TestState::Passed => passed += 1,
+                TestState::Failed => failed += 1,
+                TestState::Errored => errored += 1,
+                TestState::Skipped => skipped += 1,
+            }
+            let symbol = test_state_symbol(&test.state);
+            out.push_str(&format!("  {} {}", symbol, test.name));
+            if let Some(ms) = test.duration_ms {
+                if ms >= 1000 {
+                    out.push_str(&format!(" ({:.1}s)", ms as f64 / 1000.0));
+                } else {
+                    out.push_str(&format!(" ({}ms)", ms));
+                }
+            }
+            out.push('\n');
+            if matches!(test.state, TestState::Failed | TestState::Errored) {
+                if let Some(ref msg) = test.message {
+                    for line in msg.lines() {
+                        out.push_str(&format!("    {}\n", line));
+                    }
+                }
+            }
+        }
+        out.push('\n');
+    }
+
+    // Summary line — always show "0 failed" explicitly when all pass
+    let mut parts = Vec::new();
+    parts.push(format!("{passed} passed"));
+    parts.push(format!("{failed} failed"));
+    if errored > 0 {
+        parts.push(format!("{errored} errored"));
+    }
+    if skipped > 0 {
+        parts.push(format!("{skipped} skipped"));
+    }
+    out.push_str(&parts.join(", "));
+    out
+}
+
+/// Render verification status from a feature's verification data.
+///
+/// ```text
+/// Verification: ✓ passed (2026-03-03)
+/// ```
+/// or with comments:
+/// ```text
+/// Verification: 2 comments (2026-03-03)
+///   ✗ [critical] Core requirement missing
+///   ⚠ [major] Significant gap
+/// ```
+pub fn render_verification(
+    comments: &[VerificationComment],
+    verified_at: &DateTime<Utc>,
+) -> String {
+    let date = verified_at.format("%Y-%m-%d");
+    if comments.is_empty() {
+        return format!("Verification: \u{2713} passed ({})", date);
+    }
+
+    let mut out = format!(
+        "Verification: {} comment{} ({})\n",
+        comments.len(),
+        if comments.len() == 1 { "" } else { "s" },
+        date
+    );
+    for comment in comments {
+        let icon = match comment.severity {
+            VerificationSeverity::Critical => "\u{2717}", // ✗
+            VerificationSeverity::Major => "\u{26a0}",    // ⚠
+            VerificationSeverity::Minor => "\u{2022}",    // •
+        };
+        out.push_str(&format!(
+            "  {} [{}] {}\n",
+            icon,
+            severity_label(&comment.severity),
+            comment.title
+        ));
+    }
+    out.trim_end().to_string()
+}
+
+fn severity_label(s: &VerificationSeverity) -> &'static str {
+    match s {
+        VerificationSeverity::Critical => "critical",
+        VerificationSeverity::Major => "major",
+        VerificationSeverity::Minor => "minor",
+    }
+}
+
+/// Extract acceptance criteria checkboxes from feature details.
+///
+/// Matches lines like `- [ ] Criterion text` and `- [x] Criterion text`.
+pub fn extract_checkboxes(details: &str) -> Vec<String> {
+    details
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("- [ ]") || trimmed.starts_with("- [x]")
+        })
+        .map(|line| line.trim().to_string())
+        .collect()
 }
 
 #[cfg(test)]

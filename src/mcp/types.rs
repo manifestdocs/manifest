@@ -730,6 +730,12 @@ pub struct ActiveFeatureResponse {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetFeatureProofRequest {
+    #[schemars(description = "Feature ID (UUID, display ID like 'MAN-42', or UUID prefix)")]
+    pub feature_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetProjectHistoryRequest {
     #[schemars(description = "The UUID of the project to get activity for")]
     pub project_id: Uuid,
