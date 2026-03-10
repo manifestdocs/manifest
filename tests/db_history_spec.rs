@@ -52,6 +52,7 @@ mod feature_history {
                     details: HistoryDetails {
                         summary: "Implemented login flow".to_string(),
                         commits: vec![],
+                    ..Default::default()
                     },
                 })
                 .await
@@ -89,6 +90,7 @@ mod feature_history {
                     details: HistoryDetails {
                         summary: "Manual update".to_string(),
                         commits: vec![],
+                    ..Default::default()
                     },
                 })
                 .await
@@ -154,6 +156,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "First change".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -165,6 +168,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Second change".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -222,6 +226,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Change to feature 1".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -233,6 +238,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Change to feature 2".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -277,6 +283,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Some work".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -351,6 +358,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Work on feature 1".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -362,6 +370,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Work on feature 2".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -400,6 +409,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Implemented OAuth flow".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -441,6 +451,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "First change".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -452,6 +463,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Second change".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -493,6 +505,7 @@ mod feature_history {
                     details: HistoryDetails {
                         summary: format!("Change {}", i),
                         commits: vec![],
+                    ..Default::default()
                     },
                 })
                 .await
@@ -533,6 +546,7 @@ mod feature_history {
                     details: HistoryDetails {
                         summary: format!("Change {}", i),
                         commits: vec![],
+                    ..Default::default()
                     },
                 })
                 .await
@@ -612,6 +626,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Work in project 1".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await
@@ -623,6 +638,7 @@ mod feature_history {
                 details: HistoryDetails {
                     summary: "Work in project 2".to_string(),
                     commits: vec![],
+                    ..Default::default()
                 },
             })
             .await

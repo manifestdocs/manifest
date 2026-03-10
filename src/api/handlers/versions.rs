@@ -91,6 +91,7 @@ pub async fn update_version(
                         details: HistoryDetails {
                             summary: format!("Released {}", updated.name),
                             commits: vec![],
+                            ..Default::default()
                         },
                     })
                     .await;

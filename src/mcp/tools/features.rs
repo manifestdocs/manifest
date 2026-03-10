@@ -305,12 +305,25 @@ pub async fn plan(
     } else {
         "Proposed"
     };
-    let summary = format!(
-        "{} {} feature{}",
-        verb,
-        count,
-        if count == 1 { "" } else { "s" }
-    );
+
+    // Count features with non-default states (for bootstrapping summary)
+    let implemented_count = count_features_with_state(&response.proposed_features, "implemented");
+    let summary = if implemented_count > 0 && response.created {
+        format!(
+            "{} {} feature{} ({} already implemented)",
+            verb,
+            count,
+            if count == 1 { "" } else { "s" },
+            implemented_count,
+        )
+    } else {
+        format!(
+            "{} {} feature{}",
+            verb,
+            count,
+            if count == 1 { "" } else { "s" }
+        )
+    };
 
     let mut blocks = vec![Content::text(summary), Content::text(json)];
 
@@ -814,7 +827,7 @@ pub async fn complete_feature(
 
     // Complete feature (creates history + updates state + clears claims + emits event)
     let response = client
-        .complete_feature(feature_id, &req.summary, &commits)
+        .complete_feature(feature_id, &req.summary, &commits, req.backfill)
         .await
         .map_err(client_err)?;
 
@@ -828,17 +841,21 @@ pub async fn complete_feature(
         .await
         .and_then(|p| try_merge_feature_branch(&p));
 
-    // Fetch latest proof for display (best-effort)
-    let latest_proof = client
-        .get_proofs_for_feature(feature_id)
-        .await
-        .ok()
-        .and_then(|proofs| proofs.into_iter().next());
+    // Fetch latest proof for display (best-effort, skip for backfill)
+    let latest_proof = if !req.backfill {
+        client
+            .get_proofs_for_feature(feature_id)
+            .await
+            .ok()
+            .and_then(|proofs| proofs.into_iter().next())
+    } else {
+        None
+    };
 
     let commit_count = history.details.commits.len();
     let feature_info: FeatureInfo = (&feature).into();
     let history_id: uuid::Uuid = history.id.into();
-    let result = serde_json::json!({
+    let mut result = serde_json::json!({
         "feature": feature_info,
         "history_entry": {
             "id": history_id,
@@ -846,35 +863,51 @@ pub async fn complete_feature(
             "created_at": history.created_at.to_rfc3339()
         }
     });
+    if req.backfill {
+        result["backfilled"] = serde_json::Value::Bool(true);
+    }
 
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    let summary = format!(
-        "Completed '{}' — recorded {} commit{}",
-        feature.title,
-        commit_count,
-        if commit_count == 1 { "" } else { "s" },
-    );
+    let summary = if req.backfill {
+        format!(
+            "Backfilled '{}' — recorded {} commit{}",
+            feature.title,
+            commit_count,
+            if commit_count == 1 { "" } else { "s" },
+        )
+    } else {
+        format!(
+            "Completed '{}' — recorded {} commit{}",
+            feature.title,
+            commit_count,
+            if commit_count == 1 { "" } else { "s" },
+        )
+    };
     let mut content = vec![Content::text(summary)];
-    // Verification — full test tree
-    match &latest_proof {
-        Some(proof) => match &proof.test_suites {
-            Some(suites) if !suites.is_empty() => {
-                content.push(Content::text(format!(
-                    "Verification:\n{}",
-                    format::render_test_tree(suites)
-                )));
+    // Verification — full test tree (backfilled features skip this)
+    if req.backfill {
+        content.push(Content::text("Verification: backfilled (existing code is the proof)"));
+    } else {
+        match &latest_proof {
+            Some(proof) => match &proof.test_suites {
+                Some(suites) if !suites.is_empty() => {
+                    content.push(Content::text(format!(
+                        "Verification:\n{}",
+                        format::render_test_tree(suites)
+                    )));
+                }
+                _ => {
+                    content.push(Content::text(format!(
+                        "Verification: exit code {}",
+                        proof.exit_code
+                    )));
+                }
+            },
+            None => {
+                content.push(Content::text("Verification: none"));
             }
-            _ => {
-                content.push(Content::text(format!(
-                    "Verification: exit code {}",
-                    proof.exit_code
-                )));
-            }
-        },
-        None => {
-            content.push(Content::text("Verification: none"));
         }
     }
     for warning in &warnings {
@@ -1237,6 +1270,21 @@ async fn try_parse_via_adapter(
         result.test_suites.len()
     );
     Some(result.test_suites)
+}
+
+/// Count features (recursively) that have a specific state set.
+fn count_features_with_state(features: &[crate::mcp::types::ProposedFeature], state: &str) -> usize {
+    features
+        .iter()
+        .map(|f| {
+            let this = if f.state.as_deref() == Some(state) {
+                1
+            } else {
+                0
+            };
+            this + count_features_with_state(&f.children, state)
+        })
+        .sum()
 }
 
 /// Parse a claim-conflict JSON body into a human-readable error message.

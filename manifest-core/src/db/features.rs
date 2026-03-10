@@ -1572,6 +1572,7 @@ impl Database {
         feature_id: FeatureId,
         summary: &str,
         commits: &[CommitRef],
+        backfill: bool,
     ) -> Result<CompletionResult> {
         // Get current feature
         let feature = self
@@ -1584,8 +1585,8 @@ impl Database {
             return Err(ManifestError::invalid_state("Cannot complete a non-leaf feature").into());
         }
 
-        // Hard gate: require specification (details)
-        if feature.details.as_ref().is_none_or(|d| d.trim().is_empty()) {
+        // Hard gate: require specification (details) — skip for backfill
+        if !backfill && feature.details.as_ref().is_none_or(|d| d.trim().is_empty()) {
             return Err(ManifestError::invalid_state(
                 "Cannot complete feature: no specification. Call update_feature to add details describing what was built."
             ).into());
@@ -1597,41 +1598,43 @@ impl Database {
             .await?
             .ok_or_else(|| ManifestError::not_found("Project"))?;
 
-        // Always fetch latest proof — TDD is always enforced
-        let latest_proof = self.get_latest_proof_for_feature(feature_id).await?;
-
-        // Hard gate: require passing proof
-        match &latest_proof {
-            None => {
-                return Err(ManifestError::invalid_state(
-                    "Cannot complete feature: no proof recorded. Call prove_feature with your test results first."
-                ).into());
-            }
-            Some(p) if p.exit_code != 0 => {
-                return Err(ManifestError::invalid_state(
-                    "Cannot complete feature: latest proof has failing tests (exit code != 0). Fix the tests and call prove_feature again."
-                ).into());
-            }
-            _ => {} // passing proof exists, proceed
-        }
-
         let mut warnings = Vec::new();
 
-        // Encourage structured test results for UI rendering
-        if let Some(ref proof) = latest_proof {
-            if proof.test_suites.as_ref().is_none_or(|s| s.is_empty()) {
-                warnings.push(
-                    "Proof recorded but has no structured test results. Include test_suites with { name, suite, state, file, line } for consistent display in the UI.".to_string(),
-                );
-            }
-        }
+        if !backfill {
+            // Always fetch latest proof — TDD is always enforced
+            let latest_proof = self.get_latest_proof_for_feature(feature_id).await?;
 
-        // Check if spec was updated since the feature was claimed
-        if let Some(claimed_at) = feature.claimed_at {
-            if feature.updated_at <= claimed_at {
-                warnings.push(
-                    "Feature spec not updated since work started. Call update_feature to reflect what was actually built.".to_string(),
-                );
+            // Hard gate: require passing proof
+            match &latest_proof {
+                None => {
+                    return Err(ManifestError::invalid_state(
+                        "Cannot complete feature: no proof recorded. Call prove_feature with your test results first."
+                    ).into());
+                }
+                Some(p) if p.exit_code != 0 => {
+                    return Err(ManifestError::invalid_state(
+                        "Cannot complete feature: latest proof has failing tests (exit code != 0). Fix the tests and call prove_feature again."
+                    ).into());
+                }
+                _ => {} // passing proof exists, proceed
+            }
+
+            // Encourage structured test results for UI rendering
+            if let Some(ref proof) = latest_proof {
+                if proof.test_suites.as_ref().is_none_or(|s| s.is_empty()) {
+                    warnings.push(
+                        "Proof recorded but has no structured test results. Include test_suites with { name, suite, state, file, line } for consistent display in the UI.".to_string(),
+                    );
+                }
+            }
+
+            // Check if spec was updated since the feature was claimed
+            if let Some(claimed_at) = feature.claimed_at {
+                if feature.updated_at <= claimed_at {
+                    warnings.push(
+                        "Feature spec not updated since work started. Call update_feature to reflect what was actually built.".to_string(),
+                    );
+                }
             }
         }
 
@@ -1646,6 +1649,7 @@ impl Database {
                 details: HistoryDetails {
                     summary: summary.to_string(),
                     commits: commits.to_vec(),
+                    backfilled: backfill,
                 },
             })
             .await?;

@@ -52,6 +52,11 @@ pub struct CompleteFeatureRequest {
     #[schemars(description = "Git commits created during this work")]
     #[serde(default)]
     pub commits: Vec<CommitRefInput>,
+    #[schemars(
+        description = "Set to true when bootstrapping existing projects. Skips proof and spec requirements — the existing code is the proof. History entry is tagged as 'backfilled' for visual distinction from features that went through the full TDD cycle."
+    )]
+    #[serde(default)]
+    pub backfill: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -585,6 +590,11 @@ pub struct ProposedFeature {
     /// Priority for ordering. Lower values = implement first.
     #[serde(default)]
     pub priority: i32,
+    /// Initial state for this feature. Valid values: 'proposed' (default), 'implemented'.
+    /// Use 'implemented' when bootstrapping existing projects — features detected from the
+    /// codebase can be created directly in the implemented state, skipping the prove/complete cycle.
+    #[serde(default)]
+    pub state: Option<String>,
     /// Child features (for hierarchical structure)
     #[serde(default)]
     pub children: Vec<ProposedFeature>,

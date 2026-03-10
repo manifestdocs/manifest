@@ -1952,6 +1952,14 @@ components:
           type: integer
           default: 0
           description: Priority for ordering. Lower values = implement first.
+        state:
+          type: string
+          nullable: true
+          description: |
+            Initial state for this feature. Valid values: 'proposed' (default), 'implemented'.
+            Use 'implemented' when bootstrapping existing projects — features detected from the
+            codebase can be created directly in the implemented state.
+          enum: [proposed, implemented]
         children:
           type: array
           default: []
@@ -2448,6 +2456,13 @@ components:
               author:
                 type: string
                 nullable: true
+        backfill:
+          type: boolean
+          default: false
+          description: |
+            When true, skips proof and spec requirements. Used for bootstrapping existing
+            projects where features were implemented before Manifest was introduced.
+            History entry is tagged as "backfilled" for visual distinction.
 
     CompleteFeatureResponse:
       type: object
