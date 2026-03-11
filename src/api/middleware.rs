@@ -15,6 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+const DEFAULT_RATE_LIMIT_MAX_CLIENTS: usize = 2_048;
+
 /// Security configuration loaded from environment variables.
 #[derive(Clone, Debug)]
 pub struct SecurityConfig {
@@ -43,6 +45,10 @@ impl SecurityConfig {
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(100); // Default: 100 requests per minute
+        let max_clients = std::env::var("MANIFEST_RATE_LIMIT_MAX_CLIENTS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_RATE_LIMIT_MAX_CLIENTS);
 
         // Enable rate limiting in cloud mode OR if API key is set
         let is_cloud_mode = std::env::var("MANIFEST_MODE")
@@ -50,7 +56,11 @@ impl SecurityConfig {
             .unwrap_or(false);
 
         let rate_limiter = if api_key.is_some() || is_cloud_mode {
-            Some(RateLimiter::new(rate_limit, Duration::from_secs(60)))
+            Some(RateLimiter::with_max_clients(
+                rate_limit,
+                Duration::from_secs(60),
+                max_clients,
+            ))
         } else {
             None
         };
@@ -70,11 +80,19 @@ impl SecurityConfig {
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(100);
+        let max_clients = std::env::var("MANIFEST_RATE_LIMIT_MAX_CLIENTS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_RATE_LIMIT_MAX_CLIENTS);
 
         Self {
             api_key: None,
             cors_origins,
-            rate_limiter: Some(RateLimiter::new(rate_limit, Duration::from_secs(60))),
+            rate_limiter: Some(RateLimiter::with_max_clients(
+                rate_limit,
+                Duration::from_secs(60),
+                max_clients,
+            )),
         }
     }
 
@@ -150,6 +168,8 @@ pub struct RateLimiter {
     max_requests: u32,
     /// Time window duration
     window: Duration,
+    /// Maximum distinct clients tracked at once.
+    max_clients: usize,
     /// Request counts per IP
     requests: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
 }
@@ -157,9 +177,15 @@ pub struct RateLimiter {
 impl RateLimiter {
     /// Create a new rate limiter.
     pub fn new(max_requests: u32, window: Duration) -> Self {
+        Self::with_max_clients(max_requests, window, DEFAULT_RATE_LIMIT_MAX_CLIENTS)
+    }
+
+    /// Create a rate limiter with explicit client tracking capacity.
+    pub fn with_max_clients(max_requests: u32, window: Duration, max_clients: usize) -> Self {
         Self {
             max_requests,
             window,
+            max_clients: max_clients.max(1),
             requests: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -171,28 +197,36 @@ impl RateLimiter {
         let cutoff = now - self.window;
 
         let mut requests = self.requests.lock().unwrap_or_else(|e| e.into_inner());
-        let entry = requests.entry(ip).or_default();
+        Self::cleanup_expired(&mut requests, cutoff);
 
-        // Remove expired entries
-        entry.retain(|&t| t > cutoff);
-
-        if entry.len() < self.max_requests as usize {
-            entry.push(now);
-            true
-        } else {
-            false
+        if let Some(entry) = requests.get_mut(&ip) {
+            if entry.len() < self.max_requests as usize {
+                entry.push(now);
+                return true;
+            }
+            return false;
         }
+
+        if requests.len() >= self.max_clients {
+            Self::evict_stalest_client(&mut requests);
+        }
+        if requests.len() >= self.max_clients {
+            tracing::warn!(
+                max_clients = self.max_clients,
+                "Rate limiter capacity reached; rejecting request"
+            );
+            return false;
+        }
+
+        requests.insert(ip, vec![now]);
+        true
     }
 
     /// Clean up old entries to prevent memory growth.
     pub fn cleanup(&self) {
         let cutoff = Instant::now() - self.window;
         let mut requests = self.requests.lock().unwrap_or_else(|e| e.into_inner());
-
-        requests.retain(|_, timestamps| {
-            timestamps.retain(|&t| t > cutoff);
-            !timestamps.is_empty()
-        });
+        Self::cleanup_expired(&mut requests, cutoff);
     }
 
     /// Spawn a background task that periodically cleans up expired entries.
@@ -204,6 +238,39 @@ impl RateLimiter {
                 limiter.cleanup();
             }
         });
+    }
+
+    fn cleanup_expired(requests: &mut HashMap<IpAddr, Vec<Instant>>, cutoff: Instant) {
+        requests.retain(|_, timestamps| {
+            timestamps.retain(|&t| t > cutoff);
+            !timestamps.is_empty()
+        });
+    }
+
+    fn evict_stalest_client(requests: &mut HashMap<IpAddr, Vec<Instant>>) {
+        let stalest_ip = requests
+            .iter()
+            .filter_map(|(ip, timestamps)| {
+                timestamps
+                    .iter()
+                    .max()
+                    .copied()
+                    .map(|latest_request| (*ip, latest_request))
+            })
+            .min_by_key(|(_, latest_request)| *latest_request)
+            .map(|(ip, _)| ip);
+
+        if let Some(ip) = stalest_ip {
+            requests.remove(&ip);
+        }
+    }
+
+    #[cfg(test)]
+    fn tracked_clients_len(&self) -> usize {
+        self.requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
     }
 }
 
@@ -347,6 +414,22 @@ mod tests {
         assert!(limiter.check(ip2));
         assert!(limiter.check(ip2));
         assert!(!limiter.check(ip2));
+    }
+
+    #[test]
+    fn rate_limiter_caps_tracked_clients() {
+        let limiter = RateLimiter::with_max_clients(5, Duration::from_secs(60), 2);
+        let ip1: IpAddr = "192.168.1.1".parse().unwrap();
+        let ip2: IpAddr = "192.168.1.2".parse().unwrap();
+        let ip3: IpAddr = "192.168.1.3".parse().unwrap();
+
+        assert!(limiter.check(ip1));
+        assert!(limiter.check(ip2));
+        assert_eq!(limiter.tracked_clients_len(), 2);
+
+        // Third client should trigger eviction rather than unbounded growth.
+        assert!(limiter.check(ip3));
+        assert_eq!(limiter.tracked_clients_len(), 2);
     }
 
     #[test]

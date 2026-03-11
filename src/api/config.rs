@@ -38,16 +38,24 @@ impl PathRestrictions {
             .ok()
             .map(|s| s.split(',').map(|p| p.trim().to_string()).collect());
 
+        let mut denied_paths = vec![
+            "/etc".to_string(),
+            "/var".to_string(),
+            "/tmp".to_string(),
+            "/root".to_string(),
+            "/proc".to_string(),
+            "/sys".to_string(),
+        ];
+        #[cfg(target_os = "macos")]
+        denied_paths.extend(
+            ["/private/etc", "/private/var", "/private/tmp"]
+                .into_iter()
+                .map(str::to_string),
+        );
+
         Self {
             allowed_roots,
-            denied_paths: vec![
-                "/etc".to_string(),
-                "/var".to_string(),
-                "/tmp".to_string(),
-                "/root".to_string(),
-                "/proc".to_string(),
-                "/sys".to_string(),
-            ],
+            denied_paths,
         }
     }
 
@@ -58,9 +66,19 @@ impl PathRestrictions {
             return Err(ConfigError::Invalid("Path must be absolute".to_string()));
         }
 
-        // Canonicalize to resolve symlinks and ..
-        // Fall back to the raw path if it doesn't exist yet (e.g., during directory browsing)
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        // Reject explicit parent traversal segments.
+        if path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(ConfigError::Invalid(
+                "Path must not contain '..' components".to_string(),
+            ));
+        }
+
+        // Canonicalize to resolve symlinks and normalize paths. For non-existent paths,
+        // canonicalize the nearest existing ancestor and append the remaining suffix.
+        let canonical = canonicalize_for_validation(path);
 
         // Check denied paths
         for denied in &self.denied_paths {
@@ -85,6 +103,34 @@ impl PathRestrictions {
 
         Ok(())
     }
+}
+
+fn canonicalize_for_validation(path: &std::path::Path) -> std::path::PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+
+    let mut suffix = Vec::new();
+    let mut cursor = path;
+
+    while !cursor.exists() {
+        let Some(name) = cursor.file_name() else {
+            return path.to_path_buf();
+        };
+        suffix.push(name.to_os_string());
+        let Some(parent) = cursor.parent() else {
+            return path.to_path_buf();
+        };
+        cursor = parent;
+    }
+
+    let mut canonical = cursor
+        .canonicalize()
+        .unwrap_or_else(|_| cursor.to_path_buf());
+    for segment in suffix.iter().rev() {
+        canonical.push(segment);
+    }
+    canonical
 }
 
 #[cfg(test)]
