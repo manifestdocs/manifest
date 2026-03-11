@@ -82,24 +82,56 @@ pub async fn update_version(
     // If version was just released, create history entry and ensure minimum versions
     if was_unreleased && updated.released_at.is_some() {
         // Get project to find root_feature_id
-        if let Ok(Some(project)) = db.get_project(updated.project_id).await {
-            if let Some(root_feature_id) = project.root_feature_id {
-                let _ = db
-                    .create_history_entry(CreateHistoryInput {
-                        feature_id: root_feature_id,
-                        version_id: Some(updated.id),
-                        details: HistoryDetails {
-                            summary: format!("Released {}", updated.name),
-                            commits: vec![],
-                            ..Default::default()
-                        },
-                    })
-                    .await;
+        match db.get_project(updated.project_id).await {
+            Ok(Some(project)) => {
+                if let Some(root_feature_id) = project.root_feature_id {
+                    if let Err(e) = db
+                        .create_history_entry(CreateHistoryInput {
+                            feature_id: root_feature_id,
+                            version_id: Some(updated.id),
+                            details: HistoryDetails {
+                                summary: format!("Released {}", updated.name),
+                                commits: vec![],
+                                ..Default::default()
+                            },
+                        })
+                        .await
+                    {
+                        tracing::warn!(
+                            project_id = %updated.project_id,
+                            version_id = %updated.id,
+                            error = %e,
+                            "Failed to record release history entry"
+                        );
+                    }
+                }
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    project_id = %updated.project_id,
+                    version_id = %updated.id,
+                    "Released version references missing project"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    project_id = %updated.project_id,
+                    version_id = %updated.id,
+                    error = %e,
+                    "Failed to load project for release history entry"
+                );
             }
         }
 
         // Ensure at least 4 unreleased versions exist after release
-        let _ = db.ensure_minimum_versions(updated.project_id, 4).await;
+        if let Err(e) = db.ensure_minimum_versions(updated.project_id, 4).await {
+            tracing::warn!(
+                project_id = %updated.project_id,
+                version_id = %updated.id,
+                error = %e,
+                "Failed to ensure minimum unreleased versions after release"
+            );
+        }
     }
 
     Ok(Json(updated))

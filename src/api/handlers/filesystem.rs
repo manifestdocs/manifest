@@ -6,9 +6,11 @@
 
 use axum::{extract::Query, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
+use validator::Validate;
 
 use super::ApiError;
+use crate::api::validation::ValidatedJson;
 
 #[derive(Debug, Deserialize)]
 pub struct BrowseQuery {
@@ -57,6 +59,13 @@ const SKIP_DIRS: &[&str] = &[
     ".vscode",
 ];
 
+/// Hard cap on how many raw directory entries are inspected per browse request.
+const MAX_BROWSE_SCAN_ENTRIES: usize = 5_000;
+/// Hard cap on how many directory items are returned per browse request.
+const MAX_BROWSE_RESULTS: usize = 500;
+/// Hard cap for child scans used to compute `has_children`.
+const MAX_CHILD_SCAN_ENTRIES: usize = 200;
+
 /// Browse directories at a given path.
 ///
 /// Returns subdirectories with metadata for building a directory browser UI.
@@ -64,98 +73,9 @@ const SKIP_DIRS: &[&str] = &[
 pub async fn browse_filesystem(
     Query(query): Query<BrowseQuery>,
 ) -> Result<Json<BrowseResponse>, ApiError> {
-    let browse_path = match &query.path {
-        Some(p) => p.clone(),
-        None => {
-            let home = dirs::home_dir().ok_or_else(|| {
-                ApiError::from((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Could not determine home directory".to_string(),
-                ))
-            })?;
-            home.to_string_lossy().to_string()
-        }
-    };
-
-    let root = Path::new(&browse_path);
-
-    // Validate path is absolute
-    if !root.is_absolute() {
-        return Err(ApiError::from((
-            StatusCode::BAD_REQUEST,
-            "Path must be absolute".to_string(),
-        )));
-    }
-
-    // Validate path against security restrictions
-    let restrictions = crate::api::config::PathRestrictions::from_env();
-    if let Err(e) = restrictions.validate(root) {
-        return Err(ApiError::from((
-            StatusCode::FORBIDDEN,
-            format!("Access denied: {}", e),
-        )));
-    }
-
-    // Validate directory exists
-    if !root.exists() {
-        return Err(ApiError::from((
-            StatusCode::NOT_FOUND,
-            format!("Directory not found: {}", browse_path),
-        )));
-    }
-    if !root.is_dir() {
-        return Err(ApiError::from((
-            StatusCode::BAD_REQUEST,
-            format!("Path is not a directory: {}", browse_path),
-        )));
-    }
-
-    // Read directory entries (blocking I/O off the async runtime)
-    let root_owned = root.to_path_buf();
-    let entries = tokio::task::spawn_blocking(move || -> Result<Vec<DirectoryEntry>, String> {
-        let read_dir =
-            std::fs::read_dir(&root_owned).map_err(|e| format!("Cannot read directory: {}", e))?;
-
-        let mut entries = Vec::new();
-        for entry in read_dir.flatten() {
-            let file_type = match entry.file_type() {
-                Ok(ft) => ft,
-                Err(_) => continue,
-            };
-
-            if !file_type.is_dir() {
-                continue;
-            }
-
-            let name = entry.file_name().to_string_lossy().to_string();
-
-            // Skip hidden directories
-            if name.starts_with('.') {
-                continue;
-            }
-
-            // Skip noise directories
-            if SKIP_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-
-            let entry_path = entry.path();
-            let has_children = peek_has_subdirs(&entry_path);
-
-            entries.push(DirectoryEntry {
-                name,
-                path: entry_path.to_string_lossy().to_string(),
-                has_children,
-            });
-        }
-
-        entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        Ok(entries)
-    })
-    .await
-    .map_err(|e| ApiError::from((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())))?
-    .map_err(|e| ApiError::from((StatusCode::FORBIDDEN, e)))?;
-
+    let browse_path = resolve_browse_path(&query)?;
+    let root = validate_browse_root(&browse_path)?;
+    let entries = list_directory_entries(root.clone()).await?;
     let parent = root.parent().map(|p| p.to_string_lossy().to_string());
 
     Ok(Json(BrowseResponse {
@@ -165,9 +85,110 @@ pub async fn browse_filesystem(
     }))
 }
 
-#[derive(Debug, Deserialize)]
+fn resolve_browse_path(query: &BrowseQuery) -> Result<String, ApiError> {
+    match &query.path {
+        Some(path) => Ok(path.clone()),
+        None => {
+            let home = dirs::home_dir().ok_or_else(|| {
+                ApiError::from((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Could not determine home directory".to_string(),
+                ))
+            })?;
+            Ok(home.to_string_lossy().to_string())
+        }
+    }
+}
+
+fn validate_browse_root(path: &str) -> Result<PathBuf, ApiError> {
+    let root = Path::new(path);
+
+    if !root.is_absolute() {
+        return Err(ApiError::from((
+            StatusCode::BAD_REQUEST,
+            "Path must be absolute".to_string(),
+        )));
+    }
+
+    let restrictions = crate::api::config::PathRestrictions::from_env();
+    if let Err(e) = restrictions.validate(root) {
+        return Err(ApiError::from((
+            StatusCode::FORBIDDEN,
+            format!("Access denied: {}", e),
+        )));
+    }
+
+    if !root.exists() {
+        return Err(ApiError::from((
+            StatusCode::NOT_FOUND,
+            "Directory not found".to_string(),
+        )));
+    }
+    if !root.is_dir() {
+        return Err(ApiError::from((
+            StatusCode::BAD_REQUEST,
+            "Path is not a directory".to_string(),
+        )));
+    }
+
+    Ok(root.to_path_buf())
+}
+
+async fn list_directory_entries(root: PathBuf) -> Result<Vec<DirectoryEntry>, ApiError> {
+    tokio::task::spawn_blocking(move || -> Result<Vec<DirectoryEntry>, String> {
+        let read_dir =
+            std::fs::read_dir(&root).map_err(|e| format!("Cannot read directory: {}", e))?;
+
+        let mut entries = Vec::new();
+        let mut scanned = 0usize;
+
+        for entry in read_dir {
+            if scanned >= MAX_BROWSE_SCAN_ENTRIES || entries.len() >= MAX_BROWSE_RESULTS {
+                tracing::info!(
+                    path = %root.display(),
+                    scanned,
+                    returned = entries.len(),
+                    "Directory browse capped by configured limits"
+                );
+                break;
+            }
+            scanned += 1;
+
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+
+            let entry_path = entry.path();
+            entries.push(DirectoryEntry {
+                name,
+                path: entry_path.to_string_lossy().to_string(),
+                has_children: peek_has_subdirs(&entry_path, MAX_CHILD_SCAN_ENTRIES),
+            });
+        }
+
+        entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(entries)
+    })
+    .await
+    .map_err(|e| ApiError::from((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())))?
+    .map_err(|e| ApiError::from((StatusCode::FORBIDDEN, e)))
+}
+
+#[derive(Debug, Deserialize, Validate)]
 pub struct MkdirRequest {
     /// Absolute path of the directory to create.
+    #[validate(length(min = 1, max = 4_096))]
     pub path: String,
 }
 
@@ -185,7 +206,7 @@ pub struct MkdirResponse {
 /// - Path must not contain `..` components
 /// - Idempotent: succeeds if the directory already exists
 pub async fn create_directory(
-    Json(body): Json<MkdirRequest>,
+    ValidatedJson(body): ValidatedJson<MkdirRequest>,
 ) -> Result<Json<MkdirResponse>, ApiError> {
     let target = Path::new(&body.path);
 
@@ -233,12 +254,18 @@ pub async fn create_directory(
 
 /// Check if a directory contains any visible subdirectories.
 /// Early-exits on first match for performance.
-fn peek_has_subdirs(path: &Path) -> bool {
+fn peek_has_subdirs(path: &Path, max_scan_entries: usize) -> bool {
     let Ok(read_dir) = std::fs::read_dir(path) else {
         return false;
     };
 
+    let mut scanned = 0usize;
     for entry in read_dir.flatten() {
+        if scanned >= max_scan_entries {
+            return false;
+        }
+        scanned += 1;
+
         let Ok(ft) = entry.file_type() else {
             continue;
         };

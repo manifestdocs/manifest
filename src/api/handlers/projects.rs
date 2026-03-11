@@ -11,6 +11,7 @@ use axum::{
 };
 use serde::Deserialize;
 use uuid::Uuid;
+use validator::Validate;
 
 use crate::db::Database;
 use crate::models::{
@@ -75,7 +76,13 @@ pub async fn create_project(
     let project = db.create_project(input).await.map_err(internal_error)?;
 
     // Bootstrap initial versions so agents and the web UI have versions to target
-    let _ = db.ensure_minimum_versions(project.id, 4).await;
+    if let Err(e) = db.ensure_minimum_versions(project.id, 4).await {
+        tracing::warn!(
+            project_id = %project.id,
+            error = %e,
+            "Failed to ensure minimum versions for new project"
+        );
+    }
 
     Ok((StatusCode::CREATED, Json(project)))
 }
@@ -132,12 +139,7 @@ pub async fn get_project_history(
     Path(project_id): Path<Uuid>,
     Query(query): Query<ProjectHistoryQuery>,
 ) -> Result<Json<Vec<ProjectHistoryEntry>>, ApiError> {
-    // Parse optional since datetime
-    let since = query
-        .since
-        .as_ref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|dt| dt.with_timezone(&chrono::Utc));
+    let since = parse_since_filter(query.since.as_deref())?;
 
     db.get_project_history(
         project_id.into(),
@@ -199,7 +201,7 @@ pub async fn remove_project_directory(
 // ============================================================
 
 /// Request body for setting project focus.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct SetFocusRequest {
     /// Feature ID to focus on, or null to clear focus.
     pub feature_id: Option<Uuid>,
@@ -217,7 +219,7 @@ pub struct FocusResponse {
 pub async fn set_project_focus(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-    Json(body): Json<SetFocusRequest>,
+    ValidatedJson(body): ValidatedJson<SetFocusRequest>,
 ) -> Result<StatusCode, ApiError> {
     let project_id: ProjectId = id.into();
     let feature_id = body.feature_id.map(FeatureId::from);
@@ -271,6 +273,23 @@ pub async fn get_project_by_directory(
         .map(Json)
         .ok_or(ApiError::from((
             StatusCode::NOT_FOUND,
-            format!("No project found for directory: {}", query.path),
+            "No project found for the provided directory".to_string(),
         )))
+}
+
+fn parse_since_filter(
+    since: Option<&str>,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApiError> {
+    let Some(raw) = since else {
+        return Ok(None);
+    };
+
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|dt| Some(dt.with_timezone(&chrono::Utc)))
+        .map_err(|_| {
+            ApiError::from((
+                StatusCode::BAD_REQUEST,
+                "Invalid 'since' parameter; expected RFC3339 timestamp".to_string(),
+            ))
+        })
 }

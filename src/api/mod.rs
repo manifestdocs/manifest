@@ -153,19 +153,49 @@ pub fn create_router_with_config(db: Database, config: SecurityConfig) -> Router
 }
 
 fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
-    let app_state = AppState::new(db.clone());
-    // Public endpoints (unauthenticated)
-    let public_router = Router::new()
+    let app_state = AppState::new(db);
+    let public_router = build_public_router();
+    let protected_api = apply_protected_layers(build_protected_api_router(), &config);
+
+    let cors_layer = build_cors_layer(&config);
+
+    // Combine public (unauthenticated) with protected API
+    let api = public_router.merge(protected_api);
+
+    // MCP router is stateless (uses its own HTTP client internally)
+    let mcp_router = mcp::streamable_http_router();
+
+    // Apply auth middleware to MCP router if API key is configured
+    let mcp_router = apply_auth_layer(mcp_router, &config);
+
+    let router = Router::new()
+        .nest("/api/v1", api)
+        .with_state(app_state)
+        .nest("/mcp", mcp_router);
+
+    #[cfg(feature = "embed-web")]
+    let router = router.fallback(static_handler);
+
+    router
+        .layer(DefaultBodyLimit::max(2_000_000)) // 2MB
+        .layer(TraceLayer::new_for_http())
+        .layer(cors_layer)
+        .layer(security_headers_layer())
+}
+
+fn build_public_router() -> Router<AppState> {
+    Router::new()
         .route("/health", get(handlers::health))
         .route("/version", get(handlers::version))
         .route(
             "/projects/{id}/subscribe",
             get(handlers::subscribe_project_features),
         )
-        .route("/portfolio/events", get(handlers::subscribe_portfolio));
+        .route("/portfolio/events", get(handlers::subscribe_portfolio))
+}
 
-    // Protected API routes
-    let protected_api = Router::new()
+fn build_protected_api_router() -> Router<AppState> {
+    Router::new()
         // Codebase analysis (separate path to avoid {id} conflicts)
         .route("/codebase/analyze", get(handlers::analyze_project))
         // Filesystem browsing and management
@@ -284,13 +314,16 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
             get(handlers::get_settings).put(handlers::update_settings),
         )
         .route("/settings/mcp-status", get(handlers::check_mcp_status))
-        .route("/settings/configure-mcp", post(handlers::configure_mcp));
+        .route("/settings/configure-mcp", post(handlers::configure_mcp))
+}
 
-    // Apply auth middleware to protected routes if API key is configured
-    let protected_api = apply_auth_layer(protected_api, &config);
+fn apply_protected_layers(
+    protected_api: Router<AppState>,
+    config: &SecurityConfig,
+) -> Router<AppState> {
+    let protected_api = apply_auth_layer(protected_api, config);
 
-    // Apply rate limiting if configured
-    let protected_api = if let Some(rate_limiter) = config.rate_limiter.clone() {
+    if let Some(rate_limiter) = config.rate_limiter.clone() {
         rate_limiter.start_cleanup_task();
         protected_api.layer(axum::middleware::from_fn_with_state(
             rate_limiter,
@@ -298,30 +331,5 @@ fn create_router_inner(db: Database, config: SecurityConfig) -> Router {
         ))
     } else {
         protected_api
-    };
-
-    let cors_layer = build_cors_layer(&config);
-
-    // Combine public (unauthenticated) with protected API
-    let api = public_router.merge(protected_api);
-
-    // MCP router is stateless (uses its own HTTP client internally)
-    let mcp_router = mcp::streamable_http_router();
-
-    // Apply auth middleware to MCP router if API key is configured
-    let mcp_router = apply_auth_layer(mcp_router, &config);
-
-    let router = Router::new()
-        .nest("/api/v1", api)
-        .with_state(app_state)
-        .nest("/mcp", mcp_router);
-
-    #[cfg(feature = "embed-web")]
-    let router = router.fallback(static_handler);
-
-    router
-        .layer(DefaultBodyLimit::max(2_000_000)) // 2MB
-        .layer(TraceLayer::new_for_http())
-        .layer(cors_layer)
-        .layer(security_headers_layer())
+    }
 }

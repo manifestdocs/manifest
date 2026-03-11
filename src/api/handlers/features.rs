@@ -15,6 +15,7 @@ use serde::Deserialize;
 use std::convert::Infallible;
 use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
+use validator::Validate;
 
 use crate::db::Database;
 use crate::mcp::{PlanFeaturesResponse, ProposedFeature};
@@ -153,10 +154,12 @@ pub async fn get_feature_history(
 }
 
 /// Input for creating a history entry directly on a feature (CLI mode).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct CreateFeatureHistoryInput {
+    #[validate(length(min = 1, max = 10_000))]
     pub summary: String,
     #[serde(default)]
+    #[validate(length(max = 200))]
     pub commits: Vec<CommitRef>,
     /// Version this work was done for.
     /// If not specified, defaults to the feature's target_version_id.
@@ -169,74 +172,88 @@ pub struct CreateFeatureHistoryInput {
 pub async fn create_feature_history(
     State(db): State<Database>,
     Path(feature_id): Path<Uuid>,
-    Json(input): Json<CreateFeatureHistoryInput>,
+    ValidatedJson(input): ValidatedJson<CreateFeatureHistoryInput>,
 ) -> Result<(StatusCode, Json<FeatureHistory>), ApiError> {
-    // Verify feature exists
+    let feature_id = FeatureId::from(feature_id);
+    let feature = require_leaf_feature(&db, feature_id).await?;
+    let history = create_history_entry_from_input(&db, feature_id, input).await?;
+    sync_feature_state_after_history(&db, feature_id, &feature).await?;
+
+    Ok((StatusCode::CREATED, Json(history)))
+}
+
+async fn require_leaf_feature(db: &Database, feature_id: FeatureId) -> Result<Feature, ApiError> {
     let feature = db
-        .get_feature(feature_id.into())
+        .get_feature(feature_id)
         .await
         .map_err(internal_error)?
         .ok_or(ApiError::not_found("Feature"))?;
 
-    // Verify it's a leaf feature
-    if !db
-        .is_leaf(feature_id.into())
-        .await
-        .map_err(internal_error)?
-    {
+    if !db.is_leaf(feature_id).await.map_err(internal_error)? {
         return Err(ApiError::from((
             StatusCode::BAD_REQUEST,
             "Cannot create history on a non-leaf feature".to_string(),
         )));
     }
 
-    // Create history entry directly
-    // If version_id not provided, database layer defaults to feature's target_version_id
-    let history = db
-        .create_history_entry(CreateHistoryInput {
-            feature_id: feature_id.into(),
-            version_id: input.version_id.map(VersionId::from),
-            details: HistoryDetails {
-                summary: input.summary,
-                commits: input.commits,
-                ..Default::default()
-            },
-        })
-        .await
-        .map_err(internal_error)?;
+    Ok(feature)
+}
 
-    // Update feature state to implemented and clear desired_details
+async fn create_history_entry_from_input(
+    db: &Database,
+    feature_id: FeatureId,
+    input: CreateFeatureHistoryInput,
+) -> Result<FeatureHistory, ApiError> {
+    db.create_history_entry(CreateHistoryInput {
+        feature_id,
+        version_id: input.version_id.map(VersionId::from),
+        details: HistoryDetails {
+            summary: input.summary,
+            commits: input.commits,
+            ..Default::default()
+        },
+    })
+    .await
+    .map_err(internal_error)
+}
+
+async fn sync_feature_state_after_history(
+    db: &Database,
+    feature_id: FeatureId,
+    feature: &Feature,
+) -> Result<(), ApiError> {
     let needs_state_change = feature.state != FeatureState::Implemented;
     let has_pending_changes = feature.desired_details.is_some();
-
-    if needs_state_change || has_pending_changes {
-        db.update_feature(
-            feature_id.into(),
-            UpdateFeatureInput {
-                parent_id: None,
-                title: None,
-                details: None,
-                desired_details: if has_pending_changes {
-                    Some(None) // Clear desired_details
-                } else {
-                    None // Don't touch
-                },
-                details_summary: None,
-                state: if needs_state_change {
-                    Some(FeatureState::Implemented)
-                } else {
-                    None
-                },
-                priority: None,
-                target_version_id: None,
-                blocked_by: None,
-            },
-        )
-        .await
-        .map_err(internal_error)?;
+    if !needs_state_change && !has_pending_changes {
+        return Ok(());
     }
 
-    Ok((StatusCode::CREATED, Json(history)))
+    db.update_feature(
+        feature_id,
+        UpdateFeatureInput {
+            parent_id: None,
+            title: None,
+            details: None,
+            desired_details: if has_pending_changes {
+                Some(None)
+            } else {
+                None
+            },
+            details_summary: None,
+            state: if needs_state_change {
+                Some(FeatureState::Implemented)
+            } else {
+                None
+            },
+            priority: None,
+            target_version_id: None,
+            blocked_by: None,
+        },
+    )
+    .await
+    .map_err(internal_error)?;
+
+    Ok(())
 }
 
 /// Get a feature by ID.
@@ -444,11 +461,12 @@ fn is_display_id_format(s: &str) -> bool {
 // ============================================================
 
 /// Input for bulk feature creation.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct BulkCreateFeaturesInput {
     /// The target version for all features. If null, features go to backlog.
     pub target_version_id: Option<Uuid>,
     /// The proposed feature tree.
+    #[validate(length(max = 200))]
     pub features: Vec<ProposedFeature>,
     /// If true, creates the features in the database. If false, returns preview only.
     #[serde(default)]
@@ -462,7 +480,7 @@ pub struct BulkCreateFeaturesInput {
 pub async fn bulk_create_features(
     State(db): State<Database>,
     Path(project_id): Path<Uuid>,
-    Json(input): Json<BulkCreateFeaturesInput>,
+    ValidatedJson(input): ValidatedJson<BulkCreateFeaturesInput>,
 ) -> Result<Json<PlanFeaturesResponse>, ApiError> {
     // Guard rail: cap total features in the tree
     let total = count_proposed_features(&input.features);
@@ -579,13 +597,15 @@ const SKIP_DIFF_PATTERNS: &[&str] = &[
     ".min.css",
 ];
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct VerifyFeatureBody {
+    #[validate(length(max = 250_000))]
     pub diff: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct RecordVerificationBody {
+    #[validate(length(max = 200))]
     pub comments: Vec<VerificationComment>,
 }
 
@@ -596,7 +616,7 @@ pub struct RecordVerificationBody {
 pub async fn get_verify_context(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-    Json(body): Json<VerifyFeatureBody>,
+    ValidatedJson(body): ValidatedJson<VerifyFeatureBody>,
 ) -> Result<Json<VerifyFeatureContextResponse>, ApiError> {
     let ctx = db
         .get_feature_with_context(id.into())
@@ -636,7 +656,7 @@ pub async fn get_verify_context(
 pub async fn record_feature_verification(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-    Json(body): Json<RecordVerificationBody>,
+    ValidatedJson(body): ValidatedJson<RecordVerificationBody>,
 ) -> Result<Json<Feature>, ApiError> {
     // Verify feature exists
     db.get_feature(id.into())
@@ -760,9 +780,11 @@ fn truncate_at_file_boundary(diff: &str, max_chars: usize) -> String {
 // ============================================================
 
 /// Input for setting a feature claim.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct SetClaimInput {
+    #[validate(length(min = 1, max = 100))]
     pub agent_type: String,
+    #[validate(length(max = 10_000))]
     pub metadata: Option<String>,
     /// Force claim even if another agent holds it. Default false.
     #[serde(default)]
@@ -776,7 +798,7 @@ pub struct SetClaimInput {
 pub async fn set_feature_claim(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-    Json(input): Json<SetClaimInput>,
+    ValidatedJson(input): ValidatedJson<SetClaimInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     db.claim_feature_atomic(
         id.into(),
@@ -795,10 +817,12 @@ pub async fn set_feature_claim(
 // ============================================================
 
 /// Input for completing a feature.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct CompleteFeatureInput {
+    #[validate(length(min = 1, max = 10_000))]
     pub summary: String,
     #[serde(default)]
+    #[validate(length(max = 200))]
     pub commits: Vec<CommitRef>,
     /// When true, skips proof and spec requirements. Used for bootstrapping existing projects
     /// where the code predates Manifest. History entry is tagged as "backfilled".
@@ -810,7 +834,7 @@ pub struct CompleteFeatureInput {
 pub async fn complete_feature(
     State(db): State<Database>,
     Path(id): Path<Uuid>,
-    Json(input): Json<CompleteFeatureInput>,
+    ValidatedJson(input): ValidatedJson<CompleteFeatureInput>,
 ) -> Result<(StatusCode, Json<CompleteFeatureResponse>), ApiError> {
     let result = db
         .complete_feature(id.into(), &input.summary, &input.commits, input.backfill)

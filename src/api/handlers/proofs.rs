@@ -6,24 +6,57 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
+use serde::Deserialize;
 use uuid::Uuid;
+use validator::Validate;
 
 use crate::db::Database;
-use crate::models::{CreateProofInput, Proof};
+use crate::models::{CreateProofInput, Evidence, FeatureId, HistoryId, Proof, TestSuite};
 
 use super::{internal_error, ApiError};
+use crate::api::validation::ValidatedJson;
 
 // ============================================================
 // Proofs
 // ============================================================
 
+#[derive(Debug, Deserialize, Validate)]
+pub struct CreateProofRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_id: Option<HistoryId>,
+    #[validate(length(min = 1, max = 2_000))]
+    pub command: String,
+    pub exit_code: i32,
+    #[validate(length(max = 10_000))]
+    pub output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_suites: Option<Vec<TestSuite>>,
+    #[serde(default)]
+    #[validate(length(max = 200))]
+    pub evidence: Vec<Evidence>,
+    #[validate(length(max = 100))]
+    pub commit_sha: Option<String>,
+    #[validate(length(max = 50))]
+    pub agent_type: Option<String>,
+}
+
 /// Create a new proof for a feature.
 pub async fn create_proof_for_feature(
     State(db): State<Database>,
     Path(feature_id): Path<Uuid>,
-    Json(mut input): Json<CreateProofInput>,
+    ValidatedJson(input): ValidatedJson<CreateProofRequest>,
 ) -> Result<Json<Proof>, ApiError> {
-    input.feature_id = feature_id.into();
+    let input = CreateProofInput {
+        feature_id: FeatureId::from(feature_id),
+        history_id: input.history_id,
+        command: input.command,
+        exit_code: input.exit_code,
+        output: input.output,
+        test_suites: input.test_suites,
+        evidence: input.evidence,
+        commit_sha: input.commit_sha,
+        agent_type: input.agent_type,
+    };
     db.create_proof(input)
         .await
         .map(Json)

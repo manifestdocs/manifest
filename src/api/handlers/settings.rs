@@ -8,9 +8,27 @@ use std::path::PathBuf;
 
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use manifest_core::config::ServerConfig;
+use serde::Deserialize;
+use validator::Validate;
 
 use super::ApiError;
 use crate::api::config::PathRestrictions;
+use crate::api::validation::ValidatedJson;
+
+const ALLOWED_AGENTS: &[&str] = &["claude", "gemini", "copilot", "codex"];
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateSettingsInput {
+    /// Optional database path update. Uses double-option to distinguish:
+    /// - `None`: field omitted (no change)
+    /// - `Some(None)`: clear configured value
+    /// - `Some(Some(path))`: set value
+    #[serde(default)]
+    pub database_path: Option<Option<String>>,
+    /// Optional default agent update. Uses double-option to support clearing.
+    #[serde(default)]
+    pub default_agent: Option<Option<String>>,
+}
 
 /// GET /api/v1/settings — returns current server configuration.
 pub async fn get_settings() -> impl IntoResponse {
@@ -36,61 +54,13 @@ pub async fn get_settings() -> impl IntoResponse {
 /// PUT /api/v1/settings — updates server configuration.
 /// If the database path changes, triggers a server restart.
 pub async fn update_settings(
-    Json(body): Json<serde_json::Value>,
+    ValidatedJson(input): ValidatedJson<UpdateSettingsInput>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let new_db_path = body
-        .get("database_path")
-        .and_then(|v| {
-            if v.is_null() {
-                Some(None)
-            } else {
-                v.as_str().map(|s| Some(s.to_string()))
-            }
-        })
-        .unwrap_or(None);
-
-    let new_agent = parse_agent_value(&body)?;
-
-    // Validate database path is not in a restricted directory
-    if let Some(ref path) = new_db_path {
-        let p = std::path::Path::new(path);
-        // Validate the parent directory (the file itself may not exist yet)
-        let validate_path = if p.exists() {
-            p.to_path_buf()
-        } else if let Some(parent) = p.parent() {
-            if parent.exists() {
-                parent.to_path_buf()
-            } else {
-                p.to_path_buf()
-            }
-        } else {
-            p.to_path_buf()
-        };
-        let restrictions = PathRestrictions::from_env();
-        if let Err(e) = restrictions.validate(&validate_path) {
-            return Err(ApiError::from((
-                StatusCode::BAD_REQUEST,
-                format!("Invalid database path: {e}"),
-            )));
-        }
-    }
+    validate_database_path_update(input.database_path.as_ref())?;
+    validate_default_agent_update(input.default_agent.as_ref())?;
 
     let mut config = ServerConfig::load().unwrap_or_default();
-    let old_path = config.database_path.clone();
-
-    // Update config if database_path was provided in the request
-    let path_changed = if body.get("database_path").is_some() {
-        let changed = old_path != new_db_path;
-        config.database_path = new_db_path;
-        changed
-    } else {
-        false
-    };
-
-    // Update default_agent if provided in the request
-    if let Some(agent) = new_agent {
-        config.default_agent = agent;
-    }
+    let path_changed = apply_settings_updates(&mut config, input);
 
     config.save().map_err(|e| {
         tracing::error!("Failed to save config: {:?}", e);
@@ -138,17 +108,27 @@ pub async fn check_mcp_status() -> impl IntoResponse {
         .to_string();
 
     let agent_clone = agent.clone();
-    let (configured, config_file, setup_hint) =
-        tokio::task::spawn_blocking(move || match agent_clone.as_str() {
-            "claude" => check_claude_mcp_config(),
-            _ => (
+    let check_result = tokio::task::spawn_blocking(move || match agent_clone.as_str() {
+        "claude" => check_claude_mcp_config(),
+        _ => (
+            false,
+            String::new(),
+            format!("MCP config check not supported for agent '{agent_clone}'"),
+        ),
+    })
+    .await;
+
+    let (configured, config_file, setup_hint) = match check_result {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::error!("Failed to check MCP configuration: {}", e);
+            (
                 false,
                 String::new(),
-                format!("MCP config check not supported for agent '{agent_clone}'"),
-            ),
-        })
-        .await
-        .unwrap_or((false, String::new(), "Internal error".to_string()));
+                "Could not check MCP configuration".to_string(),
+            )
+        }
+    };
 
     Json(serde_json::json!({
         "agent": agent,
@@ -176,7 +156,13 @@ pub async fn configure_mcp() -> Result<impl IntoResponse, ApiError> {
         ))),
     })
     .await
-    .map_err(|e| ApiError::from((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())))?
+    .map_err(|e| {
+        tracing::error!("Failed to configure MCP: {}", e);
+        ApiError::from((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to configure MCP".to_string(),
+        ))
+    })?
 }
 
 /// Check if Claude Code has a manifest MCP server configured.
@@ -282,15 +268,25 @@ fn configure_claude_mcp() -> Result<impl IntoResponse, ApiError> {
     // Read existing config or start with empty object
     let mut json: serde_json::Value = if config_path.exists() {
         let contents = std::fs::read_to_string(&config_path).map_err(|e| {
+            tracing::error!(
+                path = %config_path.display(),
+                error = %e,
+                "Failed to read Claude config"
+            );
             ApiError::from((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to read {}: {e}", config_path.display()),
+                "Failed to read Claude configuration".to_string(),
             ))
         })?;
         serde_json::from_str(&contents).map_err(|e| {
+            tracing::warn!(
+                path = %config_path.display(),
+                error = %e,
+                "Invalid JSON in Claude config"
+            );
             ApiError::from((
                 StatusCode::BAD_REQUEST,
-                format!("Invalid JSON in {}: {e}", config_path.display()),
+                "Claude configuration file contains invalid JSON".to_string(),
             ))
         })?
     } else {
@@ -311,24 +307,31 @@ fn configure_claude_mcp() -> Result<impl IntoResponse, ApiError> {
     // Ensure parent directory exists
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
+            tracing::error!(path = %parent.display(), error = %e, "Failed to create config directory");
             ApiError::from((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create directory: {e}"),
+                "Failed to prepare Claude configuration directory".to_string(),
             ))
         })?;
     }
 
     // Write back
     let contents = serde_json::to_string_pretty(&json).map_err(|e| {
+        tracing::error!("Failed to serialize Claude config: {}", e);
         ApiError::from((
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to serialize config: {e}"),
+            "Failed to serialize Claude configuration".to_string(),
         ))
     })?;
     std::fs::write(&config_path, contents).map_err(|e| {
+        tracing::error!(
+            path = %config_path.display(),
+            error = %e,
+            "Failed to write Claude config"
+        );
         ApiError::from((
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to write {}: {e}", config_path.display()),
+            "Failed to write Claude configuration".to_string(),
         ))
     })?;
 
@@ -338,36 +341,68 @@ fn configure_claude_mcp() -> Result<impl IntoResponse, ApiError> {
     })))
 }
 
-/// Parse and validate the `default_agent` field from a settings update body.
-///
-/// Returns `Ok(None)` if not present, `Ok(Some(None))` to reset, `Ok(Some(Some(agent)))` if valid.
-fn parse_agent_value(body: &serde_json::Value) -> Result<Option<Option<String>>, ApiError> {
-    const ALLOWED_AGENTS: &[&str] = &["claude", "gemini", "copilot", "codex"];
+fn apply_settings_updates(config: &mut ServerConfig, input: UpdateSettingsInput) -> bool {
+    let old_path = config.database_path.clone();
 
-    let agent_val = match body.get("default_agent") {
-        Some(v) => v,
-        None => return Ok(None),
-    };
-    if agent_val.is_null() {
-        return Ok(Some(None));
+    if let Some(database_path) = input.database_path {
+        config.database_path = database_path;
     }
-    let agent = agent_val.as_str().ok_or_else(|| {
-        ApiError::from((
+    if let Some(default_agent) = input.default_agent {
+        config.default_agent = default_agent;
+    }
+
+    old_path != config.database_path
+}
+
+fn validate_database_path_update(database_path: Option<&Option<String>>) -> Result<(), ApiError> {
+    let Some(Some(path)) = database_path else {
+        return Ok(());
+    };
+
+    let validate_path = path_for_restriction_check(path);
+    let restrictions = PathRestrictions::from_env();
+    if let Err(e) = restrictions.validate(&validate_path) {
+        tracing::warn!(path, error = %e, "Rejected database path update");
+        return Err(ApiError::from((
             StatusCode::BAD_REQUEST,
-            "default_agent must be a string".to_string(),
-        ))
-    })?;
-    if !ALLOWED_AGENTS.contains(&agent) {
+            "Invalid database path".to_string(),
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_default_agent_update(default_agent: Option<&Option<String>>) -> Result<(), ApiError> {
+    let Some(Some(agent)) = default_agent else {
+        return Ok(());
+    };
+
+    if !ALLOWED_AGENTS.contains(&agent.as_str()) {
         return Err(ApiError::from((
             StatusCode::BAD_REQUEST,
             format!(
-                "Invalid default_agent '{}'. Allowed values: {}",
-                agent,
+                "default_agent must be one of: {}",
                 ALLOWED_AGENTS.join(", ")
             ),
         )));
     }
-    Ok(Some(Some(agent.to_string())))
+
+    Ok(())
+}
+
+fn path_for_restriction_check(path: &str) -> PathBuf {
+    let p = std::path::Path::new(path);
+    if p.exists() {
+        return p.to_path_buf();
+    }
+
+    if let Some(parent) = p.parent() {
+        if parent.exists() {
+            return parent.to_path_buf();
+        }
+    }
+
+    p.to_path_buf()
 }
 
 /// Resolve the effective database path given the current config and environment.
