@@ -856,7 +856,8 @@ impl Database {
         Ok(())
     }
 
-    /// Search features by title or details using LIKE matching, ranked by title matches first.
+    /// Search features by title, details, or display ID (e.g. "127" or "MANIF-127").
+    /// Exact feature_number matches rank highest, then title matches, then details matches.
     pub async fn search_features(
         &self,
         query: &str,
@@ -867,8 +868,39 @@ impl Database {
         let search_pattern = format!("%{}%", escaped_query);
         let limit_val = limit.unwrap_or(10) as i64;
 
-        let rows = match project_id {
-            Some(pid) => {
+        // Extract feature number from query: "127" or "MANIF-127" or "manif-127"
+        let feature_number: Option<i64> = query.parse::<i64>().ok().or_else(|| {
+            query
+                .rsplit_once('-')
+                .and_then(|(_, num)| num.parse::<i64>().ok())
+        });
+
+        let rows = match (project_id, feature_number) {
+            (Some(pid), Some(num)) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
+                     FROM features
+                     WHERE project_id = $1 AND (
+                         feature_number = $4
+                         OR title LIKE $2 ESCAPE '\\'
+                         OR details LIKE $2 ESCAPE '\\'
+                     )
+                     ORDER BY
+                         CASE WHEN feature_number = $4 THEN 0
+                              WHEN title LIKE $2 ESCAPE '\\' THEN 1
+                              ELSE 2 END,
+                         priority,
+                         title
+                     LIMIT $3",
+                )
+                .bind(pid.to_string())
+                .bind(&search_pattern)
+                .bind(limit_val)
+                .bind(num)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (Some(pid), None) => {
                 sqlx::query(
                     "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
                      FROM features
@@ -885,7 +917,28 @@ impl Database {
                 .fetch_all(&self.pool)
                 .await?
             }
-            None => {
+            (None, Some(num)) => {
+                sqlx::query(
+                    "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
+                     FROM features
+                     WHERE feature_number = $3
+                         OR title LIKE $1 ESCAPE '\\'
+                         OR details LIKE $1 ESCAPE '\\'
+                     ORDER BY
+                         CASE WHEN feature_number = $3 THEN 0
+                              WHEN title LIKE $1 ESCAPE '\\' THEN 1
+                              ELSE 2 END,
+                         priority,
+                         title
+                     LIMIT $2",
+                )
+                .bind(&search_pattern)
+                .bind(limit_val)
+                .bind(num)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (None, None) => {
                 sqlx::query(
                     "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
                      FROM features
