@@ -678,7 +678,10 @@ mod feature_claims {
         .await
         .unwrap();
 
-        let _result = db.complete_feature(feature.id, "Done", &[], false).await.unwrap();
+        let _result = db
+            .complete_feature(feature.id, "Done", &[], false)
+            .await
+            .unwrap();
 
         // Drain events — the last one should be Completed
         // (there may be Updated events before it from update_feature + clear_claim)

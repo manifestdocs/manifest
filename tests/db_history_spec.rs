@@ -52,7 +52,7 @@ mod feature_history {
                     details: HistoryDetails {
                         summary: "Implemented login flow".to_string(),
                         commits: vec![],
-                    ..Default::default()
+                        ..Default::default()
                     },
                 })
                 .await
@@ -90,7 +90,7 @@ mod feature_history {
                     details: HistoryDetails {
                         summary: "Manual update".to_string(),
                         commits: vec![],
-                    ..Default::default()
+                        ..Default::default()
                     },
                 })
                 .await
@@ -505,7 +505,7 @@ mod feature_history {
                     details: HistoryDetails {
                         summary: format!("Change {}", i),
                         commits: vec![],
-                    ..Default::default()
+                        ..Default::default()
                     },
                 })
                 .await
@@ -546,7 +546,7 @@ mod feature_history {
                     details: HistoryDetails {
                         summary: format!("Change {}", i),
                         commits: vec![],
-                    ..Default::default()
+                        ..Default::default()
                     },
                 })
                 .await
