@@ -1,0 +1,5 @@
+ORIENT: Session bootloader — get all project context in a single call. Returns project info, condensed feature
+tree, active feature (if selected in UI), work queue (top 3 proposed), active agent sessions, and recent
+completions. Use this as your FIRST call when starting a session instead of calling list_projects →
+get_active_feature → render_feature_tree separately. After orienting, use get_feature for full details on a
+specific feature, or start_feature to claim work.

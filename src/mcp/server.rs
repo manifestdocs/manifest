@@ -12,9 +12,9 @@ use super::types::{
     DeleteFeatureRequest, FindFeaturesRequest, GenerateFeatureTreeRequest, GetActiveFeatureRequest,
     GetFeatureProofRequest, GetFeatureRequest, GetNextFeatureRequest, GetProjectHistoryRequest,
     GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
-    PlanFeaturesRequest, ProveFeatureRequest, RecordVerificationRequest, ReleaseVersionRequest,
-    RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest, SyncRequest,
-    UpdateFeatureRequest, VerifyFeatureRequest,
+    OrientRequest, PlanFeaturesRequest, ProveFeatureRequest, RecordVerificationRequest,
+    ReleaseVersionRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest,
+    SyncRequest, UpdateFeatureRequest, VerifyFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -122,6 +122,11 @@ impl McpServer {
         params: Parameters<RenderFeatureTreeRequest>,
     ) -> Result<CallToolResult, McpError> {
         tools::features::render_feature_tree(&self.client, params.0).await
+    }
+
+    #[tool(description = "Orient")]
+    async fn orient(&self, params: Parameters<OrientRequest>) -> Result<CallToolResult, McpError> {
+        tools::orient::orient(&self.client, params.0).await
     }
 
     #[tool(description = "Get project history")]
@@ -363,6 +368,7 @@ fn tool_description(name: &str) -> Option<&'static str> {
         "find_features" => include_str!("instructions/tools/find_features.txt"),
         "get_feature" => include_str!("instructions/tools/get_feature.txt"),
         "render_feature_tree" => include_str!("instructions/tools/render_feature_tree.txt"),
+        "orient" => include_str!("instructions/tools/orient.txt"),
         "get_project_history" => include_str!("instructions/tools/get_project_history.txt"),
         "init_project" => include_str!("instructions/tools/init_project.txt"),
         "add_project_directory" => include_str!("instructions/tools/add_project_directory.txt"),

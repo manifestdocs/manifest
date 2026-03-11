@@ -11,6 +11,7 @@ pub mod context;
 pub mod features;
 pub mod format;
 pub mod generate;
+pub mod orient;
 pub mod projects;
 pub mod spec;
 pub mod sync;

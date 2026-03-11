@@ -26,7 +26,7 @@ pub struct StartFeatureRequest {
     #[serde(default = "default_agent_type")]
     pub agent_type: String,
     #[schemars(
-        description = "Force start even if another agent has claimed this feature. Default false."
+        description = "Force start even if another agent has claimed this feature or the spec lacks testable criteria. Default false."
     )]
     #[serde(default)]
     pub force: bool,
@@ -664,6 +664,66 @@ pub struct VerificationCommentInput {
     #[schemars(description = "Affected file path if the gap is localized to a single file")]
     #[serde(default)]
     pub file: Option<String>,
+}
+
+// ============================================================
+// Orient Request Type
+// ============================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct OrientRequest {
+    #[schemars(
+        description = "Project UUID. If omitted, auto-detects from the agent's working directory."
+    )]
+    #[serde(default)]
+    pub project_id: Option<Uuid>,
+    #[schemars(
+        description = "Working directory path for auto-detection when project_id is omitted."
+    )]
+    #[serde(default)]
+    pub directory_path: Option<String>,
+    #[schemars(
+        description = "Maximum depth for the feature tree. Default 2. Set 0 for unlimited."
+    )]
+    #[serde(default = "default_orient_depth")]
+    pub max_depth: u32,
+    #[schemars(description = "Include recent completion history. Default true.")]
+    #[serde(default = "default_true")]
+    pub include_history: bool,
+}
+
+fn default_orient_depth() -> u32 {
+    2
+}
+
+// ============================================================
+// Orient Response Types
+// ============================================================
+
+/// Section of the orient response for active sessions (features being worked on).
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ActiveSessionInfo {
+    pub feature_title: String,
+    pub agent_type: String,
+    pub claimed_at: String,
+}
+
+/// Section of the orient response for the work queue.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct WorkQueueItem {
+    pub id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_id: Option<String>,
+    pub title: String,
+    pub priority: i32,
+}
+
+/// Section of the orient response for recent history.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RecentHistoryItem {
+    pub feature_title: String,
+    pub summary_headline: String,
+    pub completed_at: String,
 }
 
 // ============================================================

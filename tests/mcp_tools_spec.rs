@@ -272,7 +272,7 @@ mod start_feature_tool {
     }
 
     #[tokio::test]
-    async fn warns_when_spec_is_sparse() {
+    async fn blocks_when_spec_is_sparse() {
         let (server, client) = setup().await;
         let project = create_project(&server).await;
         let pid: Uuid = project.id.into();
@@ -291,9 +291,9 @@ mod start_feature_tool {
         .await
         .unwrap();
 
-        // Should succeed but include a warning
-        assert!(result.is_error.is_none() || result.is_error == Some(false));
-        assert!(has_text_containing(&result, "\u{26a0}"));
+        // Should block — no testable criteria
+        assert_eq!(result.is_error, Some(true));
+        assert!(has_text_containing(&result, "testable"));
     }
 
     #[tokio::test]
@@ -362,7 +362,7 @@ mod start_feature_tool {
     }
 
     #[tokio::test]
-    async fn warns_when_spec_has_no_testable_criteria() {
+    async fn blocks_when_spec_has_no_testable_criteria() {
         let (server, client) = setup().await;
         let project = create_project(&server).await;
         let pid: Uuid = project.id.into();
@@ -385,9 +385,36 @@ mod start_feature_tool {
         .await
         .unwrap();
 
-        // Should succeed but warn about missing testable criteria
+        // Should block — no testable criteria
+        assert_eq!(result.is_error, Some(true));
+        assert!(has_text_containing(&result, "testable"));
+    }
+
+    #[tokio::test]
+    async fn force_bypasses_spec_gate() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+        // Spec with no testable criteria
+        let spec = "Document the authentication subsystem architecture and decisions.";
+        let feature = create_feature(&server, pid, "Auth Docs", Some(spec)).await;
+        let fid: Uuid = feature.id.into();
+
+        let result = features::start_feature(
+            &client,
+            StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: true,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Should succeed with force=true
         assert!(result.is_error.is_none() || result.is_error == Some(false));
-        assert!(has_text_containing(&result, "No testable criteria"));
+        assert!(has_text_containing(&result, "Auth Docs"));
     }
 }
 
@@ -1467,5 +1494,310 @@ mod release_version_tool {
         assert!(result.is_error.is_none() || result.is_error == Some(false));
         let texts = text_contents(&result);
         assert!(texts[0].contains(&format!("Released '{}'", vname)));
+    }
+}
+
+// ============================================================
+// Orient Tool
+// ============================================================
+
+mod orient_tool {
+    use super::*;
+    use manifest::mcp::tools::orient;
+    use manifest::mcp::types::OrientRequest;
+
+    #[tokio::test]
+    async fn returns_project_context_and_feature_tree() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Create some features
+        create_feature(&server, pid, "Authentication", Some("Auth module")).await;
+        create_feature(&server, pid, "Dashboard", Some("Dashboard module")).await;
+
+        let result = orient::orient(
+            &client,
+            OrientRequest {
+                project_id: Some(pid),
+                directory_path: None,
+                max_depth: 2,
+                include_history: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+
+        // Single call returns bundled context
+        let texts = text_contents(&result);
+        assert!(!texts.is_empty());
+        let output = texts[0];
+
+        // Project name
+        assert!(
+            output.contains("Test Project"),
+            "should contain project name"
+        );
+        // Feature tree
+        assert!(
+            output.contains("Feature Tree"),
+            "should contain feature tree section"
+        );
+        assert!(
+            output.contains("Authentication"),
+            "tree should contain features"
+        );
+    }
+
+    #[tokio::test]
+    async fn includes_work_queue_with_proposed_features() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        create_feature(&server, pid, "Proposed One", Some("spec 1")).await;
+        create_feature(&server, pid, "Proposed Two", Some("spec 2")).await;
+
+        let result = orient::orient(
+            &client,
+            OrientRequest {
+                project_id: Some(pid),
+                directory_path: None,
+                max_depth: 2,
+                include_history: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        let texts = text_contents(&result);
+        let output = texts[0];
+        assert!(
+            output.contains("Work Queue"),
+            "should include work queue section"
+        );
+        assert!(
+            output.contains("Proposed One"),
+            "work queue should list proposed features"
+        );
+    }
+
+    #[tokio::test]
+    async fn includes_active_sessions_for_claimed_features() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let feature = create_feature(&server, pid, "Claimed Feature", Some(GOOD_SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        // Claim the feature via start_feature
+        features::start_feature(
+            &client,
+            manifest::mcp::types::StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let result = orient::orient(
+            &client,
+            OrientRequest {
+                project_id: Some(pid),
+                directory_path: None,
+                max_depth: 2,
+                include_history: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        let texts = text_contents(&result);
+        let output = texts[0];
+        assert!(
+            output.contains("Active Sessions"),
+            "should include active sessions section"
+        );
+        assert!(
+            output.contains("Claimed Feature"),
+            "should show the claimed feature"
+        );
+        assert!(output.contains("claude"), "should show the agent type");
+    }
+
+    #[tokio::test]
+    async fn includes_recent_history() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let feature = create_feature(&server, pid, "Done Feature", Some(GOOD_SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        // Complete the feature (backfill mode to skip proof)
+        features::start_feature(
+            &client,
+            manifest::mcp::types::StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        features::complete_feature(
+            &client,
+            manifest::mcp::types::CompleteFeatureRequest {
+                feature_id: fid.to_string(),
+                summary: "Implemented the thing".to_string(),
+                commits: vec![],
+                backfill: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        let result = orient::orient(
+            &client,
+            OrientRequest {
+                project_id: Some(pid),
+                directory_path: None,
+                max_depth: 2,
+                include_history: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        let texts = text_contents(&result);
+        let output = texts[0];
+        assert!(
+            output.contains("Recent Completions"),
+            "should include recent history"
+        );
+        assert!(
+            output.contains("Done Feature"),
+            "should show completed feature"
+        );
+    }
+
+    #[tokio::test]
+    async fn omits_history_when_disabled() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let result = orient::orient(
+            &client,
+            OrientRequest {
+                project_id: Some(pid),
+                directory_path: None,
+                max_depth: 2,
+                include_history: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let texts = text_contents(&result);
+        let output = texts[0];
+        assert!(
+            !output.contains("Recent Completions"),
+            "should not include history when disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn respects_tree_depth_limit() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let parent = create_feature(&server, pid, "Parent", Some("parent details")).await;
+        let parent_id: Uuid = parent.id.into();
+        create_child_feature(&server, pid, parent_id, "Child", Some("child details")).await;
+
+        // Depth 1 should truncate children
+        let result = orient::orient(
+            &client,
+            OrientRequest {
+                project_id: Some(pid),
+                directory_path: None,
+                max_depth: 1,
+                include_history: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let texts = text_contents(&result);
+        let output = texts[0];
+        assert!(
+            output.contains("(...)"),
+            "depth limit should truncate with (...)"
+        );
+    }
+
+    #[tokio::test]
+    async fn requires_project_id_or_directory_path() {
+        let (_server, client) = setup().await;
+
+        let result = orient::orient(
+            &client,
+            OrientRequest {
+                project_id: None,
+                directory_path: None,
+                max_depth: 2,
+                include_history: true,
+            },
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "should error without project_id or directory_path"
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_detects_project_from_directory() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Add a directory to the project
+        server
+            .post(&format!("/api/v1/projects/{}/directories", pid))
+            .json(&manifest::models::AddDirectoryInput {
+                path: "/tmp/test-orient-dir".to_string(),
+                git_remote: None,
+                is_primary: true,
+                instructions: None,
+            })
+            .await;
+
+        let result = orient::orient(
+            &client,
+            OrientRequest {
+                project_id: None,
+                directory_path: Some("/tmp/test-orient-dir".to_string()),
+                max_depth: 2,
+                include_history: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        let texts = text_contents(&result);
+        assert!(texts[0].contains("Test Project"));
     }
 }
