@@ -168,8 +168,8 @@ When creating new features:
    - start_feature checks specification completeness and transitions proposed → in_progress
    - If the feature is ALREADY in_progress, another agent is likely working on it — ask the user before
      proceeding, and offer the next proposed feature as an alternative
-   - If the feature has no details, start_feature will refuse — write a spec first using update_feature
-   - If details are very sparse, you will see a warning — flesh out the spec before implementing
+   - If the feature has no details or no testable acceptance criteria, start_feature will refuse — write a spec
+     with verifiable criteria using update_feature. Use force=true to bypass for non-testable features (e.g., docs)
 
    **Greenfield projects**: For new codebases with no existing code, scaffold the project and make an initial
    commit BEFORE calling start_feature. Scaffolders like `rails new`, `create-react-app`, or `cargo init` often

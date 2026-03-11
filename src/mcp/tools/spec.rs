@@ -61,14 +61,14 @@ pub struct SpecStatus {
 }
 
 impl SpecStatus {
-    /// True when a leaf feature has no details at all — blocks `start_feature`.
+    /// True when a leaf feature has no details or no testable criteria — blocks `start_feature`.
     pub fn should_block(&self) -> bool {
-        self.tier == FeatureTier::Leaf && !self.has_details
+        self.tier == FeatureTier::Leaf && (!self.has_details || self.testable_criteria_count == 0)
     }
 
-    /// True when spec-level warnings apply (missing testable criteria for leaves with details).
+    /// True when spec-level warnings apply. All warning conditions are now blocking.
     pub fn has_warnings(&self) -> bool {
-        self.tier == FeatureTier::Leaf && self.has_details && self.testable_criteria_count == 0
+        false
     }
 
     /// One-line status string for MCP responses.
@@ -590,20 +590,20 @@ mod tests {
     }
 
     #[test]
-    fn no_testable_criteria_warns() {
+    fn no_testable_criteria_blocks() {
         let config = default_config();
         let spec = "Handle user login with appropriate validation and security measures. \
                      The system should authenticate users against the database and manage \
                      sessions correctly with proper error handling throughout.";
         let status = analyze_spec(Some(spec), false, false);
         assert_eq!(status.testable_criteria_count, 0);
-        assert!(status.has_warnings());
+        assert!(status.should_block());
         let guidance = status.guidance(&config).unwrap();
         assert!(guidance.contains("No testable criteria"));
     }
 
     #[test]
-    fn testable_criteria_present_no_warning() {
+    fn testable_criteria_present_does_not_block() {
         let config = default_config();
         let spec = "Handle user login with appropriate validation and security measures \
                      for the authentication subsystem.\n\
@@ -611,7 +611,16 @@ mod tests {
                      - [ ] rejects invalid credentials";
         let status = analyze_spec(Some(spec), false, false);
         assert_eq!(status.testable_criteria_count, 2);
-        assert!(!status.has_warnings());
+        assert!(!status.should_block());
         assert!(status.guidance(&config).is_none());
+    }
+
+    #[test]
+    fn has_warnings_always_false() {
+        // All warning conditions are now blocking
+        let status = analyze_spec(Some("No criteria here."), false, false);
+        assert!(!status.has_warnings());
+        let status = analyze_spec(None, false, false);
+        assert!(!status.has_warnings());
     }
 }

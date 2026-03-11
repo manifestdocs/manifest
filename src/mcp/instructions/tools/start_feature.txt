@@ -5,8 +5,9 @@ context. Also handles implemented features with pending changes (desired_details
 implemented → in_progress so you can implement the requested changes. Do not change the feature's target version
 during implementation.
 
-SPEC GATE: Blocks if a leaf feature has no `details`; you must write a spec first using update_feature. This is
-the most common failure mode. If details exist but lack acceptance criteria, returns a warning to flesh out the spec.
+SPEC GATE: Blocks if a leaf feature has no `details` or has no testable acceptance criteria (checkbox items,
+assertion verbs, or Gherkin Then lines). You must write a spec with verifiable criteria using update_feature.
+Use force=true to bypass this check for features that genuinely have no testable behavior (e.g., documentation).
 
 BLOCKED GUARD: Rejects features in `blocked` state and features whose ancestor feature set is blocked. Returns the
 list of blocking features that must reach 'implemented' before this feature can be started.

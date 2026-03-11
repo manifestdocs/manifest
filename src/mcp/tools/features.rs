@@ -899,7 +899,9 @@ pub async fn complete_feature(
     let mut content = vec![Content::text(summary)];
     // Verification — full test tree (backfilled features skip this)
     if req.backfill {
-        content.push(Content::text("Verification: backfilled (existing code is the proof)"));
+        content.push(Content::text(
+            "Verification: backfilled (existing code is the proof)",
+        ));
     } else {
         match &latest_proof {
             Some(proof) => match &proof.test_suites {
@@ -1354,7 +1356,10 @@ async fn try_parse_via_adapter(
 }
 
 /// Count features (recursively) that have a specific state set.
-fn count_features_with_state(features: &[crate::mcp::types::ProposedFeature], state: &str) -> usize {
+fn count_features_with_state(
+    features: &[crate::mcp::types::ProposedFeature],
+    state: &str,
+) -> usize {
     features
         .iter()
         .map(|f| {
