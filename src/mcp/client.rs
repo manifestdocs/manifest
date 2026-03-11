@@ -750,11 +750,15 @@ impl ManifestClient {
         feature_id: Uuid,
         summary: &str,
         commits: &[CommitRef],
+        backfill: bool,
     ) -> Result<CompleteFeatureResponse, ClientError> {
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "summary": summary,
             "commits": commits,
         });
+        if backfill {
+            body["backfill"] = serde_json::Value::Bool(true);
+        }
         let response = self
             .request(
                 reqwest::Method::POST,

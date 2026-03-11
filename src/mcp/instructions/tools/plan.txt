@@ -6,3 +6,8 @@ multiple versions (0.1.0, 0.2.0, etc.) based on delivery phase. With confirm=fal
 confirm=true, creates the features. IMPORTANT: After confirming, (1) use update_feature to distill the root
 feature, replacing the full PRD with high-level project context, and (2) create versions with create_version and
 assign features to them with set_feature_version.
+
+BOOTSTRAPPING EXISTING PROJECTS: Each feature can include an optional state field. Set state to 'implemented' for
+features that already exist in the codebase (e.g., detected by generate_feature_tree). These features are created
+directly in the implemented state, skipping the prove/complete cycle. The ideal bootstrap flow is:
+init_project → generate_feature_tree → plan (with per-feature states) → done.

@@ -444,6 +444,7 @@ mod complete_feature_tool {
                     message: "Add CSV export".to_string(),
                     author: None,
                 }],
+                backfill: false,
             },
         )
         .await
@@ -500,6 +501,7 @@ mod complete_feature_tool {
                 feature_id: fid.to_string(),
                 summary: "Done".to_string(),
                 commits: vec![],
+                backfill: false,
             },
         )
         .await
@@ -552,6 +554,7 @@ mod complete_feature_tool {
                 feature_id: fid.to_string(),
                 summary: "Built it".to_string(),
                 commits: vec![],
+                backfill: false,
             },
         )
         .await
@@ -589,6 +592,7 @@ mod complete_feature_tool {
                 feature_id: fid.to_string(),
                 summary: "Done without tests".to_string(),
                 commits: vec![],
+                backfill: false,
             },
         )
         .await;
@@ -643,6 +647,7 @@ mod complete_feature_tool {
                 feature_id: fid.to_string(),
                 summary: "Done with failing tests".to_string(),
                 commits: vec![],
+                backfill: false,
             },
         )
         .await;
@@ -696,6 +701,7 @@ mod complete_feature_tool {
                 feature_id: fid.to_string(),
                 summary: "Done".to_string(),
                 commits: vec![],
+                backfill: false,
             },
         )
         .await
@@ -704,6 +710,34 @@ mod complete_feature_tool {
         // Should succeed but include warning about stale spec
         assert!(result.is_error.is_none() || result.is_error == Some(false));
         assert!(has_text_containing(&result, "spec not updated"));
+    }
+
+    #[tokio::test]
+    async fn backfill_skips_proof_and_spec_requirements() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Create feature with NO details (spec) — normally this would block completion
+        let feature = create_feature(&server, pid, "Existing Auth", None).await;
+        let fid: Uuid = feature.id.into();
+
+        // Complete with backfill=true — should succeed without proof or spec
+        let result = features::complete_feature(
+            &client,
+            CompleteFeatureRequest {
+                feature_id: fid.to_string(),
+                summary: "Pre-existing authentication system".to_string(),
+                commits: vec![],
+                backfill: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(has_text_containing(&result, "Backfilled"));
+        assert!(has_text_containing(&result, "backfilled"));
     }
 }
 
@@ -1026,6 +1060,7 @@ mod get_feature_tool {
                     message: "Add history".to_string(),
                     author: None,
                 }],
+                backfill: false,
             },
         )
         .await
@@ -1243,12 +1278,14 @@ mod plan_tool {
                         title: "Auth".to_string(),
                         details: None,
                         priority: 0,
+                        state: None,
                         children: vec![],
                     },
                     ProposedFeature {
                         title: "Dashboard".to_string(),
                         details: None,
                         priority: 1,
+                        state: None,
                         children: vec![],
                     },
                 ],
@@ -1278,6 +1315,7 @@ mod plan_tool {
                     title: "API Layer".to_string(),
                     details: Some("REST API endpoints".to_string()),
                     priority: 0,
+                    state: None,
                     children: vec![],
                 }],
                 confirm: true,
@@ -1288,6 +1326,62 @@ mod plan_tool {
 
         let texts = text_contents(&result);
         assert!(texts[0].contains("Created 1 feature"));
+    }
+
+    #[tokio::test]
+    async fn creates_features_with_implemented_state() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let result = features::plan(
+            &client,
+            PlanFeaturesRequest {
+                project_id: pid,
+                target_version_id: None,
+                features: vec![
+                    ProposedFeature {
+                        title: "Existing Feature".to_string(),
+                        details: Some("Already built".to_string()),
+                        priority: 0,
+                        state: Some("implemented".to_string()),
+                        children: vec![],
+                    },
+                    ProposedFeature {
+                        title: "New Feature".to_string(),
+                        details: None,
+                        priority: 1,
+                        state: None,
+                        children: vec![],
+                    },
+                ],
+                confirm: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        let texts = text_contents(&result);
+        assert!(texts[0].contains("Created 2 features"));
+        assert!(texts[0].contains("1 already implemented"));
+
+        // Verify the features were created with correct states
+        let tree_result = features::render_feature_tree(
+            &client,
+            manifest::mcp::types::RenderFeatureTreeRequest {
+                project_id: pid,
+                max_depth: 0,
+            },
+        )
+        .await
+        .unwrap();
+
+        let tree_text = text_contents(&tree_result);
+        let tree = &tree_text[0];
+        // Implemented feature should show implemented marker
+        assert!(tree.contains("Existing Feature"));
+        assert!(tree.contains("New Feature"));
     }
 }
 

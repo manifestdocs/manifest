@@ -199,6 +199,7 @@ pub async fn create_feature_history(
             details: HistoryDetails {
                 summary: input.summary,
                 commits: input.commits,
+                ..Default::default()
             },
         })
         .await
@@ -528,12 +529,20 @@ fn flatten_feature_tree(
     let id = FeatureId::new();
     created_ids.push(id.into());
 
+    // Resolve the initial state: respect explicit state from proposal (for bootstrapping),
+    // default to Proposed for normal planning workflow.
+    let state = proposed
+        .state
+        .as_deref()
+        .and_then(|s| std::str::FromStr::from_str(s).ok())
+        .unwrap_or(FeatureState::Proposed);
+
     inputs.push(CreateFeatureInput {
         id: Some(id),
         parent_id,
         title: proposed.title.clone(),
         details: proposed.details.clone(),
-        state: Some(FeatureState::Proposed),
+        state: Some(state),
         priority: Some(proposed.priority),
         target_version_id,
     });
@@ -791,6 +800,10 @@ pub struct CompleteFeatureInput {
     pub summary: String,
     #[serde(default)]
     pub commits: Vec<CommitRef>,
+    /// When true, skips proof and spec requirements. Used for bootstrapping existing projects
+    /// where the code predates Manifest. History entry is tagged as "backfilled".
+    #[serde(default)]
+    pub backfill: bool,
 }
 
 /// POST /features/:id/complete — complete a feature (create history + update state + clear claims).
@@ -800,7 +813,7 @@ pub async fn complete_feature(
     Json(input): Json<CompleteFeatureInput>,
 ) -> Result<(StatusCode, Json<CompleteFeatureResponse>), ApiError> {
     let result = db
-        .complete_feature(id.into(), &input.summary, &input.commits)
+        .complete_feature(id.into(), &input.summary, &input.commits, input.backfill)
         .await
         .map_err(internal_error)?;
 

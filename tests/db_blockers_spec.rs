@@ -620,7 +620,7 @@ mod feature_claims {
         .unwrap();
 
         let result = db
-            .complete_feature(feature.id, "Implemented the feature", &[])
+            .complete_feature(feature.id, "Implemented the feature", &[], false)
             .await
             .unwrap();
         let completed = result.feature;
@@ -678,7 +678,7 @@ mod feature_claims {
         .await
         .unwrap();
 
-        let _result = db.complete_feature(feature.id, "Done", &[]).await.unwrap();
+        let _result = db.complete_feature(feature.id, "Done", &[], false).await.unwrap();
 
         // Drain events — the last one should be Completed
         // (there may be Updated events before it from update_feature + clear_claim)
@@ -949,7 +949,7 @@ mod proof_gate {
 
         // Try to complete without any proof — should be rejected
         let result = db
-            .complete_feature(feature.id, "Done without proof", &[])
+            .complete_feature(feature.id, "Done without proof", &[], false)
             .await;
 
         assert!(result.is_err());
@@ -979,7 +979,7 @@ mod proof_gate {
 
         // Try to complete with failing proof — should be rejected
         let result = db
-            .complete_feature(feature.id, "Done with failing tests", &[])
+            .complete_feature(feature.id, "Done with failing tests", &[], false)
             .await;
 
         assert!(result.is_err());
@@ -1009,11 +1009,72 @@ mod proof_gate {
 
         // Complete should succeed
         let result = db
-            .complete_feature(feature.id, "Done with passing tests", &[])
+            .complete_feature(feature.id, "Done with passing tests", &[], false)
             .await
             .unwrap();
 
         assert_eq!(result.feature.state, FeatureState::Implemented);
         assert_eq!(result.history.details.summary, "Done with passing tests");
+    }
+
+    #[tokio::test]
+    async fn backfill_skips_proof_requirement() {
+        let db = setup().await;
+        let (_project, feature) = setup_provable_feature(&db).await;
+
+        // Complete with backfill=true — no proof needed
+        let result = db
+            .complete_feature(feature.id, "Pre-existing auth system", &[], true)
+            .await
+            .unwrap();
+
+        assert_eq!(result.feature.state, FeatureState::Implemented);
+        assert!(result.history.details.backfilled);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn backfill_skips_spec_requirement() {
+        let db = setup().await;
+        let project = create_test_project(&db).await;
+        let root = db
+            .get_feature(project.root_feature_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Create feature WITHOUT details (spec)
+        let feature = db
+            .create_feature(
+                project.id,
+                CreateFeatureInput {
+                    id: None,
+                    parent_id: Some(root.id),
+                    title: "No Spec Feature".to_string(),
+                    details: None,
+                    priority: None,
+                    target_version_id: None,
+                    state: Some(FeatureState::InProgress),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Normal complete should fail (no spec)
+        let err = db
+            .complete_feature(feature.id, "Done", &[], false)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no specification"), "Error: {err}");
+
+        // Backfill should succeed
+        let result = db
+            .complete_feature(feature.id, "Backfilled feature", &[], true)
+            .await
+            .unwrap();
+
+        assert_eq!(result.feature.state, FeatureState::Implemented);
+        assert!(result.history.details.backfilled);
     }
 }

@@ -35,6 +35,11 @@ pub struct HistoryDetails {
     /// Git commits created during this work.
     #[serde(default)]
     pub commits: Vec<CommitRef>,
+    /// When true, this entry was backfilled during project bootstrapping rather than
+    /// going through the normal prove/complete TDD cycle. The code existed before
+    /// Manifest was introduced — the code itself is the proof.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub backfilled: bool,
 }
 
 /// A reference to a git commit.

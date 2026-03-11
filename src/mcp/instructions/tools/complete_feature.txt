@@ -19,3 +19,8 @@ for all test suites.
 WARNINGS: Returns advisory warnings when test evidence is missing (no prove_feature call) or when the feature spec
 was not updated after implementation (no update_feature call). Address these warnings before considering the feature
 complete.
+
+BACKFILL MODE: Set backfill=true when bootstrapping existing projects where features were implemented before
+Manifest was introduced. This skips proof and spec requirements — the existing code is the proof. The history entry
+is tagged as 'backfilled' so it's visually distinct from features that went through the full TDD cycle. Use this
+when documenting an existing codebase, not for new development.
