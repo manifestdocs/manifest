@@ -179,6 +179,9 @@ pub async fn get_feature(
 
     let mut feature_info: FeatureInfoWithContext = (&feature_with_context).into();
 
+    // Parse depth mode (shallow, standard, deep)
+    let depth = req.depth.as_deref().unwrap_or("standard");
+
     // Populate display IDs
     let project_id: uuid::Uuid = feature_with_context.feature.project_id.into();
     let key_prefix = client
@@ -189,11 +192,34 @@ pub async fn get_feature(
         .unwrap_or_default();
     format::populate_display_ids(&mut feature_info, &feature_with_context, &key_prefix);
 
-    // Apply LOD to breadcrumb: direct parent gets full details, more distant ancestors truncated
-    feature_info.breadcrumb = format::lod_breadcrumb(&feature_info.breadcrumb, 1);
+    // Apply depth-dependent context filtering
+    match depth {
+        "shallow" => {
+            // Spec only: strip breadcrumb details, siblings, children
+            feature_info.breadcrumb = feature_info
+                .breadcrumb
+                .into_iter()
+                .map(|mut b| {
+                    b.details = None;
+                    b
+                })
+                .collect();
+            feature_info.siblings = vec![];
+            feature_info.children = vec![];
+        }
+        "deep" => {
+            // Full context: breadcrumb with budget, keep siblings/children
+            feature_info.breadcrumb = format::lod_breadcrumb(&feature_info.breadcrumb, 1);
+        }
+        _ => {
+            // Standard: breadcrumb with budget, keep siblings/children
+            feature_info.breadcrumb = format::lod_breadcrumb(&feature_info.breadcrumb, 1);
+        }
+    }
 
-    // Optionally include history
-    let history = if req.include_history {
+    // Include history when explicitly requested or in deep mode
+    let include_history = req.include_history || depth == "deep";
+    let history = if include_history {
         let history = client
             .get_feature_history(feature_id)
             .await

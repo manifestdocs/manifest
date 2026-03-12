@@ -183,6 +183,11 @@ pub struct GetFeatureRequest {
     )]
     #[serde(default)]
     pub include_history: bool,
+    #[schemars(
+        description = "Context depth: 'shallow' (spec only, no breadcrumb/siblings/children), 'standard' (spec + rich breadcrumb, default), 'deep' (spec + breadcrumb + history + siblings). Overrides include_history when set to 'deep'."
+    )]
+    #[serde(default)]
+    pub depth: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

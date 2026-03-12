@@ -1023,6 +1023,7 @@ mod get_feature_tool {
             GetFeatureRequest {
                 feature_id: fid.to_string(),
                 include_history: false,
+                depth: None,
             },
         )
         .await
@@ -1098,6 +1099,7 @@ mod get_feature_tool {
             GetFeatureRequest {
                 feature_id: fid.to_string(),
                 include_history: true,
+                depth: None,
             },
         )
         .await
@@ -1128,6 +1130,7 @@ mod get_feature_tool {
             GetFeatureRequest {
                 feature_id: child_id.to_string(),
                 include_history: false,
+                depth: None,
             },
         )
         .await
@@ -2059,6 +2062,343 @@ mod decision_capture {
         assert!(
             !has_text_containing(&result, "Consider updating parent"),
             "Should NOT suggest propagation for root features"
+        );
+    }
+}
+
+// ============================================================
+// Context-Budgeted Delivery (MANIF-127)
+// ============================================================
+
+mod context_budgeted_delivery {
+    use super::*;
+    use manifest::mcp::tools::format;
+    use manifest::mcp::types::{BreadcrumbItemInfo, GetFeatureRequest, StartFeatureRequest};
+
+    // --- Unit tests for budget_breadcrumb ---
+
+    #[test]
+    fn per_level_budget_truncates_long_details() {
+        let long_text = "x".repeat(3000);
+        let breadcrumb = vec![
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Root".into(),
+                details: Some(long_text),
+            },
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Current".into(),
+                details: Some("short".into()),
+            },
+        ];
+
+        let result = format::budget_breadcrumb(&breadcrumb, 2000, 8000);
+        // Root details should be truncated to ~2000 chars
+        let root_len = result[0].details.as_ref().unwrap().len();
+        assert!(
+            root_len <= 2003, // 2000 + "..."
+            "Root details should be truncated to ~2000 chars, got {}",
+            root_len
+        );
+        // Current feature details untouched
+        assert_eq!(result[1].details.as_deref(), Some("short"));
+    }
+
+    #[test]
+    fn total_budget_truncates_distant_ancestors_first() {
+        // 3 ancestors each with 3000 chars = 9000 total, over 8000 budget
+        let text_a = "Para one.\n\n".to_string() + &"a".repeat(2989);
+        let text_b = "b".repeat(3000);
+        let text_c = "c".repeat(3000);
+
+        let breadcrumb = vec![
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Root".into(),
+                details: Some(text_a),
+            },
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Middle".into(),
+                details: Some(text_b),
+            },
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Parent".into(),
+                details: Some(text_c.clone()),
+            },
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Current".into(),
+                details: None,
+            },
+        ];
+
+        // Per-level 3000 (no per-level truncation), total 8000
+        let result = format::budget_breadcrumb(&breadcrumb, 3000, 8000);
+
+        // Root (most distant) should be truncated first
+        let root_len = result[0].details.as_ref().map_or(0, |d| d.len());
+        assert!(
+            root_len < 3000,
+            "Root should be truncated (got {} chars)",
+            root_len
+        );
+        // Parent (nearest) should keep full details
+        assert_eq!(
+            result[2].details.as_ref().map(|d| d.len()),
+            Some(3000),
+            "Parent (nearest ancestor) should keep full details"
+        );
+    }
+
+    #[test]
+    fn empty_breadcrumb_returns_empty() {
+        let result = format::budget_breadcrumb(&[], 2000, 8000);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn within_budget_details_preserved() {
+        let breadcrumb = vec![
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Root".into(),
+                details: Some("Root context with decisions".into()),
+            },
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Parent".into(),
+                details: Some("Parent arch decisions\n\nMore detail here".into()),
+            },
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Current".into(),
+                details: Some("Feature spec".into()),
+            },
+        ];
+
+        let result = format::budget_breadcrumb(&breadcrumb, 2000, 8000);
+        // All within budget — everything preserved
+        assert_eq!(
+            result[0].details.as_deref(),
+            Some("Root context with decisions")
+        );
+        assert_eq!(
+            result[1].details.as_deref(),
+            Some("Parent arch decisions\n\nMore detail here")
+        );
+        assert_eq!(result[2].details.as_deref(), Some("Feature spec"));
+    }
+
+    // --- Integration tests for depth parameter ---
+
+    #[tokio::test]
+    async fn get_feature_shallow_strips_breadcrumb_and_siblings() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let parent = create_feature(
+            &server,
+            pid,
+            "Auth System",
+            Some("JWT auth with refresh tokens"),
+        )
+        .await;
+        let parent_id: Uuid = parent.id.into();
+
+        let child = create_child_feature(&server, pid, parent_id, "Login", Some(GOOD_SPEC)).await;
+        let _sibling =
+            create_child_feature(&server, pid, parent_id, "Logout", Some("Logout feature")).await;
+        let child_id: Uuid = child.id.into();
+
+        let result = features::get_feature(
+            &client,
+            GetFeatureRequest {
+                feature_id: child_id.to_string(),
+                include_history: false,
+                depth: Some("shallow".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        // Should have the feature spec
+        assert!(has_text_containing(&result, "title: Login"));
+        // Breadcrumb should NOT have parent details
+        assert!(
+            !has_text_containing(&result, "JWT auth with refresh tokens"),
+            "Shallow mode should strip breadcrumb details"
+        );
+        // Should NOT include siblings
+        assert!(
+            !has_text_containing(&result, "Logout"),
+            "Shallow mode should strip siblings"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_feature_deep_includes_history_automatically() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let feature = create_feature(&server, pid, "Deep Feature", Some(GOOD_SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        // Start, prove, complete to create history
+        features::start_feature(
+            &client,
+            StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        features::prove_feature(
+            &client,
+            manifest::mcp::types::ProveFeatureRequest {
+                feature_id: fid.to_string(),
+                command: "cargo test".to_string(),
+                exit_code: 0,
+                output: None,
+                test_suites: None,
+                tests: None,
+                evidence: vec![],
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        features::complete_feature(
+            &client,
+            manifest::mcp::types::CompleteFeatureRequest {
+                feature_id: fid.to_string(),
+                summary: "Built deep feature".to_string(),
+                commits: vec![],
+                backfill: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Now get with depth=deep (NOT setting include_history)
+        let result = features::get_feature(
+            &client,
+            GetFeatureRequest {
+                feature_id: fid.to_string(),
+                include_history: false,
+                depth: Some("deep".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        // Deep mode should include history automatically
+        assert!(
+            has_text_containing(&result, "Built deep feature"),
+            "Deep mode should include history without explicit include_history"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_feature_delivers_ancestor_details_in_breadcrumb() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let parent = create_feature(
+            &server,
+            pid,
+            "Payments",
+            Some("All amounts in cents. Use Stripe API v2."),
+        )
+        .await;
+        let parent_id: Uuid = parent.id.into();
+
+        let child =
+            create_child_feature(&server, pid, parent_id, "Checkout Flow", Some(GOOD_SPEC)).await;
+        let child_id: Uuid = child.id.into();
+
+        let result = features::start_feature(
+            &client,
+            StartFeatureRequest {
+                feature_id: child_id.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        // Breadcrumb should include parent's context details
+        assert!(
+            has_text_containing(&result, "All amounts in cents"),
+            "start_feature breadcrumb should include parent feature set details"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_feature_standard_includes_breadcrumb_details() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let parent = create_feature(
+            &server,
+            pid,
+            "Auth Module",
+            Some("Uses JWT with 15min expiry. CORS localhost:5173 in dev."),
+        )
+        .await;
+        let parent_id: Uuid = parent.id.into();
+
+        let child = create_child_feature(
+            &server,
+            pid,
+            parent_id,
+            "OAuth Login",
+            Some("Google OAuth integration"),
+        )
+        .await;
+        let child_id: Uuid = child.id.into();
+
+        // Standard depth (default) should include breadcrumb details
+        let result = features::get_feature(
+            &client,
+            GetFeatureRequest {
+                feature_id: child_id.to_string(),
+                include_history: false,
+                depth: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(
+            has_text_containing(&result, "Uses JWT with 15min expiry"),
+            "Standard depth should include ancestor details in breadcrumb"
         );
     }
 }

@@ -76,38 +76,106 @@ pub fn display_id(feature_number: Option<i32>, key_prefix: &str, uuid: &uuid::Uu
     }
 }
 
-/// Apply LOD (level-of-detail) to a breadcrumb trail.
+/// Default per-level character budget for ancestor details in breadcrumbs.
+const PER_LEVEL_BUDGET: usize = 2000;
+
+/// Default total character budget for all ancestor details combined.
+const TOTAL_BUDGET: usize = 8000;
+
+/// Apply budget-based LOD (level-of-detail) to a breadcrumb trail.
 ///
-/// - Items within `detail_depth` hops of the end (current feature) keep full details.
-/// - More distant ancestors get truncated to their first paragraph.
-/// - The root item (index 0) already uses `details_summary` from the SQL query,
-///   so we don't truncate it further here.
+/// Each ancestor's details are capped at `PER_LEVEL_BUDGET` characters.
+/// The total details across all ancestors are capped at `TOTAL_BUDGET`,
+/// with nearest ancestors (closest to current feature) prioritized —
+/// distant ancestors are truncated first when the budget is tight.
+///
+/// The root item (index 0) already uses `details_summary` from the SQL query,
+/// so it typically arrives pre-summarized.
 pub fn lod_breadcrumb(
     breadcrumb: &[BreadcrumbItemInfo],
-    detail_depth: usize,
+    _detail_depth: usize,
+) -> Vec<BreadcrumbItemInfo> {
+    budget_breadcrumb(breadcrumb, PER_LEVEL_BUDGET, TOTAL_BUDGET)
+}
+
+/// Budget-based breadcrumb truncation with configurable limits.
+///
+/// Strategy:
+/// 1. Apply per-level cap to each item's details.
+/// 2. If total exceeds budget, progressively truncate from the most distant
+///    ancestor toward the current feature until within budget.
+pub fn budget_breadcrumb(
+    breadcrumb: &[BreadcrumbItemInfo],
+    per_level: usize,
+    total: usize,
 ) -> Vec<BreadcrumbItemInfo> {
     let len = breadcrumb.len();
-    breadcrumb
-        .iter()
-        .enumerate()
-        .map(|(i, item)| {
-            // Distance from the end (current feature is at len-1)
-            let distance_from_current = len.saturating_sub(1).saturating_sub(i);
+    if len == 0 {
+        return vec![];
+    }
 
-            if distance_from_current <= detail_depth {
-                // Within detail depth: keep full details
-                item.clone()
-            } else {
-                // Beyond detail depth: truncate to first paragraph
-                BreadcrumbItemInfo {
-                    id: item.id,
-                    display_id: item.display_id.clone(),
-                    title: item.title.clone(),
-                    details: item.details.as_ref().map(|d| first_paragraph(d)),
-                }
-            }
+    // Step 1: Apply per-level cap to each item
+    let mut items: Vec<BreadcrumbItemInfo> = breadcrumb
+        .iter()
+        .map(|item| BreadcrumbItemInfo {
+            id: item.id,
+            display_id: item.display_id.clone(),
+            title: item.title.clone(),
+            details: item
+                .details
+                .as_ref()
+                .map(|d| truncate_to_budget(d, per_level)),
         })
-        .collect()
+        .collect();
+
+    // Step 2: Enforce total budget, truncating from most distant ancestor first
+    let mut total_chars: usize = items.iter().map(|i| detail_len(i)).sum();
+    if total_chars <= total {
+        return items;
+    }
+
+    // Walk from root (index 0) toward current feature, truncating as needed
+    for i in 0..len.saturating_sub(1) {
+        if total_chars <= total {
+            break;
+        }
+        let current_len = detail_len(&items[i]);
+        if current_len == 0 {
+            continue;
+        }
+
+        // Try first-paragraph truncation
+        let truncated = items[i]
+            .details
+            .as_ref()
+            .map(|d| first_paragraph(d))
+            .unwrap_or_default();
+        let new_len = truncated.len();
+
+        if new_len < current_len {
+            total_chars = total_chars - current_len + new_len;
+            items[i].details = if truncated.is_empty() {
+                None
+            } else {
+                Some(truncated)
+            };
+        }
+
+        // If still over budget, remove details entirely from this level
+        if total_chars > total {
+            let removed = detail_len(&items[i]);
+            if removed > 0 {
+                total_chars -= removed;
+                items[i].details = None;
+            }
+        }
+    }
+
+    items
+}
+
+fn detail_len(item: &BreadcrumbItemInfo) -> usize {
+    item.details.as_ref().map_or(0, |d| d.len())
 }
 
 /// Extract the first paragraph from a text block.
@@ -124,6 +192,28 @@ fn first_paragraph(text: &str) -> String {
     } else {
         text.to_string()
     }
+}
+
+/// Truncate text to a character budget, breaking at a paragraph or line boundary.
+/// Appends "..." when truncated.
+fn truncate_to_budget(text: &str, budget: usize) -> String {
+    if text.len() <= budget {
+        return text.to_string();
+    }
+
+    // Try to break at a paragraph boundary within budget
+    let search_area = &text[..budget];
+    if let Some(pos) = search_area.rfind("\n\n") {
+        return format!("{}...", text[..pos].trim());
+    }
+
+    // Fall back to line boundary
+    if let Some(pos) = search_area.rfind('\n') {
+        return format!("{}...", text[..pos].trim());
+    }
+
+    // Last resort: hard truncate at budget
+    format!("{}...", &text[..budget.saturating_sub(3)])
 }
 
 /// Serialize a value to YAML.
@@ -535,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lod_breadcrumb_within_depth() {
+    fn test_lod_breadcrumb_preserves_short_details() {
         let breadcrumb = vec![
             BreadcrumbItemInfo {
                 id: uuid::Uuid::nil(),
@@ -557,37 +647,28 @@ mod tests {
             },
         ];
 
-        // detail_depth=1: current (index 2, distance 0) and parent (index 1, distance 1) keep full details
+        // All details are short enough to fit within default budgets (2000/level, 8000 total)
         let result = lod_breadcrumb(&breadcrumb, 1);
+        assert_eq!(result[0].details.as_deref(), Some("Root details summary"));
         assert_eq!(
             result[1].details.as_deref(),
             Some("Full parent context\n\nMore details here")
         );
-
-        // Root (index 0, distance 2) should be truncated to first paragraph
-        assert_eq!(result[0].details.as_deref(), Some("Root details summary"));
+        assert_eq!(
+            result[2].details.as_deref(),
+            Some("Current feature details")
+        );
     }
 
     #[test]
-    fn test_lod_breadcrumb_truncation() {
+    fn test_budget_breadcrumb_per_level_truncation() {
+        let long_text = "x".repeat(3000);
         let breadcrumb = vec![
             BreadcrumbItemInfo {
                 id: uuid::Uuid::nil(),
                 display_id: None,
                 title: "Root".into(),
-                details: Some("First paragraph.\n\nSecond paragraph with more.".into()),
-            },
-            BreadcrumbItemInfo {
-                id: uuid::Uuid::nil(),
-                display_id: None,
-                title: "Grandparent".into(),
-                details: Some("GP first paragraph.\n\nGP second paragraph.".into()),
-            },
-            BreadcrumbItemInfo {
-                id: uuid::Uuid::nil(),
-                display_id: None,
-                title: "Parent".into(),
-                details: Some("Parent details\n\nParent extra".into()),
+                details: Some(long_text),
             },
             BreadcrumbItemInfo {
                 id: uuid::Uuid::nil(),
@@ -597,20 +678,46 @@ mod tests {
             },
         ];
 
-        // detail_depth=1: only parent (distance 1) and current (distance 0) keep full details
-        let result = lod_breadcrumb(&breadcrumb, 1);
+        let result = budget_breadcrumb(&breadcrumb, 2000, 8000);
+        // Root should be truncated to ~2000 chars
+        let root_len = result[0].details.as_ref().unwrap().len();
+        assert!(root_len <= 2003); // budget + "..."
+        assert!(result[1].details.is_none());
+    }
 
-        // Root (distance 3) -> truncated
-        assert_eq!(result[0].details.as_deref(), Some("First paragraph...."));
-        // Grandparent (distance 2) -> truncated
-        assert_eq!(result[1].details.as_deref(), Some("GP first paragraph...."));
-        // Parent (distance 1) -> full
-        assert_eq!(
-            result[2].details.as_deref(),
-            Some("Parent details\n\nParent extra")
-        );
-        // Current (distance 0) -> full (None stays None)
-        assert!(result[3].details.is_none());
+    #[test]
+    fn test_budget_breadcrumb_total_budget_truncates_distant_first() {
+        // Two ancestors with 500 chars each, total budget 600 — root gets truncated first
+        let text_a = "Para one.\n\n".to_string() + &"a".repeat(489);
+        let text_b = "b".repeat(500);
+
+        let breadcrumb = vec![
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Root".into(),
+                details: Some(text_a),
+            },
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Parent".into(),
+                details: Some(text_b.clone()),
+            },
+            BreadcrumbItemInfo {
+                id: uuid::Uuid::nil(),
+                display_id: None,
+                title: "Current".into(),
+                details: None,
+            },
+        ];
+
+        let result = budget_breadcrumb(&breadcrumb, 1000, 600);
+        // Root should be truncated (it's most distant)
+        let root_len = result[0].details.as_ref().map_or(0, |d| d.len());
+        assert!(root_len < 500, "Root should be truncated, got {}", root_len);
+        // Parent (nearest) should keep full details
+        assert_eq!(result[1].details.as_ref().map(|d| d.len()), Some(500));
     }
 
     #[test]
