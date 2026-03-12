@@ -1801,3 +1801,118 @@ mod orient_tool {
         assert!(texts[0].contains("Test Project"));
     }
 }
+
+// ============================================================
+// Feature Set Context Guidance (MANIF-162)
+// ============================================================
+
+mod feature_set_context_guidance {
+    use super::*;
+    use manifest::mcp::types::{CreateFeatureRequest, StartFeatureRequest};
+
+    #[tokio::test]
+    async fn start_feature_nudges_when_parent_has_empty_details() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Create parent feature set with NO details
+        let parent = create_feature(&server, pid, "Authentication", None).await;
+        let parent_id: Uuid = parent.id.into();
+
+        // Create child with a good spec
+        let child =
+            create_child_feature(&server, pid, parent_id, "Email Login", Some(GOOD_SPEC)).await;
+        let child_id: Uuid = child.id.into();
+
+        let result = features::start_feature(
+            &client,
+            StartFeatureRequest {
+                feature_id: child_id.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(
+            has_text_containing(&result, "has no shared context"),
+            "Expected nudge about empty parent details"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_feature_no_nudge_when_parent_has_details() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Create parent feature set WITH details
+        let parent = create_feature(
+            &server,
+            pid,
+            "Authentication",
+            Some("JWT tokens with 15-min expiry. Refresh via HTTP-only cookie."),
+        )
+        .await;
+        let parent_id: Uuid = parent.id.into();
+
+        let child =
+            create_child_feature(&server, pid, parent_id, "Email Login", Some(GOOD_SPEC)).await;
+        let child_id: Uuid = child.id.into();
+
+        let result = features::start_feature(
+            &client,
+            StartFeatureRequest {
+                feature_id: child_id.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(
+            !has_text_containing(&result, "has no shared context"),
+            "Should NOT nudge when parent has details"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_feature_under_parent_shows_feature_set_guidance() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Create a parent feature first
+        let parent = create_feature(&server, pid, "Authentication", None).await;
+        let parent_id: Uuid = parent.id.into();
+
+        // Create a child under it — the parent now becomes a feature set
+        let result = features::create_feature(
+            &client,
+            CreateFeatureRequest {
+                project_id: pid,
+                parent_id: Some(parent_id),
+                title: "Email Login".to_string(),
+                details: Some(GOOD_SPEC.to_string()),
+                state: "proposed".to_string(),
+                priority: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        // Check for feature set guidance about adding shared context
+        assert!(
+            has_text_containing(&result, "shared context"),
+            "Expected feature set guidance when creating child under parent"
+        );
+    }
+}

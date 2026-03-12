@@ -396,6 +396,27 @@ pub async fn create_feature(
         }
     }
 
+    // If created under a parent, nudge about adding shared context to the parent feature set
+    if req.parent_id.is_some() {
+        // Check if the parent has details by fetching its context
+        let parent_id: uuid::Uuid = req.parent_id.unwrap();
+        if let Ok(parent_ctx) = client.get_feature_with_context(parent_id.into()).await {
+            let parent_has_details = parent_ctx
+                .feature
+                .details
+                .as_ref()
+                .is_some_and(|d| !d.trim().is_empty());
+            if !parent_has_details {
+                blocks.push(Content::text(format!(
+                    "Parent '{}' is now a feature set. Add shared context that applies to all \
+                     children — architectural decisions, conventions, constraints. This context \
+                     flows to agents via the breadcrumb when they work on child features.",
+                    parent_ctx.feature.title
+                )));
+            }
+        }
+    }
+
     Ok(CallToolResult::success(blocks))
 }
 
@@ -684,6 +705,29 @@ pub async fn start_feature(
     // Apply LOD to breadcrumb
     feature_info.breadcrumb = format::lod_breadcrumb(&feature_info.breadcrumb, 1);
 
+    // Check if parent feature set has empty details (for nudge later)
+    let empty_parent_nudge = if feature_info.breadcrumb.len() >= 3 {
+        let parent_bc = &feature_info.breadcrumb[feature_info.breadcrumb.len() - 2];
+        let parent_has_details = parent_bc
+            .details
+            .as_ref()
+            .is_some_and(|d| !d.trim().is_empty());
+        if !parent_has_details {
+            let parent_display = parent_bc.display_id.as_deref().unwrap_or("the parent");
+            Some(format!(
+                "Note: Parent feature set '{}' has no shared context.\n\
+                 Consider adding architectural decisions, conventions, or constraints \
+                 that apply to all {} features using:\n  \
+                 update_feature({}, details: \"...\")",
+                parent_bc.title, parent_bc.title, parent_display
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let response = crate::mcp::types::StartFeatureResponse {
         feature: feature_info,
         spec_status: spec_status.summary().to_string(),
@@ -722,6 +766,11 @@ pub async fn start_feature(
              After implementing, update `details` to match what was built."
                 .to_string(),
         ));
+    }
+
+    // Nudge if parent feature set has empty details (hierarchical context guidance)
+    if let Some(nudge) = empty_parent_nudge {
+        content.push(Content::text(nudge));
     }
 
     // If spec has warnings (e.g., no testable criteria), prepend a warning text block

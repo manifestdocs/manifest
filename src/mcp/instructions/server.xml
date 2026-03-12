@@ -95,6 +95,18 @@ Write what the agent cannot discover from code — intent, business rules, edge 
 complex features should have proportionally more detail: additional context, more acceptance criteria, edge cases,
 and constraints. Do NOT put file paths, directory layouts, codebase overviews, or step-by-step implementation plans
 in specs — agents discover code structure on their own and extra context degrades performance.
+
+**Context belongs at different levels of the tree:**
+
+| Level | What goes here | Examples |
+|---|---|---|
+| Project instructions | Cross-cutting conventions, tech stack, deployment model | "Use pnpm. Deploy via Docker. REST API on port 3000." |
+| Feature set details | Domain decisions, constraints, patterns for this area | "Auth uses JWT. Payments use Stripe. All amounts in cents." |
+| Leaf feature spec | User story, acceptance criteria, edge cases | "As a user, I can reset my password..." |
+
+Feature set details are the primary mechanism for scoped context — they flow to agents automatically via the
+breadcrumb when working on child features. When creating or working under a feature set, populate its details
+with architectural decisions and constraints that apply to all children.
 </features_as_docs>
 
 <updating_features>
