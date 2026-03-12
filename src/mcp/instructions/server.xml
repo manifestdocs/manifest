@@ -208,9 +208,14 @@ When creating new features:
 4. DOCUMENT — MANDATORY after implementing:
    a) call update_feature to set details to what was actually built
    b) call prove_feature to record test evidence
-   c) call complete_feature with a summary of what you did + commit SHAs
+   c) call complete_feature with a summary that captures:
+      - Key decisions and their rationale ("Chose X over Y because...")
+      - Any deviations from the original spec and why
+      - Discoveries that affect sibling features ("Discovered that...")
+      - Constraints or gotchas for future work
    NOTE: complete_feature REQUIRES a passing proof (exit_code 0). Fix failing tests and call prove_feature again
-   before completing.
+   before completing. If the summary contains decisions relevant to sibling features, complete_feature will suggest
+   updating the parent feature set's details — apply these suggestions to propagate context upward through the tree.
 
 Common sequence: list_projects → get_active_feature → start_feature → [implement] → prove_feature →
 update_feature (details) → complete_feature

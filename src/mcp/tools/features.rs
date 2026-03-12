@@ -978,8 +978,67 @@ pub async fn complete_feature(
     if let Some(msg) = merge_message {
         content.push(Content::text(msg));
     }
+
+    // Context propagation: suggest updating parent feature set when summary contains decisions
+    if !req.backfill {
+        if let Some(suggestion) =
+            build_propagation_suggestion(client, feature_id.into(), &req.summary).await
+        {
+            content.push(Content::text(suggestion));
+        }
+    }
+
     content.push(Content::text(json));
     Ok(CallToolResult::success(content))
+}
+
+/// Check if a completion summary contains decision-like patterns worth propagating
+/// to the parent feature set. Returns a suggestion string if applicable.
+async fn build_propagation_suggestion(
+    client: &ManifestClient,
+    feature_id: FeatureId,
+    summary: &str,
+) -> Option<String> {
+    // Only trigger if summary contains decision/discovery patterns
+    let patterns = [
+        "discovered that",
+        "decided to",
+        "chose ",
+        "switched to",
+        "constraint:",
+        "note:",
+        "deviated from",
+        "instead of",
+        " over ",
+        "requirement",
+        "discovered ",
+    ];
+    let lower = summary.to_lowercase();
+    let has_decisions = patterns.iter().any(|p| lower.contains(p));
+    if !has_decisions {
+        return None;
+    }
+
+    // Get feature context to find the parent
+    let fid: uuid::Uuid = feature_id.into();
+    let ctx = client.get_feature_with_context(fid).await.ok()?;
+
+    // Only suggest for non-root parents (feature must have a parent that isn't the project root)
+    let parent = ctx.parent.as_ref()?;
+
+    // Check breadcrumb: need at least 3 items (root, parent, feature) to have a non-root parent
+    if ctx.breadcrumb.len() < 3 {
+        return None;
+    }
+
+    // Use parent ID for the suggestion
+    let parent_display = parent.id.to_string();
+
+    Some(format!(
+        "Consider updating parent '{}' with decisions from this work that may affect sibling features.\n\
+         Use: update_feature({}, details: \"...\")",
+        parent.title, parent_display
+    ))
 }
 
 /// Record test evidence for a feature.

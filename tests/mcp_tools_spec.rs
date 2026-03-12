@@ -1916,3 +1916,149 @@ mod feature_set_context_guidance {
         );
     }
 }
+
+// ============================================================
+// Decision Capture in Completions (MANIF-84)
+// ============================================================
+
+mod decision_capture {
+    use super::*;
+    use manifest::mcp::types::{CommitRefInput, CompleteFeatureRequest, StartFeatureRequest};
+
+    /// Helper: start + prove a feature so it's ready for completion
+    async fn start_and_prove(client: &ManifestClient, feature_id: Uuid) {
+        features::start_feature(
+            client,
+            StartFeatureRequest {
+                feature_id: feature_id.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        features::prove_feature(
+            client,
+            manifest::mcp::types::ProveFeatureRequest {
+                feature_id: feature_id.to_string(),
+                command: "cargo test".to_string(),
+                exit_code: 0,
+                output: None,
+                test_suites: None,
+                tests: None,
+                evidence: vec![],
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn suggests_parent_update_when_summary_contains_decisions() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Create parent feature set
+        let parent = create_feature(&server, pid, "Authentication", None).await;
+        let parent_id: Uuid = parent.id.into();
+
+        // Create child
+        let child =
+            create_child_feature(&server, pid, parent_id, "Email Login", Some(GOOD_SPEC)).await;
+        let child_id: Uuid = child.id.into();
+
+        start_and_prove(&client, child_id).await;
+
+        let result = features::complete_feature(
+            &client,
+            CompleteFeatureRequest {
+                feature_id: child_id.to_string(),
+                summary: "Implemented email login. Discovered that bcrypt rounds must be >=12 for compliance. Decided to use Redis for session storage instead of SQLite.".to_string(),
+                commits: vec![CommitRefInput {
+                    sha: "abc1234".to_string(),
+                    message: "Add email login".to_string(),
+                    author: None,
+                }],
+                backfill: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(
+            has_text_containing(&result, "Consider updating parent"),
+            "Expected parent context propagation suggestion"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_propagation_when_summary_has_no_decisions() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let parent = create_feature(&server, pid, "Authentication", None).await;
+        let parent_id: Uuid = parent.id.into();
+
+        let child =
+            create_child_feature(&server, pid, parent_id, "Email Login", Some(GOOD_SPEC)).await;
+        let child_id: Uuid = child.id.into();
+
+        start_and_prove(&client, child_id).await;
+
+        let result = features::complete_feature(
+            &client,
+            CompleteFeatureRequest {
+                feature_id: child_id.to_string(),
+                summary: "Implemented email login with standard password hashing".to_string(),
+                commits: vec![],
+                backfill: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(
+            !has_text_containing(&result, "Consider updating parent"),
+            "Should NOT suggest propagation for plain summaries"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_propagation_for_root_features() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Root-level feature (no parent feature set)
+        let feature = create_feature(&server, pid, "Email Login", Some(GOOD_SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        start_and_prove(&client, fid).await;
+
+        let result = features::complete_feature(
+            &client,
+            CompleteFeatureRequest {
+                feature_id: fid.to_string(),
+                summary: "Implemented login. Discovered that bcrypt rounds must be >=12."
+                    .to_string(),
+                commits: vec![],
+                backfill: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(
+            !has_text_containing(&result, "Consider updating parent"),
+            "Should NOT suggest propagation for root features"
+        );
+    }
+}
