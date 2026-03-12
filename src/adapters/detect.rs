@@ -26,6 +26,31 @@ pub fn detect_adapter(command: &str) -> Option<&'static str> {
         Some("jest")
     } else if trimmed.starts_with("go test") {
         Some("go-test")
+    } else if trimmed.starts_with("dotnet test") {
+        Some("dotnet-test")
+    } else if trimmed.starts_with("rspec")
+        || trimmed.starts_with("bundle exec rspec")
+        || trimmed.starts_with("bin/rspec")
+    {
+        Some("rspec")
+    } else if trimmed.starts_with("mvn test")
+        || trimmed.starts_with("mvn verify")
+        || trimmed.starts_with("./mvnw test")
+        || trimmed.starts_with("gradle test")
+        || trimmed.starts_with("./gradlew test")
+    {
+        Some("junit")
+    } else if trimmed.starts_with("phpunit")
+        || trimmed.starts_with("./vendor/bin/phpunit")
+        || trimmed.starts_with("php artisan test")
+    {
+        Some("phpunit")
+    } else if trimmed.starts_with("swift test") {
+        Some("swift-test")
+    } else if trimmed.starts_with("mix test") {
+        Some("elixir-test")
+    } else if trimmed.starts_with("dart test") || trimmed.starts_with("flutter test") {
+        Some("dart-test")
     } else {
         None
     }
@@ -75,6 +100,72 @@ mod tests {
     fn detects_go_test() {
         assert_eq!(detect_adapter("go test ./..."), Some("go-test"));
         assert_eq!(detect_adapter("go test -v ./pkg/..."), Some("go-test"));
+    }
+
+    #[test]
+    fn detects_dotnet_test() {
+        assert_eq!(detect_adapter("dotnet test"), Some("dotnet-test"));
+        assert_eq!(
+            detect_adapter("dotnet test --filter Auth"),
+            Some("dotnet-test")
+        );
+    }
+
+    #[test]
+    fn detects_rspec() {
+        assert_eq!(detect_adapter("rspec"), Some("rspec"));
+        assert_eq!(detect_adapter("rspec spec/auth_spec.rb"), Some("rspec"));
+        assert_eq!(detect_adapter("bundle exec rspec"), Some("rspec"));
+        assert_eq!(detect_adapter("bundle exec rspec spec/"), Some("rspec"));
+        assert_eq!(detect_adapter("bin/rspec"), Some("rspec"));
+    }
+
+    #[test]
+    fn detects_junit() {
+        assert_eq!(detect_adapter("mvn test"), Some("junit"));
+        assert_eq!(detect_adapter("mvn verify"), Some("junit"));
+        assert_eq!(detect_adapter("./mvnw test"), Some("junit"));
+        assert_eq!(detect_adapter("gradle test"), Some("junit"));
+        assert_eq!(detect_adapter("./gradlew test"), Some("junit"));
+    }
+
+    #[test]
+    fn detects_phpunit() {
+        assert_eq!(detect_adapter("phpunit"), Some("phpunit"));
+        assert_eq!(detect_adapter("./vendor/bin/phpunit"), Some("phpunit"));
+        assert_eq!(
+            detect_adapter("./vendor/bin/phpunit tests/"),
+            Some("phpunit")
+        );
+        assert_eq!(detect_adapter("php artisan test"), Some("phpunit"));
+    }
+
+    #[test]
+    fn detects_swift_test() {
+        assert_eq!(detect_adapter("swift test"), Some("swift-test"));
+        assert_eq!(
+            detect_adapter("swift test --filter AuthTests"),
+            Some("swift-test")
+        );
+    }
+
+    #[test]
+    fn detects_elixir_test() {
+        assert_eq!(detect_adapter("mix test"), Some("elixir-test"));
+        assert_eq!(
+            detect_adapter("mix test test/auth_test.exs"),
+            Some("elixir-test")
+        );
+    }
+
+    #[test]
+    fn detects_dart_test() {
+        assert_eq!(detect_adapter("dart test"), Some("dart-test"));
+        assert_eq!(detect_adapter("flutter test"), Some("dart-test"));
+        assert_eq!(
+            detect_adapter("flutter test test/auth_test.dart"),
+            Some("dart-test")
+        );
     }
 
     #[test]

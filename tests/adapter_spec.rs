@@ -51,11 +51,18 @@ mod builtin_adapters {
     #[test]
     fn lists_all_built_in_adapters() {
         let adapters = list_builtin_adapters();
-        assert_eq!(adapters.len(), 4);
+        assert_eq!(adapters.len(), 11);
         assert!(adapters.contains(&"cargo-test"));
-        assert!(adapters.contains(&"pytest"));
-        assert!(adapters.contains(&"jest"));
+        assert!(adapters.contains(&"dart-test"));
+        assert!(adapters.contains(&"dotnet-test"));
+        assert!(adapters.contains(&"elixir-test"));
         assert!(adapters.contains(&"go-test"));
+        assert!(adapters.contains(&"jest"));
+        assert!(adapters.contains(&"junit"));
+        assert!(adapters.contains(&"phpunit"));
+        assert!(adapters.contains(&"pytest"));
+        assert!(adapters.contains(&"rspec"));
+        assert!(adapters.contains(&"swift-test"));
     }
 }
 
@@ -406,6 +413,473 @@ FAIL    github.com/example/auth 0.025s
 
         assert_eq!(failed.file.as_deref(), Some("auth_test.go"));
         assert_eq!(failed.line, Some(42));
+    }
+}
+
+// ============================================================
+// RSpec Adapter
+// ============================================================
+
+mod rspec_adapter {
+    use super::*;
+
+    const RSPEC_OUTPUT: &str = "\
+Authentication
+  with valid credentials
+    logs in successfully (FAILED - 1)
+  with invalid credentials
+    returns an error
+
+Failures:
+
+  1) Authentication with valid credentials logs in successfully
+     Failure/Error: expect(result).to be_truthy
+
+       expected: truthy value
+            got: false
+
+     # ./spec/auth_spec.rb:10:in `block (3 levels) in <top (required)>'
+
+1 example, 1 failure
+";
+
+    #[test]
+    fn parses_failed_test_with_message() {
+        let result = parse_test_output("bundle exec rspec", RSPEC_OUTPUT, None, None)
+            .expect("Adapter should match rspec");
+
+        assert_eq!(result.adapter_name, "rspec");
+        let tests = flatten(&result);
+
+        let failed: Vec<_> = tests
+            .iter()
+            .filter(|t| t.state == TestState::Failed)
+            .collect();
+
+        assert!(!failed.is_empty(), "Should have at least one failed test");
+    }
+
+    #[test]
+    fn auto_detects_from_rspec_command() {
+        let result = parse_test_output("rspec spec/", RSPEC_OUTPUT, None, None)
+            .expect("Should detect rspec adapter");
+
+        assert_eq!(result.adapter_name, "rspec");
+    }
+}
+
+// ============================================================
+// JUnit Adapter (Gradle format)
+// ============================================================
+
+mod junit_adapter {
+    use super::*;
+
+    const GRADLE_OUTPUT: &str = "\
+> Task :test
+
+com.example.AuthTest > loginWithValidCredentials PASSED
+com.example.AuthTest > loginWithInvalidPassword FAILED
+com.example.AuthTest > signupCreatesUser PASSED
+com.example.UserTest > getProfile PASSED
+com.example.UserTest > updateProfile SKIPPED
+
+5 tests completed, 1 failed, 1 skipped
+";
+
+    #[test]
+    fn parses_gradle_format() {
+        let result = parse_test_output("./gradlew test", GRADLE_OUTPUT, None, None)
+            .expect("Adapter should match junit");
+
+        assert_eq!(result.adapter_name, "junit");
+        assert_eq!(total_test_count(&result), 5);
+    }
+
+    #[test]
+    fn maps_states_correctly() {
+        let result = parse_test_output("gradle test", GRADLE_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let passed = tests
+            .iter()
+            .filter(|t| t.state == TestState::Passed)
+            .count();
+        let failed = tests
+            .iter()
+            .filter(|t| t.state == TestState::Failed)
+            .count();
+        let skipped = tests
+            .iter()
+            .filter(|t| t.state == TestState::Skipped)
+            .count();
+
+        assert_eq!(passed, 3);
+        assert_eq!(failed, 1);
+        assert_eq!(skipped, 1);
+    }
+
+    #[test]
+    fn extracts_class_as_suite() {
+        let result = parse_test_output("gradle test", GRADLE_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let login = tests
+            .iter()
+            .find(|t| t.name == "loginWithValidCredentials")
+            .unwrap();
+
+        assert_eq!(login.suite, "com.example.AuthTest");
+    }
+
+    #[test]
+    fn auto_detects_from_mvn_command() {
+        let result = parse_test_output("mvn test", GRADLE_OUTPUT, Some("junit"), None)
+            .expect("Should work with explicit junit adapter");
+
+        assert_eq!(result.adapter_name, "junit");
+    }
+}
+
+// ============================================================
+// Dotnet Test Adapter
+// ============================================================
+
+mod dotnet_test_adapter {
+    use super::*;
+
+    const DOTNET_OUTPUT: &str = "\
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Build succeeded.
+
+  Passed  MyApp.Tests.AuthTests.LoginWithValidCredentials [5 ms]
+  Passed  MyApp.Tests.AuthTests.SignupCreatesUser [3 ms]
+  Failed  MyApp.Tests.AuthTests.LoginWithInvalidPassword [10 ms]
+  Skipped MyApp.Tests.AuthTests.RateLimiting
+
+Test Run Failed.
+Total tests: 4
+     Passed: 2
+     Failed: 1
+    Skipped: 1
+";
+
+    #[test]
+    fn parses_all_states() {
+        let result = parse_test_output("dotnet test", DOTNET_OUTPUT, None, None)
+            .expect("Adapter should match dotnet-test");
+
+        assert_eq!(result.adapter_name, "dotnet-test");
+        assert_eq!(total_test_count(&result), 4);
+    }
+
+    #[test]
+    fn extracts_duration() {
+        let result = parse_test_output("dotnet test", DOTNET_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let login = tests
+            .iter()
+            .find(|t| t.name == "MyApp.Tests.AuthTests.LoginWithValidCredentials")
+            .unwrap();
+
+        assert_eq!(login.duration_ms, Some(5));
+        assert_eq!(login.state, TestState::Passed);
+    }
+
+    #[test]
+    fn extracts_namespace_as_suite() {
+        let result = parse_test_output("dotnet test", DOTNET_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let login = tests
+            .iter()
+            .find(|t| t.name == "MyApp.Tests.AuthTests.LoginWithValidCredentials")
+            .unwrap();
+
+        assert_eq!(login.suite, "MyApp.Tests.AuthTests");
+    }
+}
+
+// ============================================================
+// PHPUnit Adapter
+// ============================================================
+
+mod phpunit_adapter {
+    use super::*;
+
+    const PHPUNIT_VERBOSE_OUTPUT: &str = "\
+PHPUnit 10.5.0 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.3.0
+
+✓ AuthTest::testLogin
+✗ AuthTest::testInvalidPassword
+→ AuthTest::testSkipped
+
+There was 1 failure:
+
+1) AuthTest::testInvalidPassword
+Failed asserting that false is true.
+
+/tests/AuthTest.php:42
+
+FAILURES!
+Tests: 3, Assertions: 3, Failures: 1.
+";
+
+    #[test]
+    fn parses_verbose_format() {
+        let result = parse_test_output("phpunit", PHPUNIT_VERBOSE_OUTPUT, None, None)
+            .expect("Adapter should match phpunit");
+
+        assert_eq!(result.adapter_name, "phpunit");
+        assert_eq!(total_test_count(&result), 3);
+    }
+
+    #[test]
+    fn maps_unicode_markers() {
+        let result = parse_test_output("phpunit", PHPUNIT_VERBOSE_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let passed = tests
+            .iter()
+            .filter(|t| t.state == TestState::Passed)
+            .count();
+        let failed = tests
+            .iter()
+            .filter(|t| t.state == TestState::Failed)
+            .count();
+        let skipped = tests
+            .iter()
+            .filter(|t| t.state == TestState::Skipped)
+            .count();
+
+        assert_eq!(passed, 1);
+        assert_eq!(failed, 1);
+        assert_eq!(skipped, 1);
+    }
+
+    #[test]
+    fn extracts_class_as_suite() {
+        let result = parse_test_output("phpunit", PHPUNIT_VERBOSE_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let login = tests.iter().find(|t| t.name == "testLogin").unwrap();
+
+        assert_eq!(login.suite, "AuthTest");
+    }
+
+    #[test]
+    fn auto_detects_from_vendor_bin() {
+        let result = parse_test_output("./vendor/bin/phpunit", PHPUNIT_VERBOSE_OUTPUT, None, None)
+            .expect("Should detect phpunit adapter");
+
+        assert_eq!(result.adapter_name, "phpunit");
+    }
+}
+
+// ============================================================
+// Swift Test Adapter
+// ============================================================
+
+mod swift_test_adapter {
+    use super::*;
+
+    const SWIFT_TEST_OUTPUT: &str = "\
+Test Suite 'All tests' started at 2024-01-01 00:00:00.000.
+Test Suite 'AuthTests' started at 2024-01-01 00:00:00.001.
+Test Case '-[AuthTests testLogin]' started.
+Test Case '-[AuthTests testLogin]' passed (0.001 seconds).
+Test Case '-[AuthTests testInvalidPassword]' started.
+/path/to/AuthTests.swift:42: error: -[AuthTests testInvalidPassword] : XCTAssertTrue failed
+Test Case '-[AuthTests testInvalidPassword]' failed (0.002 seconds).
+Test Suite 'AuthTests' failed at 2024-01-01 00:00:00.003.
+";
+
+    #[test]
+    fn parses_passed_and_failed() {
+        let result = parse_test_output("swift test", SWIFT_TEST_OUTPUT, None, None)
+            .expect("Adapter should match swift-test");
+
+        assert_eq!(result.adapter_name, "swift-test");
+        assert_eq!(total_test_count(&result), 2);
+    }
+
+    #[test]
+    fn extracts_duration() {
+        let result = parse_test_output("swift test", SWIFT_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let login = tests.iter().find(|t| t.name == "testLogin").unwrap();
+        assert_eq!(login.duration_ms, Some(1));
+        assert_eq!(login.state, TestState::Passed);
+    }
+
+    #[test]
+    fn extracts_class_as_suite() {
+        let result = parse_test_output("swift test", SWIFT_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let login = tests.iter().find(|t| t.name == "testLogin").unwrap();
+        assert_eq!(login.suite, "AuthTests");
+    }
+
+    #[test]
+    fn extracts_failure_file_and_line() {
+        let result = parse_test_output("swift test", SWIFT_TEST_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let failed = tests
+            .iter()
+            .find(|t| t.name == "testInvalidPassword")
+            .unwrap();
+
+        assert_eq!(failed.state, TestState::Failed);
+        assert_eq!(failed.file.as_deref(), Some("/path/to/AuthTests.swift"));
+        assert_eq!(failed.line, Some(42));
+    }
+}
+
+// ============================================================
+// Elixir Test Adapter
+// ============================================================
+
+mod elixir_test_adapter {
+    use super::*;
+
+    const ELIXIR_TRACE_OUTPUT: &str = "\
+AuthTest [test/auth_test.exs]
+  * test login with valid credentials (0.1ms) [L#10]
+  * test login with invalid password (0.2ms) [L#15]
+
+Finished in 0.3 seconds (0.1s async, 0.2s sync)
+2 tests, 0 failures
+";
+
+    #[test]
+    fn parses_trace_format() {
+        let result = parse_test_output("mix test --trace", ELIXIR_TRACE_OUTPUT, None, None)
+            .expect("Adapter should match elixir-test");
+
+        assert_eq!(result.adapter_name, "elixir-test");
+        assert_eq!(total_test_count(&result), 2);
+    }
+
+    #[test]
+    fn extracts_file_and_line() {
+        let result =
+            parse_test_output("mix test --trace", ELIXIR_TRACE_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let login = tests
+            .iter()
+            .find(|t| t.name == "test login with valid credentials")
+            .unwrap();
+
+        assert_eq!(login.file.as_deref(), Some("test/auth_test.exs"));
+        assert_eq!(login.line, Some(10));
+        assert_eq!(login.state, TestState::Passed);
+    }
+
+    #[test]
+    fn extracts_module_as_suite() {
+        let result =
+            parse_test_output("mix test --trace", ELIXIR_TRACE_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let login = tests
+            .iter()
+            .find(|t| t.name == "test login with valid credentials")
+            .unwrap();
+
+        assert_eq!(login.suite, "AuthTest");
+    }
+
+    const ELIXIR_FAILURE_OUTPUT: &str = "\
+..
+
+  1) test login with invalid password (AuthTest)
+     test/auth_test.exs:15
+     Assertion with == failed
+     code:  assert result == :ok
+     left:  :error
+     right: :ok
+
+Finished in 0.3 seconds (0.1s async, 0.2s sync)
+2 tests, 1 failure
+";
+
+    #[test]
+    fn parses_failure_format() {
+        let result = parse_test_output("mix test", ELIXIR_FAILURE_OUTPUT, None, None)
+            .expect("Adapter should match elixir-test");
+
+        assert_eq!(result.adapter_name, "elixir-test");
+
+        let tests = flatten(&result);
+        let failed = tests.iter().find(|t| t.state == TestState::Failed).unwrap();
+
+        assert_eq!(failed.file.as_deref(), Some("test/auth_test.exs"));
+        assert_eq!(failed.line, Some(15));
+        assert!(failed.message.is_some());
+    }
+}
+
+// ============================================================
+// Dart Test Adapter
+// ============================================================
+
+mod dart_test_adapter {
+    use super::*;
+
+    const DART_OUTPUT: &str = "\
+00:00 +0: loading test/auth_test.dart
+00:00 +1: test login with valid credentials
+00:00 +1 -1: test login with invalid password
+00:00 +1 -1 ~1: Some tests skipped
+00:00 +1 -1 ~1: All tests passed!
+";
+
+    #[test]
+    fn parses_counter_format() {
+        let result = parse_test_output("dart test", DART_OUTPUT, None, None)
+            .expect("Adapter should match dart-test");
+
+        assert_eq!(result.adapter_name, "dart-test");
+        assert_eq!(total_test_count(&result), 3);
+    }
+
+    #[test]
+    fn maps_states_from_counter_changes() {
+        let result = parse_test_output("dart test", DART_OUTPUT, None, None).unwrap();
+        let tests = flatten(&result);
+
+        let passed = tests
+            .iter()
+            .filter(|t| t.state == TestState::Passed)
+            .count();
+        let failed = tests
+            .iter()
+            .filter(|t| t.state == TestState::Failed)
+            .count();
+        let skipped = tests
+            .iter()
+            .filter(|t| t.state == TestState::Skipped)
+            .count();
+
+        assert_eq!(passed, 1);
+        assert_eq!(failed, 1);
+        assert_eq!(skipped, 1);
+    }
+
+    #[test]
+    fn auto_detects_from_flutter_test() {
+        let result = parse_test_output("flutter test", DART_OUTPUT, None, None)
+            .expect("Should detect dart-test adapter");
+
+        assert_eq!(result.adapter_name, "dart-test");
     }
 }
 
