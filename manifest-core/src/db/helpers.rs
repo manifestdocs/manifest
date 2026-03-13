@@ -172,6 +172,7 @@ pub(crate) fn row_to_project(row: &AnyRow) -> Result<Project> {
             .get::<Option<String>, _>("default_feature_destination")
             .unwrap_or_else(|| "backlog".to_string()),
         test_adapter: row.get::<Option<String>, _>("test_adapter"),
+        context_budget: row.get::<Option<i64>, _>("context_budget"),
         key_prefix: row
             .get::<Option<String>, _>("key_prefix")
             .unwrap_or_default(),

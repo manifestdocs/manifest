@@ -28,6 +28,9 @@ pub struct Project {
     pub default_feature_destination: String,
     /// Test output adapter name (e.g., "cargo-test", "pytest"). When set, overrides auto-detection.
     pub test_adapter: Option<String>,
+    /// Token budget threshold for context estimation. When estimated tokens exceed this,
+    /// start_feature recommends spawning a fresh agent session. Default: 30000.
+    pub context_budget: Option<i64>,
     /// Prefix for display IDs (e.g., "MAN" for MAN-42). Auto-derived from slug.
     pub key_prefix: String,
     pub created_at: DateTime<Utc>,
@@ -95,6 +98,8 @@ pub struct UpdateProjectInput {
     /// Test output adapter name (e.g., "cargo-test", "pytest"). Overrides auto-detection.
     #[validate(length(max = 100))]
     pub test_adapter: Option<String>,
+    /// Token budget threshold for context estimation (default: 30000).
+    pub context_budget: Option<i64>,
     /// Override the key prefix for display IDs (e.g., "MAN"). 2-5 uppercase letters.
     pub key_prefix: Option<String>,
 }

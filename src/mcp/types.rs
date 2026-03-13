@@ -466,6 +466,21 @@ pub struct SpecTemplateInfo {
     pub content: String,
 }
 
+/// Advisory context cost estimate for orchestrators and agents.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ContextEstimate {
+    /// Estimated tokens for the feature spec + breadcrumb context.
+    pub spec_tokens: u64,
+    /// Number of files in the feature's project directories.
+    pub file_count: u64,
+    /// Estimated tokens for relevant history entries.
+    pub history_tokens: u64,
+    /// Sum estimate for spec + typical implementation session.
+    pub total_estimate: u64,
+    /// Advisory recommendation: "continue" or "fresh_session".
+    pub recommendation: String,
+}
+
 /// Response for start_feature MCP tool (serialized as YAML).
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct StartFeatureResponse {
@@ -481,6 +496,8 @@ pub struct StartFeatureResponse {
     /// Default spec template for this project (if one exists).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_template: Option<SpecTemplateInfo>,
+    /// Advisory context cost estimate for orchestrators.
+    pub context_estimate: ContextEstimate,
 }
 
 /// Response for get_next_feature MCP tool (serialized as YAML).

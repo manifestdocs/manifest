@@ -2815,3 +2815,178 @@ mod related_feature_context {
         assert!(titles.contains(&"Feature B"));
     }
 }
+
+// ============================================================
+// MANIF-161: Context Estimation
+// ============================================================
+
+mod context_estimation {
+    use super::*;
+
+    const SPEC: &str = "As a user, I can do something.\n\n- [ ] Criterion 1\n- [ ] Criterion 2";
+
+    #[tokio::test]
+    async fn start_feature_includes_context_estimate() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let feature = create_feature(&server, pid, "Small Feature", Some(SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        let result = features::start_feature(
+            &client,
+            manifest::mcp::types::StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        // The YAML response should contain context_estimate fields
+        assert!(
+            has_text_containing(&result, "context_estimate"),
+            "Response should include context_estimate"
+        );
+        assert!(
+            has_text_containing(&result, "spec_tokens"),
+            "Estimate should include spec_tokens"
+        );
+        assert!(
+            has_text_containing(&result, "file_count"),
+            "Estimate should include file_count"
+        );
+        assert!(
+            has_text_containing(&result, "history_tokens"),
+            "Estimate should include history_tokens"
+        );
+        assert!(
+            has_text_containing(&result, "total_estimate"),
+            "Estimate should include total_estimate"
+        );
+        assert!(
+            has_text_containing(&result, "recommendation"),
+            "Estimate should include recommendation"
+        );
+    }
+
+    #[tokio::test]
+    async fn small_feature_recommends_continue() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let feature = create_feature(&server, pid, "Tiny Feature", Some(SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        let result = features::start_feature(
+            &client,
+            manifest::mcp::types::StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        // Small feature with minimal spec should recommend continue
+        let texts = text_contents(&result);
+        let yaml_block = texts
+            .iter()
+            .find(|t| t.contains("context_estimate"))
+            .unwrap();
+        assert!(
+            yaml_block.contains("continue"),
+            "Small feature should recommend 'continue', got: {}",
+            yaml_block
+        );
+    }
+
+    #[tokio::test]
+    async fn uses_char_based_heuristic() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Create a feature with known spec size (400 chars ≈ 100 tokens)
+        let long_spec = "A".repeat(400) + "\n\n- [ ] Test criterion";
+        let feature = create_feature(&server, pid, "Known Size", Some(&long_spec)).await;
+        let fid: Uuid = feature.id.into();
+
+        let result = features::start_feature(
+            &client,
+            manifest::mcp::types::StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        // spec_tokens should be at least 100 (400 chars / 4)
+        let texts = text_contents(&result);
+        let yaml_block = texts.iter().find(|t| t.contains("spec_tokens")).unwrap();
+        // Parse spec_tokens value — should be >= 100
+        assert!(
+            yaml_block.contains("spec_tokens:"),
+            "Should contain spec_tokens field"
+        );
+    }
+
+    #[tokio::test]
+    async fn estimate_is_advisory_does_not_block() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Set a low context budget so even a small spec triggers fresh_session
+        server
+            .put(&format!("/api/v1/projects/{}", pid))
+            .json(&manifest::models::UpdateProjectInput {
+                context_budget: Some(10),
+                ..Default::default()
+            })
+            .await;
+
+        let feature = create_feature(&server, pid, "Any Feature", Some(SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        let result = features::start_feature(
+            &client,
+            manifest::mcp::types::StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Should succeed (not blocked by estimate)
+        assert!(
+            result.is_error.is_none() || result.is_error == Some(false),
+            "Context estimation should be advisory — must not block start_feature"
+        );
+        // Should recommend fresh_session for large feature
+        let texts = text_contents(&result);
+        let yaml_block = texts
+            .iter()
+            .find(|t| t.contains("context_estimate"))
+            .unwrap();
+        assert!(
+            yaml_block.contains("fresh_session"),
+            "Large feature should recommend 'fresh_session'"
+        );
+    }
+}

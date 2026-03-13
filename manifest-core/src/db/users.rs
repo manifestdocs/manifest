@@ -217,7 +217,7 @@ impl Database {
     /// Get all projects a user can access (via membership).
     pub async fn get_user_projects(&self, user_id: UserId) -> Result<Vec<Project>> {
         let rows = sqlx::query(
-            "SELECT p.id, p.slug, p.name, p.description, p.instructions, p.current_version_id, p.root_feature_id, p.default_feature_destination, p.test_adapter, p.key_prefix, p.created_at, p.updated_at
+            "SELECT p.id, p.slug, p.name, p.description, p.instructions, p.current_version_id, p.root_feature_id, p.default_feature_destination, p.test_adapter, p.context_budget, p.key_prefix, p.created_at, p.updated_at
              FROM projects p
              INNER JOIN project_memberships pm ON p.id = pm.project_id
              WHERE pm.user_id = $1
@@ -320,6 +320,7 @@ impl Database {
             root_feature_id: Some(root_feature_id),
             default_feature_destination: "backlog".to_string(),
             test_adapter: None,
+            context_budget: None,
             key_prefix,
             created_at: now,
             updated_at: now,

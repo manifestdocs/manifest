@@ -7,7 +7,7 @@ use super::{Database, ManifestError};
 use crate::models::*;
 
 /// SELECT columns for the projects table.
-const PROJECT_COLS: &str = "id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, test_adapter, key_prefix, created_at, updated_at";
+const PROJECT_COLS: &str = "id, slug, name, description, instructions, current_version_id, root_feature_id, default_feature_destination, test_adapter, context_budget, key_prefix, created_at, updated_at";
 
 impl Database {
     /// Get all projects ordered by name.
@@ -111,6 +111,7 @@ impl Database {
             root_feature_id: Some(root_feature_id),
             default_feature_destination: "backlog".to_string(),
             test_adapter: None,
+            context_budget: None,
             key_prefix,
             created_at: now,
             updated_at: now,
@@ -140,10 +141,11 @@ impl Database {
             .default_feature_destination
             .unwrap_or(existing.default_feature_destination);
         let test_adapter = input.test_adapter.or(existing.test_adapter);
+        let context_budget = input.context_budget.or(existing.context_budget);
         let key_prefix = input.key_prefix.unwrap_or(existing.key_prefix);
 
         sqlx::query(
-            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, testing_policy = 'tdd', test_adapter = $7, key_prefix = $8, updated_at = $9 WHERE id = $10",
+            "UPDATE projects SET slug = $1, name = $2, description = $3, instructions = $4, current_version_id = $5, default_feature_destination = $6, testing_policy = 'tdd', test_adapter = $7, context_budget = $8, key_prefix = $9, updated_at = $10 WHERE id = $11",
         )
         .bind(&slug)
         .bind(&name)
@@ -152,6 +154,7 @@ impl Database {
         .bind(current_version_id.map(|u| u.to_string()))
         .bind(&default_feature_destination)
         .bind(&test_adapter)
+        .bind(context_budget)
         .bind(&key_prefix)
         .bind(now.to_rfc3339())
         .bind(id.to_string())
@@ -180,6 +183,7 @@ impl Database {
             root_feature_id: existing.root_feature_id,
             default_feature_destination,
             test_adapter,
+            context_budget,
             key_prefix,
             created_at: existing.created_at,
             updated_at: now,

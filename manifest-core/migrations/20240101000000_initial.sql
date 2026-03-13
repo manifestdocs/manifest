@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS projects (
     default_feature_destination TEXT NOT NULL DEFAULT 'backlog',
     testing_policy TEXT NOT NULL DEFAULT 'advisory',
     test_adapter TEXT,
+    context_budget INTEGER,
     key_prefix TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

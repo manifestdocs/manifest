@@ -760,6 +760,13 @@ pub async fn start_feature(
         None
     };
 
+    // Context estimation
+    let context_estimate = estimate_context(
+        &feature_info,
+        &project_with_dirs,
+        &feature_with_context.feature,
+    );
+
     let response = crate::mcp::types::StartFeatureResponse {
         feature: feature_info,
         spec_status: spec_status.summary().to_string(),
@@ -771,6 +778,7 @@ pub async fn start_feature(
                 name: t.name.clone(),
                 content: t.content.clone(),
             }),
+        context_estimate,
     };
 
     let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
@@ -924,6 +932,74 @@ async fn start_children_recursive(
 
     try_join_all(update_futures).await?;
     Ok(())
+}
+
+/// Default context budget threshold in estimated tokens.
+const DEFAULT_CONTEXT_BUDGET: u64 = 30_000;
+
+/// Estimate chars/4 as a rough token count (no tokenizer dependency).
+fn chars_to_tokens(chars: usize) -> u64 {
+    (chars / 4) as u64
+}
+
+/// Count files in project directories (best-effort, non-recursive for speed).
+fn count_project_files(directories: &[crate::models::ProjectDirectory]) -> u64 {
+    let mut count = 0u64;
+    for dir in directories {
+        if let Ok(entries) = std::fs::read_dir(&dir.path) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    count += 1;
+                }
+            }
+        }
+    }
+    count
+}
+
+/// Build a context estimate for the feature being started.
+fn estimate_context(
+    feature_info: &crate::mcp::types::FeatureInfoWithContext,
+    project: &crate::models::ProjectWithDirectories,
+    feature: &crate::models::Feature,
+) -> crate::mcp::types::ContextEstimate {
+    // Spec tokens: feature details + breadcrumb details
+    let mut spec_chars = feature.details.as_ref().map(|d| d.len()).unwrap_or(0);
+    for bc in &feature_info.breadcrumb {
+        if let Some(ref details) = bc.details {
+            spec_chars += details.len();
+        }
+    }
+    let spec_tokens = chars_to_tokens(spec_chars);
+
+    // File count from project directories
+    let file_count = count_project_files(&project.directories);
+
+    // History tokens: estimate 0 for now (history not fetched in start_feature)
+    let history_tokens = 0u64;
+
+    // Total: spec + estimated implementation overhead (file_count * ~200 tokens per file as proxy)
+    let total_estimate = spec_tokens + history_tokens + file_count * 200;
+
+    let budget = project
+        .project
+        .context_budget
+        .map(|b| b as u64)
+        .unwrap_or(DEFAULT_CONTEXT_BUDGET);
+
+    let recommendation = if total_estimate > budget {
+        "fresh_session".to_string()
+    } else {
+        "continue".to_string()
+    };
+
+    crate::mcp::types::ContextEstimate {
+        spec_tokens,
+        file_count,
+        history_tokens,
+        total_estimate,
+        recommendation,
+    }
 }
 
 /// Complete work on a feature.

@@ -401,6 +401,8 @@ impl Database {
         self.migrate_add_spec_templates().await?;
         // Migration: add FTS5 index on features for full-text search
         self.migrate_add_features_fts().await?;
+        // Migration: add context_budget column to projects
+        self.migrate_add_context_budget().await?;
         Ok(())
     }
 
@@ -1410,6 +1412,42 @@ impl Database {
         .await?;
 
         tracing::info!("Created features_fts full-text search index");
+        Ok(())
+    }
+
+    /// Add context_budget column to projects table.
+    async fn migrate_add_context_budget(&self) -> Result<()> {
+        let has_column = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("context_budget"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'projects' AND column_name = 'context_budget'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            col_exists.is_some()
+        };
+
+        if has_column {
+            return Ok(());
+        }
+
+        sqlx::query("ALTER TABLE projects ADD COLUMN context_budget INTEGER")
+            .execute(&self.pool)
+            .await?;
+
+        tracing::info!("Added context_budget column to projects");
         Ok(())
     }
 
