@@ -26,6 +26,9 @@ pub struct Version {
 /// Input for creating a new version.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreateVersionInput {
+    /// Optional ID. If not provided, auto-generated. Used by sync/cache to preserve IDs.
+    #[serde(default)]
+    pub id: Option<VersionId>,
     /// Version name in semver format (e.g., "1.0.0", "2.0.0-beta").
     #[validate(length(min = 1, max = 100))]
     pub name: String,

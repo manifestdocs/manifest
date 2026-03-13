@@ -81,6 +81,7 @@ impl Database {
                 .create_version(
                     project_id,
                     CreateVersionInput {
+                        id: None,
                         name: next_name,
                         description: None,
                     },
@@ -124,7 +125,7 @@ impl Database {
             .into());
         }
 
-        let id = VersionId::new();
+        let id = input.id.unwrap_or_else(VersionId::new);
         let now = Utc::now();
 
         sqlx::query(

@@ -479,6 +479,7 @@ mod tests {
     async fn create_and_get_project() {
         let store = setup().await;
         let input = CreateProjectInput {
+            id: None,
             name: "Test Project".to_string(),
             slug: Some("test".to_string()),
             description: None,
@@ -506,6 +507,7 @@ mod tests {
 
         let project = store
             .create_project(&CreateProjectInput {
+                id: None,
                 name: "P".to_string(),
                 slug: Some("p".to_string()),
                 description: None,
@@ -545,6 +547,7 @@ mod tests {
 
         let project = store
             .create_project(&CreateProjectInput {
+                id: None,
                 name: "P".to_string(),
                 slug: Some("p2".to_string()),
                 description: None,
@@ -588,6 +591,7 @@ mod tests {
 
         let project = store
             .create_project(&CreateProjectInput {
+                id: None,
                 name: "P".to_string(),
                 slug: Some("p3".to_string()),
                 description: None,
@@ -654,6 +658,7 @@ mod tests {
 
         let project = store
             .create_project(&CreateProjectInput {
+                id: None,
                 name: "P".to_string(),
                 slug: Some("p4".to_string()),
                 description: None,
@@ -668,6 +673,7 @@ mod tests {
             .create_version(
                 &project.id,
                 &CreateVersionInput {
+                    id: None,
                     name: "1.0.0".to_string(),
                     description: Some("First release".to_string()),
                 },
@@ -694,6 +700,7 @@ mod tests {
 
         let project = store
             .create_project(&CreateProjectInput {
+                id: None,
                 name: "P".to_string(),
                 slug: Some("p5".to_string()),
                 description: None,
@@ -745,6 +752,7 @@ mod tests {
 
         let project = store
             .create_project(&CreateProjectInput {
+                id: None,
                 name: "P".to_string(),
                 slug: Some("p6".to_string()),
                 description: None,
@@ -823,6 +831,7 @@ mod tests {
 
         let project = store
             .create_project(&CreateProjectInput {
+                id: None,
                 name: "P".to_string(),
                 slug: Some("p7".to_string()),
                 description: None,
@@ -876,6 +885,7 @@ mod tests {
 
         let project = store
             .create_project(&CreateProjectInput {
+                id: None,
                 name: "P".to_string(),
                 slug: Some("p8".to_string()),
                 description: None,

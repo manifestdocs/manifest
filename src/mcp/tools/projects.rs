@@ -165,11 +165,13 @@ pub async fn init_project(
 
             client
                 .create_project(&CreateProjectInput {
+                    id: None,
                     name,
                     slug: None,
                     description: analysis.description.clone(),
                     instructions: None,
                     key_prefix: None,
+                    skip_default_versions: req.skip_default_versions,
                 })
                 .await
                 .map_err(client_err)?

@@ -59,6 +59,9 @@ pub struct ProjectDirectory {
 /// Input for creating a new project.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreateProjectInput {
+    /// Optional ID. If not provided, auto-generated. Used by sync/cache to preserve IDs.
+    #[serde(default)]
+    pub id: Option<ProjectId>,
     /// Display name for the project.
     #[validate(length(min = 1, max = 200))]
     pub name: String,
@@ -74,6 +77,9 @@ pub struct CreateProjectInput {
     /// Override the auto-derived key prefix for display IDs (e.g., "MAN").
     #[validate(length(max = 5))]
     pub key_prefix: Option<String>,
+    /// Skip auto-creating default versions. Set true when creating versions interactively.
+    #[serde(default)]
+    pub skip_default_versions: bool,
 }
 
 /// Input for updating an existing project. All fields are optional for partial updates.

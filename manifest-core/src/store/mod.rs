@@ -13,12 +13,14 @@
 //! - **`FeatureQuery`** provides backend-agnostic filtering
 //! - **`StoreCapabilities`** lets application code adapt to backend differences
 
+pub mod cached;
 mod error;
 mod query;
 pub mod sqlite;
 mod traits;
 mod types;
 
+pub use cached::*;
 pub use error::*;
 pub use query::*;
 pub use sqlite::*;

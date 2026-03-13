@@ -42,7 +42,7 @@ impl Database {
 
     /// Create a new project with an auto-generated root feature.
     pub async fn create_project(&self, input: CreateProjectInput) -> Result<Project> {
-        let project_id = ProjectId::new();
+        let project_id = input.id.unwrap_or_else(ProjectId::new);
         let root_feature_id = FeatureId::new();
         let now = Utc::now();
 

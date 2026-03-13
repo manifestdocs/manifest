@@ -110,6 +110,7 @@ pub async fn create_version(
         .create_version(
             req.project_id,
             &CreateVersionInput {
+                id: None,
                 name: req.name,
                 description: req.description,
             },
