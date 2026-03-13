@@ -19,6 +19,7 @@
 pub mod config;
 pub mod db;
 pub mod models;
+pub mod store;
 
 // Re-export commonly used types at crate root
 pub use config::ServerConfig;
