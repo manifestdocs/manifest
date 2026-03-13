@@ -15,6 +15,7 @@
 
 pub mod cached;
 mod error;
+pub mod harness;
 mod query;
 pub mod sqlite;
 mod traits;
