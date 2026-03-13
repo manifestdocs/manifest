@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS features (
     claim_metadata TEXT,
     verification_result TEXT,
     verified_at TEXT,
+    state_updated_at TEXT,
+    details_updated_at TEXT,
+    parent_id_updated_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

@@ -409,6 +409,8 @@ impl Database {
         // Migration: add context_budget column to projects
         self.migrate_add_context_budget().await?;
         self.migrate_add_remotes().await?;
+        self.migrate_add_field_timestamps().await?;
+        self.migrate_add_offline_queue().await?;
         Ok(())
     }
 
@@ -1513,6 +1515,97 @@ impl Database {
         .await?;
 
         tracing::info!("Added remotes and project_remotes tables");
+        Ok(())
+    }
+
+    /// Migration: add field-level `_updated_at` columns to features table.
+    ///
+    /// These columns enable field-level conflict resolution during sync:
+    /// each tracked field has its own timestamp so concurrent edits to
+    /// different fields of the same feature both survive.
+    async fn migrate_add_field_timestamps(&self) -> Result<()> {
+        let has_col = if self.dialect.is_sqlite() {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+            schema
+                .as_ref()
+                .map(|s| s.to_lowercase().contains("state_updated_at"))
+                .unwrap_or(false)
+        } else {
+            let col_exists: Option<String> = sqlx::query_scalar(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'features' AND column_name = 'state_updated_at'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+            col_exists.is_some()
+        };
+
+        if has_col {
+            return Ok(());
+        }
+
+        for col in [
+            "state_updated_at",
+            "details_updated_at",
+            "parent_id_updated_at",
+        ] {
+            sqlx::query(&format!("ALTER TABLE features ADD COLUMN {col} TEXT"))
+                .execute(&self.pool)
+                .await?;
+        }
+
+        tracing::info!("Added field-level timestamp columns to features table");
+        Ok(())
+    }
+
+    /// Migration: add offline_queue table for queuing writes when remotes are unreachable.
+    async fn migrate_add_offline_queue(&self) -> Result<()> {
+        let has_table = if self.dialect.is_sqlite() {
+            let exists: Option<String> = sqlx::query_scalar(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='offline_queue'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+            exists.is_some()
+        } else {
+            let exists: Option<String> = sqlx::query_scalar(
+                "SELECT table_name FROM information_schema.tables WHERE table_name = 'offline_queue'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+            exists.is_some()
+        };
+
+        if has_table {
+            return Ok(());
+        }
+
+        sqlx::query(
+            "CREATE TABLE offline_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL,
+                remote_id TEXT NOT NULL,
+                table_name TEXT NOT NULL,
+                row_id TEXT NOT NULL,
+                operation TEXT NOT NULL DEFAULT 'upsert',
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_offline_queue_remote ON offline_queue(remote_id)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        tracing::info!("Added offline_queue table");
         Ok(())
     }
 

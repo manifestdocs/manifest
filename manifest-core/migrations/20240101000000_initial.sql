@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS features (
     claimed_by TEXT,
     claimed_at TEXT,
     claim_metadata TEXT,
+    state_updated_at TEXT,
+    details_updated_at TEXT,
+    parent_id_updated_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     CONSTRAINT fk_features_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -326,6 +329,23 @@ CREATE TABLE IF NOT EXISTS project_remotes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_remotes_remote ON project_remotes(remote_id);
+
+-- ============================================================
+-- Offline Queue (for sync when remotes are unreachable)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS offline_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    remote_id TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    operation TEXT NOT NULL DEFAULT 'upsert',
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_offline_queue_remote ON offline_queue(remote_id);
 
 -- ============================================================
 -- Schema Migrations Tracking (for compatibility with existing DBs)

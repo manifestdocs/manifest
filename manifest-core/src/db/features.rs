@@ -448,6 +448,7 @@ impl Database {
         };
 
         let now = Utc::now();
+        let existing_details_ref = existing.details.clone();
         let title = input.title.unwrap_or(existing.title);
         let mut details = input.details.or(existing.details);
         let details_summary = input.details_summary.unwrap_or(existing.details_summary);
@@ -577,8 +578,27 @@ impl Database {
                 .map(|v| v.id);
         }
 
+        // Track field-level timestamps for sync conflict resolution
+        let now_str = now.to_rfc3339();
+        let state_updated_at = if state != existing.state {
+            Some(now_str.as_str())
+        } else {
+            None
+        };
+        let details_changed = details.as_deref() != existing_details_ref.as_deref();
+        let details_updated_at = if details_changed {
+            Some(now_str.as_str())
+        } else {
+            None
+        };
+        let parent_id_updated_at = if parent_id != existing.parent_id {
+            Some(now_str.as_str())
+        } else {
+            None
+        };
+
         sqlx::query(
-            "UPDATE features SET parent_id = $1, title = $2, details = $3, desired_details = $4, details_summary = $5, state = $6, priority = $7, target_version_id = $8, updated_at = $9 WHERE id = $10",
+            "UPDATE features SET parent_id = $1, title = $2, details = $3, desired_details = $4, details_summary = $5, state = $6, priority = $7, target_version_id = $8, updated_at = $9, state_updated_at = COALESCE($11, state_updated_at), details_updated_at = COALESCE($12, details_updated_at), parent_id_updated_at = COALESCE($13, parent_id_updated_at) WHERE id = $10",
         )
         .bind(parent_id.map(|u| u.to_string()))
         .bind(&title)
@@ -588,8 +608,11 @@ impl Database {
         .bind(state.as_str())
         .bind(priority)
         .bind(target_version_id.map(|u| u.to_string()))
-        .bind(now.to_rfc3339())
+        .bind(&now_str)
         .bind(id.to_string())
+        .bind(state_updated_at)
+        .bind(details_updated_at)
+        .bind(parent_id_updated_at)
         .execute(&self.pool)
         .await?;
 
@@ -1689,7 +1712,7 @@ impl Database {
 
         // Atomically update state + claim in a single UPDATE
         let result = sqlx::query(
-            "UPDATE features SET state = $1, claimed_by = $2, claimed_at = $3, claim_metadata = $4, target_version_id = $5, updated_at = $6 WHERE id = $7",
+            "UPDATE features SET state = $1, claimed_by = $2, claimed_at = $3, claim_metadata = $4, target_version_id = $5, updated_at = $6, state_updated_at = $6 WHERE id = $7",
         )
         .bind(new_state.as_str())
         .bind(agent_type)

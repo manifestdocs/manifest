@@ -21,6 +21,7 @@ pub mod db;
 pub mod github;
 pub mod models;
 pub mod store;
+pub mod sync;
 pub mod turso;
 
 // Re-export commonly used types at crate root

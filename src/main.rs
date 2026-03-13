@@ -105,6 +105,11 @@ enum Commands {
         #[command(subcommand)]
         action: RemoteAction,
     },
+    /// Sync projects with remote backends
+    Sync {
+        #[command(subcommand)]
+        action: SyncAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -151,6 +156,18 @@ enum RemoteAction {
         /// Name of the remote to inspect
         name: String,
     },
+}
+
+#[derive(Subcommand)]
+enum SyncAction {
+    /// Trigger a manual sync for all or a specific project
+    Run {
+        /// Sync only this project (by slug)
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Show sync status for all linked projects
+    Status,
 }
 
 /// Initialize tracing with output to stderr (for MCP mode) or stdout
@@ -493,6 +510,125 @@ async fn main() -> anyhow::Result<()> {
                             eprintln!("  Connection failed: {}", e);
                             std::process::exit(1);
                         }
+                    }
+                }
+            }
+        }
+        Some(Commands::Sync { action }) => {
+            let database = db::Database::open_with_override(cli.db).await?;
+            database.migrate().await?;
+
+            match action {
+                SyncAction::Run { project } => {
+                    // Get all remotes with active project links
+                    let remotes = database.list_remotes().await?;
+                    if remotes.is_empty() {
+                        println!("No remotes configured. Add one with: manifest remote add <name> --url <url> --token <token>");
+                        return Ok(());
+                    }
+
+                    let coordinator = manifest_core::sync::MergeCoordinator::new();
+                    let mut synced = 0;
+
+                    for remote in &remotes {
+                        if !remote.sync_enabled {
+                            continue;
+                        }
+
+                        let token = database
+                            .get_remote_token(remote.id)
+                            .await?
+                            .unwrap_or_default();
+                        let config = manifest_core::turso::TursoConfig::from_remote(
+                            &remote.name,
+                            &remote.url,
+                            &token,
+                        );
+
+                        match manifest_core::turso::TursoConnection::open(config).await {
+                            Ok(conn) => {
+                                coordinator
+                                    .add_connection(&remote.id.to_string(), conn)
+                                    .await;
+
+                                let links = database.get_remote_projects(remote.id).await?;
+                                for link in &links {
+                                    if link.sync_state != manifest_core::models::SyncState::Active {
+                                        continue;
+                                    }
+
+                                    // Filter by project slug if specified
+                                    if let Some(ref slug) = project {
+                                        let proj = database.get_project(link.project_id).await?;
+                                        if let Some(ref p) = proj {
+                                            if p.slug != *slug {
+                                                continue;
+                                            }
+                                        }
+                                    }
+
+                                    println!(
+                                        "Syncing project {} via '{}'...",
+                                        link.project_id, remote.name
+                                    );
+                                    synced += 1;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: Could not connect to '{}': {}", remote.name, e);
+                            }
+                        }
+                    }
+
+                    if synced == 0 {
+                        println!("No projects linked to active remotes.");
+                        println!(
+                            "  Link a project with: manifest project link <slug> --remote <name>"
+                        );
+                    } else {
+                        println!("Sync complete. {} project(s) synced.", synced);
+                    }
+                }
+                SyncAction::Status => {
+                    let remotes = database.list_remotes().await?;
+                    if remotes.is_empty() {
+                        println!("No remotes configured.");
+                        return Ok(());
+                    }
+
+                    let mut has_links = false;
+                    println!(
+                        "{:<20} {:<15} {:<10} {}",
+                        "PROJECT", "REMOTE", "STATE", "LAST SYNCED"
+                    );
+
+                    for remote in &remotes {
+                        let links = database.get_remote_projects(remote.id).await?;
+                        for link in &links {
+                            has_links = true;
+                            let project_name = database
+                                .get_project(link.project_id)
+                                .await?
+                                .map(|p| p.name)
+                                .unwrap_or_else(|| "???".to_string());
+
+                            let last_synced = link
+                                .last_synced_at
+                                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                                .unwrap_or_else(|| "never".to_string());
+
+                            println!(
+                                "{:<20} {:<15} {:<10} {}",
+                                project_name,
+                                remote.name,
+                                link.sync_state.as_str(),
+                                last_synced,
+                            );
+                        }
+                    }
+
+                    if !has_links {
+                        println!("No projects linked to any remote.");
                     }
                 }
             }
