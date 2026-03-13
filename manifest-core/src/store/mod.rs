@@ -15,10 +15,12 @@
 
 mod error;
 mod query;
+pub mod sqlite;
 mod traits;
 mod types;
 
 pub use error::*;
 pub use query::*;
+pub use sqlite::*;
 pub use traits::*;
 pub use types::*;
