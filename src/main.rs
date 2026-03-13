@@ -141,6 +141,16 @@ enum RemoteAction {
         #[arg(long)]
         token: Option<String>,
     },
+    /// Test connectivity to a remote
+    Ping {
+        /// Name of the remote to ping
+        name: String,
+    },
+    /// Show detailed info about a remote
+    Info {
+        /// Name of the remote to inspect
+        name: String,
+    },
 }
 
 /// Initialize tracing with output to stderr (for MCP mode) or stdout
@@ -413,6 +423,77 @@ async fn main() -> anyhow::Result<()> {
                     };
                     database.update_remote(remote.id, &input).await?;
                     println!("Remote '{}' updated.", name);
+                }
+                RemoteAction::Ping { name } => {
+                    let Some(remote) = database.get_remote_by_name(&name).await? else {
+                        eprintln!("Remote '{}' not found.", name);
+                        std::process::exit(1);
+                    };
+                    let token = database
+                        .get_remote_token(remote.id)
+                        .await?
+                        .unwrap_or_default();
+
+                    let config = manifest_core::turso::TursoConfig::from_remote(
+                        &remote.name,
+                        &remote.url,
+                        &token,
+                    );
+                    println!("Pinging '{}'...", name);
+                    match manifest_core::turso::TursoConnection::open(config).await {
+                        Ok(conn) => match conn.ping().await {
+                            Ok(Some(latency)) => {
+                                println!("  Connected. Latency: {}ms", latency.as_millis());
+                            }
+                            Ok(None) => println!("  Local-only database (no remote)."),
+                            Err(e) => {
+                                eprintln!("  Ping failed: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("  Connection failed: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                RemoteAction::Info { name } => {
+                    let Some(remote) = database.get_remote_by_name(&name).await? else {
+                        eprintln!("Remote '{}' not found.", name);
+                        std::process::exit(1);
+                    };
+                    let token = database
+                        .get_remote_token(remote.id)
+                        .await?
+                        .unwrap_or_default();
+
+                    let config = manifest_core::turso::TursoConfig::from_remote(
+                        &remote.name,
+                        &remote.url,
+                        &token,
+                    );
+                    match manifest_core::turso::TursoConnection::open(config).await {
+                        Ok(conn) => {
+                            let info = conn.info().await?;
+                            println!("Remote: {}", name);
+                            println!("  Provider:  {}", remote.provider);
+                            println!("  URL:       {}", remote.url);
+                            println!("  Replica:   {}", info.replica_path.display());
+                            println!("  Tables:    {}", info.table_count);
+                            println!("  Projects:  {}", info.project_count);
+                            println!("  Features:  {}", info.feature_count);
+                            println!("  Sync interval: {}s", info.sync_interval.as_secs());
+                            if let Some(ago) = info.last_sync {
+                                println!("  Last sync: {}s ago", ago.as_secs());
+                            } else {
+                                println!("  Last sync: never");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("  Connection failed: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }

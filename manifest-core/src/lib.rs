@@ -18,8 +18,10 @@
 
 pub mod config;
 pub mod db;
+pub mod github;
 pub mod models;
 pub mod store;
+pub mod turso;
 
 // Re-export commonly used types at crate root
 pub use config::ServerConfig;

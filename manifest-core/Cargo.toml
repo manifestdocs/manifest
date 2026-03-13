@@ -29,6 +29,12 @@ tracing = "0.1"
 # Async traits (for dyn-safe async trait objects)
 async-trait = "0.1"
 
+# Turso/libSQL embedded replicas
+libsql = { version = "0.9", default-features = false, features = ["core", "replication", "remote", "sync", "tls"] }
+
+# HTTP client (for GitHub backend)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
 # Utils
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
