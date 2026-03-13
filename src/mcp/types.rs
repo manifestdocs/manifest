@@ -168,6 +168,11 @@ pub struct FindFeaturesRequest {
         description = "Optional search query to match against title and details. When provided, returns features ranked by relevance."
     )]
     pub query: Option<String>,
+    #[schemars(
+        description = "Search mode: 'default' (LIKE search on title + details, current behavior) or 'full' (FTS5 full-text search with relevance ranking — better for natural language queries like 'Redis session state'). Defaults to 'default'."
+    )]
+    #[serde(default)]
+    pub search_mode: Option<String>,
     #[schemars(description = "Maximum number of features to return. Defaults to no limit.")]
     pub limit: Option<u32>,
     #[schemars(description = "Number of features to skip for pagination. Defaults to 0.")]

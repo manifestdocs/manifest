@@ -964,6 +964,109 @@ impl Database {
         Ok(summaries)
     }
 
+    /// Full-text search over feature title and details using FTS5.
+    ///
+    /// Returns features ranked by FTS5 relevance score. Falls back to LIKE-based
+    /// search if the FTS5 table doesn't exist (e.g., PostgreSQL or pre-migration databases).
+    pub async fn search_features_fts(
+        &self,
+        query: &str,
+        project_id: Option<ProjectId>,
+        state: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<FeatureSummary>> {
+        let limit_val = limit.unwrap_or(10) as i64;
+
+        // Build FTS5 query — quote individual words and join with OR for flexible matching
+        let fts_query = query
+            .split_whitespace()
+            .map(|word| format!("\"{}\"", word.replace('"', "")))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+
+        let rows = match (project_id, state) {
+            (Some(pid), Some(st)) => {
+                sqlx::query(
+                    "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
+                     FROM features f
+                     INNER JOIN features_fts fts ON f.rowid = fts.rowid
+                     WHERE features_fts MATCH $1
+                       AND f.project_id = $3
+                       AND f.state = $4
+                     ORDER BY fts.rank
+                     LIMIT $2",
+                )
+                .bind(&fts_query)
+                .bind(limit_val)
+                .bind(pid.to_string())
+                .bind(st)
+                .fetch_all(&self.pool)
+                .await
+            }
+            (Some(pid), None) => {
+                sqlx::query(
+                    "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
+                     FROM features f
+                     INNER JOIN features_fts fts ON f.rowid = fts.rowid
+                     WHERE features_fts MATCH $1
+                       AND f.project_id = $3
+                     ORDER BY fts.rank
+                     LIMIT $2",
+                )
+                .bind(&fts_query)
+                .bind(limit_val)
+                .bind(pid.to_string())
+                .fetch_all(&self.pool)
+                .await
+            }
+            (None, Some(st)) => {
+                sqlx::query(
+                    "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
+                     FROM features f
+                     INNER JOIN features_fts fts ON f.rowid = fts.rowid
+                     WHERE features_fts MATCH $1
+                       AND f.state = $3
+                     ORDER BY fts.rank
+                     LIMIT $2",
+                )
+                .bind(&fts_query)
+                .bind(limit_val)
+                .bind(st)
+                .fetch_all(&self.pool)
+                .await
+            }
+            (None, None) => {
+                sqlx::query(
+                    "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
+                     FROM features f
+                     INNER JOIN features_fts fts ON f.rowid = fts.rowid
+                     WHERE features_fts MATCH $1
+                     ORDER BY fts.rank
+                     LIMIT $2",
+                )
+                .bind(&fts_query)
+                .bind(limit_val)
+                .fetch_all(&self.pool)
+                .await
+            }
+        };
+
+        // Fall back to LIKE search if FTS5 table doesn't exist
+        let rows = match rows {
+            Ok(r) => r,
+            Err(_) => {
+                return self.search_features(query, project_id, limit).await;
+            }
+        };
+
+        let mut summaries: Vec<FeatureSummary> = rows
+            .iter()
+            .map(row_to_feature_summary)
+            .collect::<Result<_>>()?;
+        self.resolve_derived_states_summary(&mut summaries).await?;
+        Ok(summaries)
+    }
+
     /// Build the complete feature tree for a project as nested nodes.
     pub async fn get_feature_tree(&self, project_id: ProjectId) -> Result<Vec<FeatureTreeNode>> {
         let project = self.get_project(project_id).await?;

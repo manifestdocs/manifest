@@ -91,7 +91,13 @@ pub async fn find_features(
     // If query is provided, use search; otherwise use list
     let features = if let Some(ref query) = req.query {
         client
-            .search_features(query, req.project_id, effective_limit)
+            .search_features_with_mode(
+                query,
+                req.project_id,
+                req.state.as_deref(),
+                req.search_mode.as_deref(),
+                effective_limit,
+            )
             .await
             .map_err(client_err)?
     } else {

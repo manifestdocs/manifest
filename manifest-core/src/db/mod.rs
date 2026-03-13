@@ -361,6 +361,9 @@ impl Database {
 
         // Run embedded schema directly (sqlx::migrate! has issues with the any driver)
         self.run_schema().await?;
+        // FTS5 triggers contain semicolons that break the schema splitter,
+        // so they're created separately via the migration function.
+        self.migrate_add_features_fts().await?;
         Ok(())
     }
 
@@ -396,6 +399,8 @@ impl Database {
         self.migrate_add_test_adapter().await?;
         // Migration: add spec_templates table
         self.migrate_add_spec_templates().await?;
+        // Migration: add FTS5 index on features for full-text search
+        self.migrate_add_features_fts().await?;
         Ok(())
     }
 
@@ -1338,6 +1343,73 @@ impl Database {
         }
 
         tracing::info!("Created default spec templates for {} projects", rows.len());
+        Ok(())
+    }
+
+    /// Add FTS5 full-text search index on features table.
+    async fn migrate_add_features_fts(&self) -> Result<()> {
+        if !self.dialect.is_sqlite() {
+            return Ok(());
+        }
+
+        // Check if FTS table already exists
+        let has_fts: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features_fts'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(0);
+
+        if has_fts > 0 {
+            return Ok(());
+        }
+
+        // Create FTS5 virtual table (content-synced with features table)
+        sqlx::query(
+            "CREATE VIRTUAL TABLE features_fts USING fts5(
+                title, details,
+                content=features,
+                content_rowid=rowid
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Triggers to keep FTS in sync
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS features_fts_insert AFTER INSERT ON features BEGIN
+                INSERT INTO features_fts(rowid, title, details) VALUES (new.rowid, new.title, COALESCE(new.details, ''));
+            END",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS features_fts_update AFTER UPDATE OF title, details ON features BEGIN
+                INSERT INTO features_fts(features_fts, rowid, title, details) VALUES ('delete', old.rowid, old.title, COALESCE(old.details, ''));
+                INSERT INTO features_fts(rowid, title, details) VALUES (new.rowid, new.title, COALESCE(new.details, ''));
+            END",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS features_fts_delete AFTER DELETE ON features BEGIN
+                INSERT INTO features_fts(features_fts, rowid, title, details) VALUES ('delete', old.rowid, old.title, COALESCE(old.details, ''));
+            END",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Populate FTS index with existing data
+        sqlx::query(
+            "INSERT INTO features_fts(rowid, title, details)
+             SELECT rowid, title, COALESCE(details, '') FROM features",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        tracing::info!("Created features_fts full-text search index");
         Ok(())
     }
 

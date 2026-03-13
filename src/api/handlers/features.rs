@@ -379,6 +379,10 @@ pub struct SearchFeaturesQuery {
     pub q: String,
     /// Optional project UUID to limit search to.
     pub project_id: Option<Uuid>,
+    /// Optional state filter.
+    pub state: Option<String>,
+    /// Search mode: "full" for FTS5 full-text search, default for LIKE search.
+    pub search_mode: Option<String>,
     /// Maximum number of results to return. Defaults to 10.
     pub limit: Option<u32>,
 }
@@ -389,10 +393,18 @@ pub async fn search_features(
     State(db): State<Database>,
     Query(query): Query<SearchFeaturesQuery>,
 ) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
-    db.search_features(&query.q, query.project_id.map(ProjectId::from), query.limit)
-        .await
-        .map(Json)
-        .map_err(internal_error)
+    let pid = query.project_id.map(ProjectId::from);
+    if query.search_mode.as_deref() == Some("full") {
+        db.search_features_fts(&query.q, pid, query.state.as_deref(), query.limit)
+            .await
+            .map(Json)
+            .map_err(internal_error)
+    } else {
+        db.search_features(&query.q, pid, query.limit)
+            .await
+            .map(Json)
+            .map_err(internal_error)
+    }
 }
 
 // ============================================================

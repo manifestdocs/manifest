@@ -111,6 +111,9 @@ CREATE INDEX IF NOT EXISTS idx_features_project ON features(project_id);
 CREATE INDEX IF NOT EXISTS idx_features_parent ON features(parent_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_features_number ON features(project_id, feature_number);
 
+-- FTS5 full-text search index is created by migrate_add_features_fts()
+-- because triggers contain semicolons that break the schema splitter.
+
 CREATE TABLE IF NOT EXISTS feature_blockers (
     feature_id TEXT NOT NULL,
     blocker_feature_id TEXT NOT NULL,

@@ -262,9 +262,27 @@ impl ManifestClient {
         project_id: Option<Uuid>,
         limit: Option<u32>,
     ) -> Result<Vec<FeatureSummary>, ClientError> {
+        self.search_features_with_mode(query, project_id, None, None, limit)
+            .await
+    }
+
+    pub async fn search_features_with_mode(
+        &self,
+        query: &str,
+        project_id: Option<Uuid>,
+        state: Option<&str>,
+        search_mode: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<FeatureSummary>, ClientError> {
         let mut params: Vec<(&str, String)> = vec![("q", query.to_string())];
         if let Some(pid) = project_id {
             params.push(("project_id", pid.to_string()));
+        }
+        if let Some(st) = state {
+            params.push(("state", st.to_string()));
+        }
+        if let Some(mode) = search_mode {
+            params.push(("search_mode", mode.to_string()));
         }
         if let Some(l) = limit {
             params.push(("limit", l.to_string()));

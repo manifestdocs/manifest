@@ -1161,6 +1161,7 @@ mod find_features_tool {
                 version_id: None,
                 state: None,
                 query: None,
+                search_mode: None,
                 limit: None,
                 offset: None,
             },
@@ -2399,6 +2400,269 @@ mod context_budgeted_delivery {
         assert!(
             has_text_containing(&result, "Uses JWT with 15min expiry"),
             "Standard depth should include ancestor details in breadcrumb"
+        );
+    }
+}
+
+// ============================================================
+// Cross-Branch Context Search (MANIF-163)
+// ============================================================
+
+mod cross_branch_context_search {
+    use super::*;
+    use manifest::mcp::types::FindFeaturesRequest;
+
+    #[tokio::test]
+    async fn fts_search_finds_features_by_details_content() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Create features with specific details
+        create_feature(
+            &server,
+            pid,
+            "Auth Login",
+            Some("Uses Redis for session state. JWT tokens with 15min expiry."),
+        )
+        .await;
+        create_feature(
+            &server,
+            pid,
+            "Rate Limiting",
+            Some("API rate limits per IP address. No Redis needed here."),
+        )
+        .await;
+        create_feature(&server, pid, "Profile Page", Some("Displays user avatar")).await;
+
+        // FTS search for "Redis" should find both features mentioning Redis
+        let result = features::find_features(
+            &client,
+            FindFeaturesRequest {
+                project_id: Some(pid),
+                version_id: None,
+                state: None,
+                query: Some("Redis".to_string()),
+                search_mode: Some("full".to_string()),
+                limit: None,
+                offset: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        let texts = text_contents(&result);
+        let content = texts.join(" ");
+        assert!(
+            content.contains("Auth Login"),
+            "FTS should find feature with Redis in details"
+        );
+        assert!(
+            content.contains("Rate Limiting"),
+            "FTS should find second feature with Redis in details"
+        );
+        assert!(
+            !content.contains("Profile Page"),
+            "FTS should not find feature without Redis"
+        );
+    }
+
+    #[tokio::test]
+    async fn default_search_mode_uses_like_search() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        create_feature(
+            &server,
+            pid,
+            "Widget Builder",
+            Some("Creates complex dashboard widgets"),
+        )
+        .await;
+
+        // Default (no search_mode) should still work via LIKE
+        let result = features::find_features(
+            &client,
+            FindFeaturesRequest {
+                project_id: Some(pid),
+                version_id: None,
+                state: None,
+                query: Some("Widget".to_string()),
+                search_mode: None,
+                limit: None,
+                offset: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(
+            has_text_containing(&result, "Widget Builder"),
+            "Default search should find by title via LIKE"
+        );
+    }
+
+    #[tokio::test]
+    async fn fts_search_with_state_filter() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let feature = create_feature(&server, pid, "Implemented Auth", Some(GOOD_SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        // Start, prove, complete to make it implemented
+        features::start_feature(
+            &client,
+            manifest::mcp::types::StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+        features::prove_feature(
+            &client,
+            manifest::mcp::types::ProveFeatureRequest {
+                feature_id: fid.to_string(),
+                command: "cargo test".to_string(),
+                exit_code: 0,
+                output: None,
+                test_suites: None,
+                tests: None,
+                evidence: vec![],
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+        features::complete_feature(
+            &client,
+            manifest::mcp::types::CompleteFeatureRequest {
+                feature_id: fid.to_string(),
+                summary: "Done".to_string(),
+                commits: vec![],
+                backfill: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        create_feature(
+            &server,
+            pid,
+            "Proposed Auth Improvement",
+            Some("Better auth with session tokens"),
+        )
+        .await;
+
+        // FTS search with state=proposed should only find proposed feature
+        let result = features::find_features(
+            &client,
+            FindFeaturesRequest {
+                project_id: Some(pid),
+                version_id: None,
+                state: Some("proposed".to_string()),
+                query: Some("auth".to_string()),
+                search_mode: Some("full".to_string()),
+                limit: None,
+                offset: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        let texts = text_contents(&result);
+        let content = texts.join(" ");
+        assert!(
+            content.contains("Proposed Auth Improvement"),
+            "Should find proposed feature"
+        );
+        assert!(
+            !content.contains("Implemented Auth"),
+            "Should not find implemented feature when filtering by proposed"
+        );
+    }
+
+    #[tokio::test]
+    async fn fts_index_syncs_on_update() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let feature = create_feature(
+            &server,
+            pid,
+            "Empty Feature",
+            Some("Original content without keywords"),
+        )
+        .await;
+        let fid: Uuid = feature.id.into();
+
+        // Before update: search for "Kubernetes" should return empty
+        let result = features::find_features(
+            &client,
+            FindFeaturesRequest {
+                project_id: Some(pid),
+                version_id: None,
+                state: None,
+                query: Some("Kubernetes".to_string()),
+                search_mode: Some("full".to_string()),
+                limit: None,
+                offset: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            !has_text_containing(&result, "Empty Feature"),
+            "Should not find feature before details mention Kubernetes"
+        );
+
+        // Update details to mention Kubernetes
+        features::update_feature(
+            &client,
+            manifest::mcp::types::UpdateFeatureRequest {
+                feature_id: fid.to_string(),
+                title: None,
+                details: Some("Deploy to Kubernetes cluster with Helm charts".to_string()),
+                desired_details: None,
+                details_summary: None,
+                state: None,
+                priority: None,
+                parent_id: None,
+                target_version_id: None,
+                clear_version: false,
+                blocked_by: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // After update: search should now find it
+        let result = features::find_features(
+            &client,
+            FindFeaturesRequest {
+                project_id: Some(pid),
+                version_id: None,
+                state: None,
+                query: Some("Kubernetes".to_string()),
+                search_mode: Some("full".to_string()),
+                limit: None,
+                offset: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            has_text_containing(&result, "Empty Feature"),
+            "FTS index should sync on update — feature should now be found"
         );
     }
 }
