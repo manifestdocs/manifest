@@ -2666,3 +2666,152 @@ mod cross_branch_context_search {
         );
     }
 }
+
+// ============================================================
+// MANIF-126: Related Feature Context
+// ============================================================
+
+mod related_feature_context {
+    use super::*;
+
+    const SPEC: &str = "As a user, I can do something.\n\n- [ ] Criterion 1\n- [ ] Criterion 2";
+
+    #[tokio::test]
+    async fn start_feature_shows_dependents_when_present() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        // Create the blocker feature (the one we'll start)
+        let blocker = create_feature(&server, pid, "Core Module", Some(SPEC)).await;
+        let blocker_id: Uuid = blocker.id.into();
+
+        // Create a feature that depends on the blocker
+        let dependent = create_feature(&server, pid, "Extension Module", Some(SPEC)).await;
+        let dependent_id: Uuid = dependent.id.into();
+
+        // Set blocker relationship: Extension is blocked by Core
+        features::update_feature(
+            &client,
+            manifest::mcp::types::UpdateFeatureRequest {
+                feature_id: dependent_id.to_string(),
+                title: None,
+                details: None,
+                desired_details: None,
+                details_summary: None,
+                state: Some("blocked".to_string()),
+                priority: None,
+                parent_id: None,
+                target_version_id: None,
+                clear_version: false,
+                blocked_by: Some(vec![blocker_id]),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Start the blocker — should show dependents
+        let result = features::start_feature(
+            &client,
+            manifest::mcp::types::StartFeatureRequest {
+                feature_id: blocker_id.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(
+            has_text_containing(&result, "Dependents"),
+            "Should show dependents block when other features depend on this one"
+        );
+        assert!(
+            has_text_containing(&result, "Extension Module"),
+            "Should name the dependent feature"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_feature_omits_blocks_when_no_relations() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let feature = create_feature(&server, pid, "Standalone Feature", Some(SPEC)).await;
+        let fid: Uuid = feature.id.into();
+
+        let result = features::start_feature(
+            &client,
+            manifest::mcp::types::StartFeatureRequest {
+                feature_id: fid.to_string(),
+                agent_type: "claude".to_string(),
+                force: false,
+                claim_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_error.is_none() || result.is_error == Some(false));
+        assert!(
+            !has_text_containing(&result, "Blockers"),
+            "Should not show blockers block when none exist"
+        );
+        assert!(
+            !has_text_containing(&result, "Dependents"),
+            "Should not show dependents block when none exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn dependents_api_returns_features_blocked_by_this_one() {
+        let (server, client) = setup().await;
+        let project = create_project(&server).await;
+        let pid: Uuid = project.id.into();
+
+        let blocker = create_feature(&server, pid, "Foundation", Some(SPEC)).await;
+        let blocker_id: Uuid = blocker.id.into();
+
+        let dep1 = create_feature(&server, pid, "Feature A", Some(SPEC)).await;
+        let dep1_id: Uuid = dep1.id.into();
+
+        let dep2 = create_feature(&server, pid, "Feature B", Some(SPEC)).await;
+        let dep2_id: Uuid = dep2.id.into();
+
+        // Both depend on Foundation
+        for dep_id in [dep1_id, dep2_id] {
+            features::update_feature(
+                &client,
+                manifest::mcp::types::UpdateFeatureRequest {
+                    feature_id: dep_id.to_string(),
+                    title: None,
+                    details: None,
+                    desired_details: None,
+                    details_summary: None,
+                    state: Some("blocked".to_string()),
+                    priority: None,
+                    parent_id: None,
+                    target_version_id: None,
+                    clear_version: false,
+                    blocked_by: Some(vec![blocker_id]),
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        // Query dependents via API
+        let dependents: Vec<FeatureSummary> = server
+            .get(&format!("/api/v1/features/{}/dependents", blocker_id))
+            .await
+            .json();
+
+        assert_eq!(dependents.len(), 2);
+        let titles: Vec<&str> = dependents.iter().map(|d| d.title.as_str()).collect();
+        assert!(titles.contains(&"Feature A"));
+        assert!(titles.contains(&"Feature B"));
+    }
+}

@@ -800,6 +800,37 @@ pub async fn start_feature(
         ));
     }
 
+    // Related feature context: blockers and dependents
+    let blockers = client
+        .get_feature_blockers(feature_id)
+        .await
+        .map_err(client_err)?;
+    if !blockers.is_empty() {
+        let lines: Vec<String> = blockers
+            .iter()
+            .map(|b| format!("  - {} ({})", b.title, b.state.as_str()))
+            .collect();
+        content.push(Content::text(format!(
+            "Blockers — these features must be implemented before this one:\n{}",
+            lines.join("\n")
+        )));
+    }
+
+    let dependents = client
+        .get_feature_dependents(feature_id)
+        .await
+        .map_err(client_err)?;
+    if !dependents.is_empty() {
+        let lines: Vec<String> = dependents
+            .iter()
+            .map(|d| format!("  - {} ({})", d.title, d.state.as_str()))
+            .collect();
+        content.push(Content::text(format!(
+            "Dependents — these features are waiting on this one:\n{}",
+            lines.join("\n")
+        )));
+    }
+
     // Nudge if parent feature set has empty details (hierarchical context guidance)
     if let Some(nudge) = empty_parent_nudge {
         content.push(Content::text(nudge));

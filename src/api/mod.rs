@@ -286,6 +286,10 @@ fn build_protected_api_router() -> Router<AppState> {
             get(handlers::get_feature_blockers),
         )
         .route(
+            "/features/{id}/dependents",
+            get(handlers::get_feature_dependents),
+        )
+        .route(
             "/features/{id}/blocked-ancestor",
             get(handlers::find_blocked_ancestor),
         )

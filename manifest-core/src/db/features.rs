@@ -1370,6 +1370,25 @@ impl Database {
         rows.iter().map(row_to_feature_summary).collect()
     }
 
+    /// Get features that depend on (are blocked by) this feature.
+    /// Returns features that list this feature as one of their blockers.
+    pub async fn get_feature_dependents(
+        &self,
+        feature_id: FeatureId,
+    ) -> Result<Vec<FeatureSummary>> {
+        let sql = "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
+                   FROM feature_blockers fb
+                   JOIN features f ON f.id = fb.feature_id
+                   WHERE fb.blocker_feature_id = $1
+                   ORDER BY f.priority, f.title";
+        let rows = sqlx::query(sql)
+            .bind(feature_id.to_string())
+            .fetch_all(&self.pool)
+            .await?;
+
+        rows.iter().map(row_to_feature_summary).collect()
+    }
+
     /// When a feature transitions to `implemented`, check if any features blocked by it
     /// can now be auto-resolved (all their blockers are implemented).
     /// Returns the IDs of features that were unblocked.

@@ -337,6 +337,22 @@ pub async fn get_feature_blockers(
         .map_err(internal_error)
 }
 
+/// Get features that depend on (are blocked by) a feature.
+pub async fn get_feature_dependents(
+    State(db): State<Database>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<FeatureSummary>>, ApiError> {
+    db.get_feature(id.into())
+        .await
+        .map_err(internal_error)?
+        .ok_or(ApiError::not_found("Feature"))?;
+
+    db.get_feature_dependents(id.into())
+        .await
+        .map(Json)
+        .map_err(internal_error)
+}
+
 /// Find a blocked ancestor feature set in the parent chain.
 /// Returns the first blocked ancestor, or 204 if none found.
 pub async fn find_blocked_ancestor(

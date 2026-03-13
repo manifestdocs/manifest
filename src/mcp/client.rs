@@ -335,6 +335,20 @@ impl ManifestClient {
         self.handle_response(response).await
     }
 
+    pub async fn get_feature_dependents(
+        &self,
+        id: Uuid,
+    ) -> Result<Vec<FeatureSummary>, ClientError> {
+        let response = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/features/{}/dependents", id),
+            )
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+
     /// Find a blocked ancestor feature set in the parent chain.
     pub async fn find_blocked_ancestor(
         &self,
