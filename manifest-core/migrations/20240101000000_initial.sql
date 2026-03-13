@@ -303,6 +303,31 @@ CREATE INDEX IF NOT EXISTS idx_audit_user_time ON audit_log(user_id, created_at)
 CREATE INDEX IF NOT EXISTS idx_audit_project_time ON audit_log(project_id, created_at);
 
 -- ============================================================
+-- Remotes (local-only, never synced)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS remotes (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'turso',
+    url TEXT NOT NULL,
+    auth_token TEXT NOT NULL,
+    sync_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_remotes (
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    remote_id TEXT NOT NULL REFERENCES remotes(id) ON DELETE CASCADE,
+    sync_state TEXT NOT NULL DEFAULT 'active',
+    last_synced_at TEXT,
+    PRIMARY KEY (project_id, remote_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_remotes_remote ON project_remotes(remote_id);
+
+-- ============================================================
 -- Schema Migrations Tracking (for compatibility with existing DBs)
 -- ============================================================
 

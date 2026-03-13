@@ -7,6 +7,10 @@ use tokio::sync::broadcast;
 
 use crate::models::ProjectId;
 
+// Re-export sqlx types for use by the API layer's error handling
+pub use sqlx::error::DatabaseError;
+pub use sqlx::Error as SqlxError;
+
 mod features;
 mod helpers;
 mod history;
@@ -15,6 +19,7 @@ mod portfolio;
 pub use features::CompletionResult;
 mod projects;
 mod proofs;
+mod remotes;
 mod templates;
 mod versions;
 
@@ -403,6 +408,7 @@ impl Database {
         self.migrate_add_features_fts().await?;
         // Migration: add context_budget column to projects
         self.migrate_add_context_budget().await?;
+        self.migrate_add_remotes().await?;
         Ok(())
     }
 
@@ -1448,6 +1454,65 @@ impl Database {
             .await?;
 
         tracing::info!("Added context_budget column to projects");
+        Ok(())
+    }
+
+    /// Add remotes and project_remotes tables for Turso backend support.
+    async fn migrate_add_remotes(&self) -> Result<()> {
+        let has_table = if self.dialect.is_sqlite() {
+            let exists: Option<String> = sqlx::query_scalar(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='remotes'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+            exists.is_some()
+        } else {
+            let exists: Option<String> = sqlx::query_scalar(
+                "SELECT table_name FROM information_schema.tables WHERE table_name = 'remotes'",
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+            exists.is_some()
+        };
+
+        if has_table {
+            return Ok(());
+        }
+
+        sqlx::query(
+            "CREATE TABLE remotes (
+                id TEXT PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                provider TEXT NOT NULL DEFAULT 'turso',
+                url TEXT NOT NULL,
+                auth_token TEXT NOT NULL,
+                sync_enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TABLE project_remotes (
+                project_id TEXT NOT NULL REFERENCES projects(id),
+                remote_id TEXT NOT NULL REFERENCES remotes(id) ON DELETE CASCADE,
+                sync_state TEXT NOT NULL DEFAULT 'active',
+                last_synced_at TEXT,
+                PRIMARY KEY (project_id, remote_id)
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_project_remotes_remote ON project_remotes(remote_id)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        tracing::info!("Added remotes and project_remotes tables");
         Ok(())
     }
 

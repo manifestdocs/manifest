@@ -331,6 +331,33 @@ pub(crate) fn row_to_project_history_entry(row: &AnyRow) -> Result<ProjectHistor
     })
 }
 
+/// Map a database row to a [`Remote`].
+pub(crate) fn row_to_remote(row: &AnyRow) -> Result<Remote> {
+    Ok(Remote {
+        id: parse_id(row.get("id"))?,
+        name: row.get("name"),
+        provider: row.get("provider"),
+        url: row.get("url"),
+        sync_enabled: row.get::<i32, _>("sync_enabled") != 0,
+        created_at: parse_datetime(row.get("created_at"))?,
+        updated_at: parse_datetime(row.get("updated_at"))?,
+    })
+}
+
+/// Map a database row to a [`ProjectRemote`].
+pub(crate) fn row_to_project_remote(row: &AnyRow) -> Result<ProjectRemote> {
+    Ok(ProjectRemote {
+        project_id: parse_id(row.get("project_id"))?,
+        remote_id: parse_id(row.get("remote_id"))?,
+        sync_state: SyncState::from_str(&row.get::<String, _>("sync_state"))
+            .unwrap_or(SyncState::Active),
+        last_synced_at: row
+            .get::<Option<String>, _>("last_synced_at")
+            .map(parse_datetime)
+            .transpose()?,
+    })
+}
+
 /// Map a database row to a [`Proof`].
 ///
 /// The `tests` column may contain either the new `Vec<TestSuite>` format or

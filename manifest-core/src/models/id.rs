@@ -111,3 +111,8 @@ define_id!(
     /// Unique identifier for a [`SpecTemplate`](super::SpecTemplate).
     TemplateId
 );
+
+define_id!(
+    /// Unique identifier for a [`Remote`](super::Remote).
+    RemoteId
+);

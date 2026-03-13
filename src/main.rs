@@ -100,6 +100,47 @@ enum Commands {
     Stop,
     /// Migrate existing projects to use root features
     MigrateRoots,
+    /// Manage remote backends (Turso databases)
+    Remote {
+        #[command(subcommand)]
+        action: RemoteAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum RemoteAction {
+    /// Add a new remote backend
+    Add {
+        /// Name for this remote (e.g., "work", "personal")
+        name: String,
+        /// Connection URL (e.g., libsql://mydb.turso.io)
+        #[arg(long)]
+        url: String,
+        /// Auth token
+        #[arg(long)]
+        token: String,
+        /// Backend provider
+        #[arg(long, default_value = "turso")]
+        provider: String,
+    },
+    /// Remove a remote backend
+    Remove {
+        /// Name of the remote to remove
+        name: String,
+    },
+    /// List all configured remotes
+    List,
+    /// Update a remote's URL or token
+    Update {
+        /// Name of the remote to update
+        name: String,
+        /// New connection URL
+        #[arg(long)]
+        url: Option<String>,
+        /// New auth token
+        #[arg(long)]
+        token: Option<String>,
+    },
 }
 
 /// Initialize tracing with output to stderr (for MCP mode) or stdout
@@ -303,6 +344,76 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 eprintln!("Manifest server is not running (no PID file found).");
                 std::process::exit(1);
+            }
+        }
+        Some(Commands::Remote { action }) => {
+            let database = db::Database::open_with_override(cli.db).await?;
+            database.migrate().await?;
+
+            match action {
+                RemoteAction::Add {
+                    name,
+                    url,
+                    token,
+                    provider,
+                } => {
+                    let input = manifest_core::models::CreateRemoteInput {
+                        name: name.clone(),
+                        provider: Some(provider),
+                        url,
+                        token,
+                    };
+                    match database.create_remote(&input).await {
+                        Ok(remote) => {
+                            println!(
+                                "Remote '{}' added (provider: {}).",
+                                remote.name, remote.provider
+                            );
+                            println!("  URL: {}", remote.url);
+                        }
+                        Err(e) => {
+                            eprintln!("Error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                RemoteAction::Remove { name } => {
+                    let Some(remote) = database.get_remote_by_name(&name).await? else {
+                        eprintln!("Remote '{}' not found.", name);
+                        std::process::exit(1);
+                    };
+                    database.delete_remote(remote.id).await?;
+                    println!("Remote '{}' removed. Local project data preserved.", name);
+                }
+                RemoteAction::List => {
+                    let remotes = database.list_remotes().await?;
+                    if remotes.is_empty() {
+                        println!("No remotes configured.");
+                        println!("  Add one with: manifest remote add <name> --url <url> --token <token>");
+                    } else {
+                        println!("{:<15} {:<10} {:<8} {}", "NAME", "PROVIDER", "SYNC", "URL");
+                        for r in &remotes {
+                            let sync_status = if r.sync_enabled { "on" } else { "off" };
+                            println!(
+                                "{:<15} {:<10} {:<8} {}",
+                                r.name, r.provider, sync_status, r.url
+                            );
+                        }
+                    }
+                }
+                RemoteAction::Update { name, url, token } => {
+                    let Some(remote) = database.get_remote_by_name(&name).await? else {
+                        eprintln!("Remote '{}' not found.", name);
+                        std::process::exit(1);
+                    };
+                    let input = manifest_core::models::UpdateRemoteInput {
+                        url,
+                        token,
+                        sync_enabled: None,
+                    };
+                    database.update_remote(remote.id, &input).await?;
+                    println!("Remote '{}' updated.", name);
+                }
             }
         }
         Some(Commands::MigrateRoots) => {
