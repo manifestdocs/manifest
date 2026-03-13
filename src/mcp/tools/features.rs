@@ -8,7 +8,7 @@
 use std::str::FromStr;
 
 use rmcp::{
-    model::{CallToolResult, Content},
+    model::{CallToolResult, Content, Role},
     ErrorData as McpError,
 };
 
@@ -34,6 +34,16 @@ use crate::models::{
 use super::spec::SpecConfig;
 
 use super::client_err;
+
+/// Create a Content block visible only to the human user (not the model).
+fn user_text(text: impl Into<String>) -> Content {
+    Content::text(text).with_audience(vec![Role::User])
+}
+
+/// Create a Content block visible only to the AI assistant (not rendered in terminal).
+fn assistant_text(text: impl Into<String>) -> Content {
+    Content::text(text).with_audience(vec![Role::Assistant])
+}
 
 /// Check if an in_progress leaf feature is stale (no update for >24h).
 /// Uses `claimed_at` when available (more accurate — not reset by metadata changes),
@@ -282,11 +292,11 @@ pub async fn get_feature(
         tier.as_str(),
     );
     let is_leaf = feature_with_context.children.is_empty();
-    let mut content = vec![Content::text(summary)];
+    let mut content = vec![user_text(summary)];
     if let Some(warning) = stale_warning(&feature_with_context.feature, is_leaf) {
         content.push(Content::text(warning));
     }
-    content.push(Content::text(yaml));
+    content.push(assistant_text(yaml));
     Ok(CallToolResult::success(content))
 }
 
@@ -360,7 +370,7 @@ pub async fn plan(
         )
     };
 
-    let mut blocks = vec![Content::text(summary), Content::text(json)];
+    let mut blocks = vec![user_text(summary), assistant_text(json)];
 
     if let Some(template) = client
         .get_default_template(req.project_id)
@@ -368,8 +378,8 @@ pub async fn plan(
         .ok()
         .flatten()
     {
-        blocks.push(Content::text(format!(
-            "\u{1f4dd} Spec Template — leaf feature details should follow this structure:\n\n{}",
+        blocks.push(assistant_text(format!(
+            "Spec Template -- leaf feature details should follow this structure:\n\n{}",
             template.content
         )));
     }
@@ -417,11 +427,11 @@ pub async fn create_feature(
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    let mut blocks = vec![Content::text(summary), Content::text(json)];
+    let mut blocks = vec![user_text(summary), assistant_text(json)];
 
     if !has_details {
         if let Some(template) = client.get_default_template(project_id).await.ok().flatten() {
-            blocks.push(Content::text(format!(
+            blocks.push(assistant_text(format!(
                 "This feature has no specification. Use update_feature to add details following this template:\n\n{}",
                 template.content
             )));
@@ -439,9 +449,9 @@ pub async fn create_feature(
                 .as_ref()
                 .is_some_and(|d| !d.trim().is_empty());
             if !parent_has_details {
-                blocks.push(Content::text(format!(
+                blocks.push(assistant_text(format!(
                     "Parent '{}' is now a feature set. Add shared context that applies to all \
-                     children — architectural decisions, conventions, constraints. This context \
+                     children -- architectural decisions, conventions, constraints. This context \
                      flows to agents via the breadcrumb when they work on child features.",
                     parent_ctx.feature.title
                 )));
@@ -528,13 +538,13 @@ pub async fn update_feature(
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-    let mut blocks = vec![Content::text(summary), Content::text(json)];
+    let mut blocks = vec![user_text(summary), assistant_text(json)];
 
     if has_details {
         let project_id: uuid::Uuid = feature.project_id.into();
         if let Some(template) = client.get_default_template(project_id).await.ok().flatten() {
-            blocks.push(Content::text(format!(
-                "\u{1f4dd} Spec Template — verify details follow this project's template:\n\n{}",
+            blocks.push(assistant_text(format!(
+                "Spec Template -- verify details follow this project's template:\n\n{}",
                 template.content
             )));
         }
@@ -783,18 +793,21 @@ pub async fn start_feature(
 
     let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
 
-    // Build content blocks
+    // Build content blocks with audience annotations:
+    // - user_text: shown in Claude Code terminal (human-readable summaries)
+    // - assistant_text: consumed by the model only (YAML data, contracts)
+    // - Content::text: shown to both (warnings, guidance the user should also see)
     let mut content = Vec::new();
 
     // Human-readable summary line
-    content.push(Content::text(format!(
-        "Started '{}' — now in_progress",
+    content.push(user_text(format!(
+        "Started '{}' -- now in_progress",
         feature_with_context.feature.title,
     )));
 
     // Git branch info (if applicable)
     if let Some(msg) = branch_message {
-        content.push(Content::text(msg));
+        content.push(user_text(msg));
     }
 
     // If this is a change request, prepend guidance
@@ -819,7 +832,7 @@ pub async fn start_feature(
             .map(|b| format!("  - {} ({})", b.title, b.state.as_str()))
             .collect();
         content.push(Content::text(format!(
-            "Blockers — these features must be implemented before this one:\n{}",
+            "Blockers -- these features must be implemented before this one:\n{}",
             lines.join("\n")
         )));
     }
@@ -834,7 +847,7 @@ pub async fn start_feature(
             .map(|d| format!("  - {} ({})", d.title, d.state.as_str()))
             .collect();
         content.push(Content::text(format!(
-            "Dependents — these features are waiting on this one:\n{}",
+            "Dependents -- these features are waiting on this one:\n{}",
             lines.join("\n")
         )));
     }
@@ -855,17 +868,18 @@ pub async fn start_feature(
         content.push(Content::text(guidance));
     }
 
-    content.push(Content::text(yaml));
+    // Full YAML spec — model-only (too verbose for terminal display)
+    content.push(assistant_text(yaml));
 
     let completion_contract = "COMPLETION CONTRACT: After implementing this feature, you MUST:\n\
-         1. prove_feature — record test evidence (command, structured results, evidence files)\n\
-         2. update_feature — set `details` to describe what was actually built \
+         1. prove_feature -- record test evidence (command, structured results, evidence files)\n\
+         2. update_feature -- set `details` to describe what was actually built \
             (if you haven't already been ticking off acceptance criteria checkboxes during implementation)\n\
-         3. complete_feature — provide summary of work + commit SHAs\n\
+         3. complete_feature -- provide summary of work + commit SHAs\n\
          Skipping these steps leaves stale documentation that misleads future agents.\n\n\
          TIP: For the best user experience, call update_feature after completing each acceptance \
-         criterion to tick its checkbox (- [ ] → - [x]). This shows real-time progress in the UI.";
-    content.push(Content::text(completion_contract));
+         criterion to tick its checkbox (- [ ] -> - [x]). This shows real-time progress in the UI.";
+    content.push(assistant_text(completion_contract));
 
     Ok(CallToolResult::success(content))
 }
@@ -1084,30 +1098,30 @@ pub async fn complete_feature(
             if commit_count == 1 { "" } else { "s" },
         )
     };
-    let mut content = vec![Content::text(summary)];
+    let mut content = vec![user_text(summary)];
     // Verification — full test tree (backfilled features skip this)
     if req.backfill {
-        content.push(Content::text(
+        content.push(user_text(
             "Verification: backfilled (existing code is the proof)",
         ));
     } else {
         match &latest_proof {
             Some(proof) => match &proof.test_suites {
                 Some(suites) if !suites.is_empty() => {
-                    content.push(Content::text(format!(
+                    content.push(user_text(format!(
                         "Verification:\n{}",
                         format::render_test_tree(suites)
                     )));
                 }
                 _ => {
-                    content.push(Content::text(format!(
+                    content.push(user_text(format!(
                         "Verification: exit code {}",
                         proof.exit_code
                     )));
                 }
             },
             None => {
-                content.push(Content::text("Verification: none"));
+                content.push(user_text("Verification: none"));
             }
         }
     }
@@ -1115,7 +1129,7 @@ pub async fn complete_feature(
         content.push(Content::text(format!("\u{26a0} Warning: {warning}")));
     }
     if let Some(msg) = merge_message {
-        content.push(Content::text(msg));
+        content.push(user_text(msg));
     }
 
     // Context propagation: suggest updating parent feature set when summary contains decisions
@@ -1123,11 +1137,12 @@ pub async fn complete_feature(
         if let Some(suggestion) =
             build_propagation_suggestion(client, feature_id.into(), &req.summary).await
         {
-            content.push(Content::text(suggestion));
+            content.push(assistant_text(suggestion));
         }
     }
 
-    content.push(Content::text(json));
+    // Structured JSON — model-only (too verbose for terminal display)
+    content.push(assistant_text(json));
     Ok(CallToolResult::success(content))
 }
 
@@ -1421,11 +1436,11 @@ pub async fn get_next_feature(
 
             let yaml = format::to_yaml(&response).map_err(|e| McpError::internal_error(e, None))?;
             let is_leaf = feature_ctx.children.is_empty();
-            let mut content = vec![Content::text(summary)];
+            let mut content = vec![user_text(summary)];
             if let Some(warning) = stale_warning(&feature_ctx.feature, is_leaf) {
                 content.push(Content::text(warning));
             }
-            content.push(Content::text(yaml));
+            content.push(assistant_text(yaml));
             Ok(CallToolResult::success(content))
         }
         None => Ok(CallToolResult::success(vec![Content::text(

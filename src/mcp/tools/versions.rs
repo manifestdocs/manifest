@@ -5,7 +5,7 @@
 //! markdown for agent-friendly output.
 
 use rmcp::{
-    model::{CallToolResult, Content},
+    model::{CallToolResult, Content, Role},
     ErrorData as McpError,
 };
 
@@ -131,8 +131,8 @@ pub async fn create_version(
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(json),
+        Content::text(summary).with_audience(vec![Role::User]),
+        Content::text(json).with_audience(vec![Role::Assistant]),
     ]))
 }
 
@@ -192,8 +192,8 @@ pub async fn set_feature_version(
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(json),
+        Content::text(summary).with_audience(vec![Role::User]),
+        Content::text(json).with_audience(vec![Role::Assistant]),
     ]))
 }
 
@@ -228,7 +228,7 @@ pub async fn release_version(
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(json),
+        Content::text(summary).with_audience(vec![Role::User]),
+        Content::text(json).with_audience(vec![Role::Assistant]),
     ]))
 }

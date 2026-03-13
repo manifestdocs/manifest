@@ -331,7 +331,9 @@ impl ServerHandler for McpServer {
 
         // Append update notice once the background check has completed
         if let Some(Some(notice)) = self.update_notice.get() {
-            result.content.push(Content::text(notice));
+            result
+                .content
+                .push(Content::text(notice).with_audience(vec![rmcp::model::Role::User]));
         }
 
         Ok(result)

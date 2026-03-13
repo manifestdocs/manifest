@@ -5,7 +5,7 @@
 //! staleness warnings for features claimed longer than 24 hours.
 
 use rmcp::{
-    model::{CallToolResult, Content},
+    model::{CallToolResult, Content, Role},
     ErrorData as McpError,
 };
 
@@ -34,7 +34,7 @@ pub async fn get_active_feature(
             let json = serde_json::to_string_pretty(&response)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-            let mut content = vec![Content::text(summary)];
+            let mut content = vec![Content::text(summary).with_audience(vec![Role::User])];
 
             // Check for stale in_progress features
             if state == FeatureState::InProgress.as_str() {
@@ -46,7 +46,7 @@ pub async fn get_active_feature(
                 }
             }
 
-            content.push(Content::text(json));
+            content.push(Content::text(json).with_audience(vec![Role::Assistant]));
             Ok(CallToolResult::success(content))
         }
         None => {

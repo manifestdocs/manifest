@@ -295,7 +295,7 @@ pub fn time_bucket(datetime: &DateTime<Utc>) -> String {
 ///
 /// Mirrors the web app's Activity tab layout:
 /// - Time bucket headers as horizontal rule labels
-/// - Release entries shown as `🏷 Released v0.2.0`
+/// - Release entries shown as `>> Released v0.2.0`
 /// - Regular entries: state icon + feature title + separator + headline + commit SHAs
 /// - Body (decisions, tradeoffs) shown indented below headline — always expanded in CLI
 ///   since there is no interactive expand/collapse
@@ -325,7 +325,7 @@ pub fn render_activity_timeline(entries: &[ProjectHistoryEntry]) -> String {
         // Release entries get special formatting (matches web app detection)
         if entry.summary.starts_with("Released ") {
             let headline = entry.summary.lines().next().unwrap_or(&entry.summary);
-            out.push_str(&format!("\u{1f3f7}\u{fe0f}  {}\n", headline.trim()));
+            out.push_str(&format!(">>  {}\n", headline.trim()));
             continue;
         }
 

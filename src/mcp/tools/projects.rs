@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use rmcp::{
-    model::{CallToolResult, Content},
+    model::{CallToolResult, Content, Role},
     ErrorData as McpError,
 };
 use uuid::Uuid;
@@ -215,8 +215,8 @@ pub async fn init_project(
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(json),
+        Content::text(summary).with_audience(vec![Role::User]),
+        Content::text(json).with_audience(vec![Role::Assistant]),
     ]))
 }
 
@@ -251,8 +251,8 @@ pub async fn add_project_directory(
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
     Ok(CallToolResult::success(vec![
-        Content::text(summary),
-        Content::text(json),
+        Content::text(summary).with_audience(vec![Role::User]),
+        Content::text(json).with_audience(vec![Role::Assistant]),
     ]))
 }
 
