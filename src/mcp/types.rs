@@ -49,8 +49,10 @@ pub struct CompleteFeatureRequest {
         description = "Summary of work done (git-style format). First line is a concise headline shown in list views. Add details after a blank line if needed (bullet points, technical notes).\n\nYour summary becomes living documentation. Include:\n- Key DECISIONS and their rationale (\"Chose X over Y because...\")\n- Any DEVIATIONS from the original spec and why\n- DISCOVERIES that affect sibling features (\"Discovered that...\")\n- Constraints or gotchas for future work (\"Note: X requires Y\")\n\nExample:\n\nImplemented OAuth login flow\n\n- Added Google OAuth provider using passport.js\n- Chose session-based auth over JWT (simpler for SSR app)\n- Deviated from spec: skipped GitHub OAuth (rate limits too restrictive)\n- Discovered that OAuth callback must use HTTPS even in dev\n- Note: refresh token rotation not yet implemented\n\nIMPORTANT: Describe WHAT was built, not that something was committed. Commits are tracked separately and displayed alongside the summary in the UI. Never write summaries like 'Committed as abc1234' or 'Committed X implementation' — the commit SHAs are already shown."
     )]
     pub summary: String,
-    #[schemars(description = "Git commits created during this work")]
-    #[serde(default)]
+    #[schemars(
+        description = "Git commits created during this work. Accepts either:\n- Simple strings: [\"abc1234\", \"def5678\"] (commit messages resolved automatically)\n- Objects: [{sha: \"abc1234\", message: \"Add feature\"}]"
+    )]
+    #[serde(default, deserialize_with = "deserialize_commits")]
     pub commits: Vec<CommitRefInput>,
     #[schemars(
         description = "Set to true when bootstrapping existing projects. Skips proof and spec requirements — the existing code is the proof. History entry is tagged as 'backfilled' for visual distinction from features that went through the full TDD cycle."
@@ -64,10 +66,39 @@ pub struct CommitRefInput {
     #[schemars(description = "The commit SHA (short or full)")]
     pub sha: String,
     #[schemars(description = "The commit message (first line)")]
+    #[serde(default)]
     pub message: String,
     #[schemars(description = "The commit author")]
     #[serde(default)]
     pub author: Option<String>,
+}
+
+/// Deserialize commits from either:
+/// - `["sha1", "sha2"]` (simple string array)
+/// - `[{sha: "sha1", message: "msg"}]` (structured array)
+fn deserialize_commits<'de, D>(deserializer: D) -> Result<Vec<CommitRefInput>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum CommitEntry {
+        Simple(String),
+        Structured(CommitRefInput),
+    }
+
+    let entries: Vec<CommitEntry> = Vec::deserialize(deserializer)?;
+    Ok(entries
+        .into_iter()
+        .map(|e| match e {
+            CommitEntry::Simple(sha) => CommitRefInput {
+                sha,
+                message: String::new(),
+                author: None,
+            },
+            CommitEntry::Structured(c) => c,
+        })
+        .collect())
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
