@@ -6,15 +6,8 @@ description = "Core library for Manifest: models and database operations"
 license = "BUSL-1.1"
 
 [dependencies]
-# Database - SQLx with multi-database support
-sqlx = { version = "0.8", default-features = false, features = [
-    "runtime-tokio",
-    "sqlite",
-    "postgres",
-    "any",
-    "uuid",
-    "chrono"
-]}
+# Database - libSQL (SQLite-compatible, with Turso embedded replica support)
+libsql = { version = "0.9", default-features = false, features = ["core", "replication", "remote", "sync", "tls"] }
 
 # Async runtime
 tokio = { version = "1", features = ["sync", "rt"] }
@@ -28,9 +21,6 @@ tracing = "0.1"
 
 # Async traits (for dyn-safe async trait objects)
 async-trait = "0.1"
-
-# Turso/libSQL embedded replicas
-libsql = { version = "0.9", default-features = false, features = ["core", "replication", "remote", "sync", "tls"] }
 
 # HTTP client (for GitHub backend)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
