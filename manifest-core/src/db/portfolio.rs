@@ -209,10 +209,7 @@ impl Database {
 
         let mut rows = self
             .conn
-            .query(
-                sql,
-                libsql::params![project_id.to_string(), since],
-            )
+            .query(sql, libsql::params![project_id.to_string(), since])
             .await
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -237,13 +234,16 @@ impl Database {
             .await
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        let last_activity_at =
-            match last_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
-                Some(row) => row_get_opt_str(&row, "last_at")
-                    .map(parse_datetime)
-                    .transpose()?,
-                None => None,
-            };
+        let last_activity_at = match last_rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+        {
+            Some(row) => row_get_opt_str(&row, "last_at")
+                .map(parse_datetime)
+                .transpose()?,
+            None => None,
+        };
 
         Ok((recent_completions, last_activity_at))
     }

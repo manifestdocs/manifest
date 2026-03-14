@@ -62,8 +62,9 @@ impl Database {
 
         match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
             Some(row) => {
-                let token: Option<String> =
-                    row.get::<Option<String>>(0).map_err(|e| anyhow::anyhow!("{}", e))?;
+                let token: Option<String> = row
+                    .get::<Option<String>>(0)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
                 Ok(token)
             }
             None => Ok(None),

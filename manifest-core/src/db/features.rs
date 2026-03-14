@@ -47,7 +47,11 @@ impl Database {
         if let Some(off) = offset {
             params.push(libsql::Value::Integer(off as i64));
         }
-        let mut rows = self.conn.query(&sql, params).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut rows = self
+            .conn
+            .query(&sql, params)
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let mut features = Vec::new();
         while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
             features.push(row_to_feature(&row)?);
@@ -85,7 +89,11 @@ impl Database {
         if let Some(off) = offset {
             params.push(libsql::Value::Integer(off as i64));
         }
-        let mut rows = self.conn.query(&sql, params).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut rows = self
+            .conn
+            .query(&sql, params)
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let mut features = Vec::new();
         while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
             features.push(row_to_feature(&row)?);
@@ -103,7 +111,11 @@ impl Database {
     /// Get a single feature by ID.
     pub async fn get_feature(&self, id: FeatureId) -> Result<Option<Feature>> {
         let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id = ?1");
-        let mut rows = self.conn.query(&sql, libsql::params![id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let row = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         match row.as_ref().map(row_to_feature).transpose()? {
@@ -133,14 +145,22 @@ impl Database {
                 let sql = format!(
                     "SELECT {FEATURE_COLS} FROM features WHERE id LIKE ?1 AND project_id = ?2 LIMIT 2"
                 );
-                let mut rows = self.conn.query(&sql, libsql::params![pattern.as_str(), pid.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                let mut rows = self
+                    .conn
+                    .query(&sql, libsql::params![pattern.as_str(), pid.to_string()])
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
                 while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
                     result_features.push(row_to_feature(&row)?);
                 }
             }
             None => {
                 let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id LIKE ?1 LIMIT 2");
-                let mut rows = self.conn.query(&sql, libsql::params![pattern.as_str()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                let mut rows = self
+                    .conn
+                    .query(&sql, libsql::params![pattern.as_str()])
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
                 while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
                     result_features.push(row_to_feature(&row)?);
                 }
@@ -176,8 +196,19 @@ impl Database {
         let prefix_upper = prefix.to_ascii_uppercase();
 
         // Look up project by key_prefix (case-insensitive via UPPER)
-        let mut pid_rows = self.conn.query("SELECT id FROM projects WHERE UPPER(key_prefix) = ?1", libsql::params![prefix_upper.as_str()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-        let project_id: Option<String> = match pid_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+        let mut pid_rows = self
+            .conn
+            .query(
+                "SELECT id FROM projects WHERE UPPER(key_prefix) = ?1",
+                libsql::params![prefix_upper.as_str()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let project_id: Option<String> = match pid_rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+        {
             Some(row) => Some(row.get::<String>(0).map_err(|e| anyhow::anyhow!("{}", e))?),
             None => None,
         };
@@ -190,7 +221,11 @@ impl Database {
         let sql = format!(
             "SELECT {FEATURE_COLS} FROM features WHERE project_id = ?1 AND feature_number = ?2"
         );
-        let mut fn_rows = self.conn.query(&sql, libsql::params![project_id.as_str(), feature_number]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut fn_rows = self
+            .conn
+            .query(&sql, libsql::params![project_id.as_str(), feature_number])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let row = fn_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         match row.as_ref().map(row_to_feature).transpose()? {
@@ -268,12 +303,21 @@ impl Database {
             };
 
         // Assign next sequential feature_number
-        let mut fn_rows = self.conn.query(
-            "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = ?1",
-            libsql::params![project_id.to_string()],
-        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-        let fn_row = fn_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
-        let feature_number: i32 = fn_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))? as i32;
+        let mut fn_rows = self
+            .conn
+            .query(
+                "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = ?1",
+                libsql::params![project_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let fn_row = fn_rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+        let feature_number: i32 =
+            fn_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))? as i32;
 
         self.conn.execute(
             "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, feature_number, target_version_id, created_at, updated_at)
@@ -349,15 +393,27 @@ impl Database {
             }
         }
 
-        let tx = self.conn.transaction().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let tx = self
+            .conn
+            .transaction()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Get the starting feature_number for this batch
-        let mut fn_rows = tx.query(
-            "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = ?1",
-            libsql::params![project_id.to_string()],
-        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-        let fn_row = fn_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
-        let mut next_number: i32 = fn_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))? as i32;
+        let mut fn_rows = tx
+            .query(
+                "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = ?1",
+                libsql::params![project_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let fn_row = fn_rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+        let mut next_number: i32 =
+            fn_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))? as i32;
 
         for input in inputs {
             let id = input.id.unwrap_or_default();
@@ -518,11 +574,24 @@ impl Database {
                     .map(|id| format!("'{}'", id))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let mut cnt_rows = self.conn.query(&format!(
+                let mut cnt_rows = self
+                    .conn
+                    .query(
+                        &format!(
                     "SELECT COUNT(*) FROM features WHERE id IN ({placeholders}) AND project_id = ?1"
-                ), libsql::params![existing.project_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-                let cnt_row = cnt_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
-                let count = cnt_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))?;
+                ),
+                        libsql::params![existing.project_id.to_string()],
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                let cnt_row = cnt_rows
+                    .next()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?
+                    .ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+                let count = cnt_row
+                    .get::<i64>(0)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
                 if count != blocker_ids.len() as i64 {
                     return Err(ManifestError::validation(
                         "All blocker features must exist in the same project.",
@@ -657,17 +726,31 @@ impl Database {
     #[must_use = "check whether the feature existed"]
     pub async fn delete_feature(&self, id: FeatureId) -> Result<bool> {
         // Get project_id before deleting
-        let mut pid_rows = self.conn.query("SELECT project_id FROM features WHERE id = ?1", libsql::params![id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-        let project_id: Option<ProjectId> = match pid_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
-            Some(row) => Some(parse_id::<ProjectId>(row.get::<String>(0).map_err(|e| anyhow::anyhow!("{}", e))?)?),
+        let mut pid_rows = self
+            .conn
+            .query(
+                "SELECT project_id FROM features WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let project_id: Option<ProjectId> = match pid_rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+        {
+            Some(row) => Some(parse_id::<ProjectId>(
+                row.get::<String>(0).map_err(|e| anyhow::anyhow!("{}", e))?,
+            )?),
             None => None,
         };
 
         let id_str = id.to_string();
 
         // Delete feature history for descendants (recursive CTE)
-        self.conn.execute(
-            "DELETE FROM feature_history WHERE feature_id IN (
+        self.conn
+            .execute(
+                "DELETE FROM feature_history WHERE feature_id IN (
                 WITH RECURSIVE descendants AS (
                     SELECT id FROM features WHERE id = ?1
                     UNION ALL
@@ -676,12 +759,16 @@ impl Database {
                 )
                 SELECT id FROM descendants
             )",
-            libsql::params![id_str.as_str()],
-        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                libsql::params![id_str.as_str()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Delete descendants and feature
-        let rows_affected = self.conn.execute(
-            "DELETE FROM features WHERE id IN (
+        let rows_affected = self
+            .conn
+            .execute(
+                "DELETE FROM features WHERE id IN (
                 WITH RECURSIVE descendants AS (
                     SELECT id FROM features WHERE id = ?1
                     UNION ALL
@@ -690,8 +777,10 @@ impl Database {
                 )
                 SELECT id FROM descendants
             )",
-            libsql::params![id_str.as_str()],
-        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                libsql::params![id_str.as_str()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         if rows_affected > 0 {
             if let Some(project_id) = project_id {
@@ -712,7 +801,14 @@ impl Database {
                 let sql = format!(
                     "SELECT {FEATURE_COLS} FROM features WHERE project_id = ?1 AND parent_id = ?2 ORDER BY priority, title"
                 );
-                let mut rows = self.conn.query(&sql, libsql::params![project_id.to_string(), root_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                let mut rows = self
+                    .conn
+                    .query(
+                        &sql,
+                        libsql::params![project_id.to_string(), root_id.to_string()],
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
                 while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
                     features.push(row_to_feature(&row)?);
                 }
@@ -721,7 +817,11 @@ impl Database {
                 let sql = format!(
                     "SELECT {FEATURE_COLS} FROM features WHERE project_id = ?1 AND parent_id IS NULL ORDER BY priority, title"
                 );
-                let mut rows = self.conn.query(&sql, libsql::params![project_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                let mut rows = self
+                    .conn
+                    .query(&sql, libsql::params![project_id.to_string()])
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
                 while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
                     features.push(row_to_feature(&row)?);
                 }
@@ -736,7 +836,11 @@ impl Database {
         let sql = format!(
             "SELECT {FEATURE_COLS} FROM features WHERE parent_id = ?1 ORDER BY priority, title"
         );
-        let mut rows = self.conn.query(&sql, libsql::params![parent_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![parent_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let mut features = Vec::new();
         while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
             features.push(row_to_feature(&row)?);
@@ -747,9 +851,22 @@ impl Database {
 
     /// Check whether a feature is a leaf node (has no children).
     pub async fn is_leaf(&self, feature_id: FeatureId) -> Result<bool> {
-        let mut cnt_rows = self.conn.query("SELECT COUNT(*) FROM features WHERE parent_id = ?1", libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-        let cnt_row = cnt_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
-        let count = cnt_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut cnt_rows = self
+            .conn
+            .query(
+                "SELECT COUNT(*) FROM features WHERE parent_id = ?1",
+                libsql::params![feature_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let cnt_row = cnt_rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+        let count = cnt_row
+            .get::<i64>(0)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(count == 0)
     }
 
@@ -770,7 +887,11 @@ impl Database {
         let sql =
             format!("SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})");
 
-        let mut rows = self.conn.query(&sql, ()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut rows = self
+            .conn
+            .query(&sql, ())
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Group child states by parent_id
         let mut children_states: std::collections::HashMap<FeatureId, Vec<FeatureState>> =
@@ -801,10 +922,20 @@ impl Database {
             return Ok(());
         }
 
-        let mut rows = self.conn.query("SELECT state FROM features WHERE parent_id = ?1", libsql::params![feature.id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT state FROM features WHERE parent_id = ?1",
+                libsql::params![feature.id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let mut states = Vec::new();
         while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
-            states.push(FeatureState::from_str(&row_get_str(&row, "state")).unwrap_or(FeatureState::Proposed));
+            states.push(
+                FeatureState::from_str(&row_get_str(&row, "state"))
+                    .unwrap_or(FeatureState::Proposed),
+            );
         }
 
         if !states.is_empty() {
@@ -834,7 +965,11 @@ impl Database {
         let sql =
             format!("SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})");
 
-        let mut rows = self.conn.query(&sql, ()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut rows = self
+            .conn
+            .query(&sql, ())
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let mut children_states: std::collections::HashMap<FeatureId, Vec<FeatureState>> =
             std::collections::HashMap::new();
@@ -895,7 +1030,9 @@ impl Database {
                     libsql::params![pid.to_string(), search_pattern.as_str(), limit_val, num],
                 ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
                 let mut v = Vec::new();
-                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary(&row)?); }
+                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                    v.push(row_to_feature_summary(&row)?);
+                }
                 v
             }
             (Some(pid), None) => {
@@ -911,7 +1048,9 @@ impl Database {
                     libsql::params![pid.to_string(), search_pattern.as_str(), limit_val],
                 ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
                 let mut v = Vec::new();
-                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary(&row)?); }
+                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                    v.push(row_to_feature_summary(&row)?);
+                }
                 v
             }
             (None, Some(num)) => {
@@ -931,7 +1070,9 @@ impl Database {
                     libsql::params![search_pattern.as_str(), limit_val, num],
                 ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
                 let mut v = Vec::new();
-                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary(&row)?); }
+                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                    v.push(row_to_feature_summary(&row)?);
+                }
                 v
             }
             (None, None) => {
@@ -947,7 +1088,9 @@ impl Database {
                     libsql::params![search_pattern.as_str(), limit_val],
                 ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
                 let mut v = Vec::new();
-                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary(&row)?); }
+                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                    v.push(row_to_feature_summary(&row)?);
+                }
                 v
             }
         };
@@ -960,7 +1103,7 @@ impl Database {
     /// Full-text search over feature title and details using FTS5.
     ///
     /// Returns features ranked by FTS5 relevance score. Falls back to LIKE-based
-    /// search if the FTS5 table doesn't exist (e.g., PostgreSQL or pre-migration databases).
+    /// search if the FTS5 table doesn't exist (e.g., pre-migration databases).
     pub async fn search_features_fts(
         &self,
         query: &str,
@@ -977,9 +1120,11 @@ impl Database {
             .collect::<Vec<_>>()
             .join(" OR ");
 
-        let rows = match (project_id, state) {
+        // Process rows inline to avoid libsql Row lifetime issues — rows must be
+        // converted to domain types while the Rows iterator is still alive.
+        let result = match (project_id, state) {
             (Some(pid), Some(st)) => {
-                match self.conn.query(
+                self.query_fts_summaries(
                     "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                      FROM features f
                      INNER JOIN features_fts fts ON f.rowid = fts.rowid
@@ -989,13 +1134,11 @@ impl Database {
                      ORDER BY fts.rank
                      LIMIT ?2",
                     libsql::params![fts_query.as_str(), limit_val, pid.to_string(), st],
-                ).await {
-                    Ok(mut r) => { let mut v = Vec::new(); while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row); } Ok(v) }
-                    Err(e) => Err(e)
-                }
+                )
+                .await
             }
             (Some(pid), None) => {
-                match self.conn.query(
+                self.query_fts_summaries(
                     "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                      FROM features f
                      INNER JOIN features_fts fts ON f.rowid = fts.rowid
@@ -1004,13 +1147,11 @@ impl Database {
                      ORDER BY fts.rank
                      LIMIT ?2",
                     libsql::params![fts_query.as_str(), limit_val, pid.to_string()],
-                ).await {
-                    Ok(mut r) => { let mut v = Vec::new(); while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row); } Ok(v) }
-                    Err(e) => Err(e)
-                }
+                )
+                .await
             }
             (None, Some(st)) => {
-                match self.conn.query(
+                self.query_fts_summaries(
                     "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                      FROM features f
                      INNER JOIN features_fts fts ON f.rowid = fts.rowid
@@ -1019,13 +1160,11 @@ impl Database {
                      ORDER BY fts.rank
                      LIMIT ?2",
                     libsql::params![fts_query.as_str(), limit_val, st],
-                ).await {
-                    Ok(mut r) => { let mut v = Vec::new(); while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row); } Ok(v) }
-                    Err(e) => Err(e)
-                }
+                )
+                .await
             }
             (None, None) => {
-                match self.conn.query(
+                self.query_fts_summaries(
                     "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                      FROM features f
                      INNER JOIN features_fts fts ON f.rowid = fts.rowid
@@ -1033,26 +1172,36 @@ impl Database {
                      ORDER BY fts.rank
                      LIMIT ?2",
                     libsql::params![fts_query.as_str(), limit_val],
-                ).await {
-                    Ok(mut r) => { let mut v = Vec::new(); while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row); } Ok(v) }
-                    Err(e) => Err(e)
-                }
+                )
+                .await
             }
         };
 
-        // Fall back to LIKE search if FTS5 table doesn't exist
-        let fts_rows = match rows {
-            Ok(r) => r,
-            Err(_) => {
-                return self.search_features(query, project_id, limit).await;
+        match result {
+            Ok(mut summaries) => {
+                self.resolve_derived_states_summary(&mut summaries).await?;
+                Ok(summaries)
             }
-        };
-
-        let mut summaries: Vec<FeatureSummary> = Vec::new();
-        for row in &fts_rows {
-            summaries.push(row_to_feature_summary(row)?);
+            // Fall back to LIKE search if FTS5 table doesn't exist
+            Err(_) => self.search_features(query, project_id, limit).await,
         }
-        self.resolve_derived_states_summary(&mut summaries).await?;
+    }
+
+    /// Execute an FTS query and convert rows to summaries inline.
+    async fn query_fts_summaries(
+        &self,
+        sql: &str,
+        params: impl libsql::params::IntoParams,
+    ) -> Result<Vec<FeatureSummary>> {
+        let mut rows = self
+            .conn
+            .query(sql, params)
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut summaries = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            summaries.push(row_to_feature_summary(&row)?);
+        }
         Ok(summaries)
     }
 
@@ -1138,7 +1287,14 @@ impl Database {
 
         // Get parent
         let parent = if let Some(parent_id) = feature.parent_id {
-            let mut pr = self.conn.query("SELECT id, title, state FROM features WHERE id = ?1", libsql::params![parent_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            let mut pr = self
+                .conn
+                .query(
+                    "SELECT id, title, state FROM features WHERE id = ?1",
+                    libsql::params![parent_id.to_string()],
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
             match pr.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
                 Some(row) => Some(row_to_feature_summary_context(&row)?),
                 None => None,
@@ -1154,7 +1310,9 @@ impl Database {
                 libsql::params![parent_id.to_string(), id.to_string()],
             ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
             let mut v = Vec::new();
-            while let Some(row) = sr.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary_context(&row)?); }
+            while let Some(row) = sr.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                v.push(row_to_feature_summary_context(&row)?);
+            }
             v
         } else {
             let mut sr = self.conn.query(
@@ -1162,7 +1320,9 @@ impl Database {
                 libsql::params![feature.project_id.to_string(), id.to_string()],
             ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
             let mut v = Vec::new();
-            while let Some(row) = sr.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary_context(&row)?); }
+            while let Some(row) = sr.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                v.push(row_to_feature_summary_context(&row)?);
+            }
             v
         };
 
@@ -1248,7 +1408,14 @@ impl Database {
                      f.priority ASC, f.created_at ASC
                  LIMIT 1"
             );
-            let mut r = self.conn.query(&sql, libsql::params![project_id.to_string(), vid.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            let mut r = self
+                .conn
+                .query(
+                    &sql,
+                    libsql::params![project_id.to_string(), vid.to_string()],
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
             r.next().await.map_err(|e| anyhow::anyhow!("{}", e))?
         } else {
             let sql = format!(
@@ -1273,7 +1440,11 @@ impl Database {
                     f.created_at ASC
                 LIMIT 1"
             );
-            let mut r = self.conn.query(&sql, libsql::params![project_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            let mut r = self
+                .conn
+                .query(&sql, libsql::params![project_id.to_string()])
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
             r.next().await.map_err(|e| anyhow::anyhow!("{}", e))?
         };
 
@@ -1291,7 +1462,13 @@ impl Database {
         blocker_ids: &[FeatureId],
     ) -> Result<()> {
         // Clear existing
-        self.conn.execute("DELETE FROM feature_blockers WHERE feature_id = ?1", libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        self.conn
+            .execute(
+                "DELETE FROM feature_blockers WHERE feature_id = ?1",
+                libsql::params![feature_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let now = Utc::now().to_rfc3339();
         for blocker_id in blocker_ids {
@@ -1306,7 +1483,13 @@ impl Database {
 
     /// Clear all blocker entries for a feature.
     pub async fn clear_feature_blockers(&self, feature_id: FeatureId) -> Result<()> {
-        self.conn.execute("DELETE FROM feature_blockers WHERE feature_id = ?1", libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        self.conn
+            .execute(
+                "DELETE FROM feature_blockers WHERE feature_id = ?1",
+                libsql::params![feature_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(())
     }
 
@@ -1317,7 +1500,11 @@ impl Database {
                    JOIN features f ON f.id = fb.blocker_feature_id
                    WHERE fb.feature_id = ?1
                    ORDER BY f.priority, f.title";
-        let mut rows = self.conn.query(sql, libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut rows = self
+            .conn
+            .query(sql, libsql::params![feature_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let mut results = Vec::new();
         while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
             results.push(row_to_feature_summary(&row)?);
@@ -1336,7 +1523,11 @@ impl Database {
                    JOIN features f ON f.id = fb.feature_id
                    WHERE fb.blocker_feature_id = ?1
                    ORDER BY f.priority, f.title";
-        let mut rows = self.conn.query(sql, libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut rows = self
+            .conn
+            .query(sql, libsql::params![feature_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let mut results = Vec::new();
         while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
             results.push(row_to_feature_summary(&row)?);
@@ -1352,10 +1543,14 @@ impl Database {
         implemented_id: FeatureId,
     ) -> Result<Vec<FeatureId>> {
         // Find all features that are blocked by the newly-implemented feature
-        let mut bf_rows = self.conn.query(
-            "SELECT feature_id FROM feature_blockers WHERE blocker_feature_id = ?1",
-            libsql::params![implemented_id.to_string()],
-        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut bf_rows = self
+            .conn
+            .query(
+                "SELECT feature_id FROM feature_blockers WHERE blocker_feature_id = ?1",
+                libsql::params![implemented_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         let mut blocked_feature_ids: Vec<String> = Vec::new();
         while let Some(row) = bf_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
             blocked_feature_ids.push(row.get::<String>(0).map_err(|e| anyhow::anyhow!("{}", e))?);
@@ -1366,21 +1561,37 @@ impl Database {
 
         for blocked_id_str in blocked_feature_ids {
             // Check if ALL blockers of this feature are now implemented
-            let mut rem_rows = self.conn.query(
-                "SELECT COUNT(*) FROM feature_blockers fb
+            let mut rem_rows = self
+                .conn
+                .query(
+                    "SELECT COUNT(*) FROM feature_blockers fb
                  JOIN features f ON f.id = fb.blocker_feature_id
                  WHERE fb.feature_id = ?1 AND f.state != 'implemented'",
-                libsql::params![blocked_id_str.as_str()],
-            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-            let rem_row = rem_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
-            let remaining = rem_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))?;
+                    libsql::params![blocked_id_str.as_str()],
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let rem_row = rem_rows
+                .next()
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?
+                .ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+            let remaining = rem_row
+                .get::<i64>(0)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             if remaining == 0 {
                 // All blockers implemented — transition to proposed
                 self.conn.execute("UPDATE features SET state = 'proposed', updated_at = ?1 WHERE id = ?2 AND state = 'blocked'", libsql::params![now.as_str(), blocked_id_str.as_str()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
                 // Clear blocker entries
-                self.conn.execute("DELETE FROM feature_blockers WHERE feature_id = ?1", libsql::params![blocked_id_str.as_str()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                self.conn
+                    .execute(
+                        "DELETE FROM feature_blockers WHERE feature_id = ?1",
+                        libsql::params![blocked_id_str.as_str()],
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
 
                 let feature_id: FeatureId = parse_id(blocked_id_str)?;
                 unblocked.push(feature_id);
@@ -1396,8 +1607,10 @@ impl Database {
         &self,
         feature_id: FeatureId,
     ) -> Result<Option<(FeatureId, String)>> {
-        let mut anc_rows = self.conn.query(
-            "WITH RECURSIVE ancestors AS (
+        let mut anc_rows = self
+            .conn
+            .query(
+                "WITH RECURSIVE ancestors AS (
                 SELECT parent_id FROM features WHERE id = ?1
                 UNION ALL
                 SELECT f.parent_id FROM features f
@@ -1407,9 +1620,14 @@ impl Database {
             INNER JOIN ancestors a ON f.id = a.parent_id
             WHERE f.state = 'blocked'
             LIMIT 1",
-            libsql::params![feature_id.to_string()],
-        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-        let row = anc_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                libsql::params![feature_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let row = anc_rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         match row {
             Some(row) => {
@@ -1467,7 +1685,11 @@ impl Database {
             let now = Utc::now();
             let root_feature_id = FeatureId::new();
 
-            let tx = self.conn.transaction().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            let tx = self
+                .conn
+                .transaction()
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             // Create root feature
             tx.execute(
@@ -1493,8 +1715,14 @@ impl Database {
             // Update project
             tx.execute(
                 "UPDATE projects SET root_feature_id = ?1, updated_at = ?2 WHERE id = ?3",
-                libsql::params![root_feature_id.to_string(), now.to_rfc3339(), project.id.to_string()],
-            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                libsql::params![
+                    root_feature_id.to_string(),
+                    now.to_rfc3339(),
+                    project.id.to_string()
+                ],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             tx.commit().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -1544,7 +1772,10 @@ impl Database {
     ) -> Result<Feature> {
         // Use BEGIN IMMEDIATE to acquire write lock immediately,
         // preventing concurrent readers from proceeding with stale data.
-        self.conn.execute("BEGIN IMMEDIATE", ()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        self.conn
+            .execute("BEGIN IMMEDIATE", ())
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Fetch the feature within the transaction
         let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id = ?1");
@@ -1637,7 +1868,10 @@ impl Database {
         }
 
         // Commit the transaction
-        self.conn.execute("COMMIT", ()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        self.conn
+            .execute("COMMIT", ())
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Emit event
         let _ = self.events.send(FeatureEvent::Updated {

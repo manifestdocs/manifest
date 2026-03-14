@@ -292,15 +292,12 @@ pub(crate) fn row_to_feature(row: &libsql::Row) -> Result<Feature> {
     Ok(Feature {
         id: parse_id(get_str(row, "id"))?,
         project_id: parse_id(get_str(row, "project_id"))?,
-        parent_id: get_opt_str(row, "parent_id")
-            .map(parse_id)
-            .transpose()?,
+        parent_id: get_opt_str(row, "parent_id").map(parse_id).transpose()?,
         title: get_str(row, "title"),
         details: get_opt_str(row, "details"),
         desired_details: get_opt_str(row, "desired_details"),
         details_summary: get_opt_str(row, "details_summary"),
-        state: FeatureState::from_str(&get_str(row, "state"))
-            .unwrap_or(FeatureState::Proposed),
+        state: FeatureState::from_str(&get_str(row, "state")).unwrap_or(FeatureState::Proposed),
         priority: get_i32(row, "priority"),
         feature_number: get_opt_i32(row, "feature_number"),
         target_version_id: get_opt_str(row, "target_version_id")
@@ -308,11 +305,9 @@ pub(crate) fn row_to_feature(row: &libsql::Row) -> Result<Feature> {
             .transpose()?,
         verification_result: get_opt_str(row, "verification_result")
             .and_then(|s| serde_json::from_str(&s).ok()),
-        verified_at: get_opt_str(row, "verified_at")
-            .and_then(|s| parse_datetime(s).ok()),
+        verified_at: get_opt_str(row, "verified_at").and_then(|s| parse_datetime(s).ok()),
         claimed_by: get_opt_str(row, "claimed_by"),
-        claimed_at: get_opt_str(row, "claimed_at")
-            .and_then(|s| parse_datetime(s).ok()),
+        claimed_at: get_opt_str(row, "claimed_at").and_then(|s| parse_datetime(s).ok()),
         claim_metadata: get_opt_str(row, "claim_metadata"),
         created_at: parse_datetime(get_str(row, "created_at"))?,
         updated_at: parse_datetime(get_str(row, "updated_at"))?,
@@ -324,12 +319,9 @@ pub(crate) fn row_to_feature_summary(row: &libsql::Row) -> Result<FeatureSummary
     Ok(FeatureSummary {
         id: parse_id(get_str(row, "id"))?,
         project_id: parse_id(get_str(row, "project_id"))?,
-        parent_id: get_opt_str(row, "parent_id")
-            .map(parse_id)
-            .transpose()?,
+        parent_id: get_opt_str(row, "parent_id").map(parse_id).transpose()?,
         title: get_str(row, "title"),
-        state: FeatureState::from_str(&get_str(row, "state"))
-            .unwrap_or(FeatureState::Proposed),
+        state: FeatureState::from_str(&get_str(row, "state")).unwrap_or(FeatureState::Proposed),
         priority: get_i32(row, "priority"),
         feature_number: get_opt_i32(row, "feature_number"),
         target_version_id: get_opt_str(row, "target_version_id")
@@ -343,8 +335,7 @@ pub(crate) fn row_to_feature_summary_context(row: &libsql::Row) -> Result<Featur
     Ok(FeatureSummaryContext {
         id: parse_id(get_str(row, "id"))?,
         title: get_str(row, "title"),
-        state: FeatureState::from_str(&get_str(row, "state"))
-            .unwrap_or(FeatureState::Proposed),
+        state: FeatureState::from_str(&get_str(row, "state")).unwrap_or(FeatureState::Proposed),
     })
 }
 
@@ -356,9 +347,7 @@ pub(crate) fn row_to_feature_history(row: &libsql::Row) -> Result<FeatureHistory
     Ok(FeatureHistory {
         id: parse_id(get_str(row, "id"))?,
         feature_id: parse_id(get_str(row, "feature_id"))?,
-        version_id: get_opt_str(row, "version_id")
-            .map(parse_id)
-            .transpose()?,
+        version_id: get_opt_str(row, "version_id").map(parse_id).transpose()?,
         details,
         created_at: parse_datetime(get_str(row, "created_at"))?,
     })
@@ -375,9 +364,7 @@ pub(crate) fn row_to_project_history_entry(row: &libsql::Row) -> Result<ProjectH
         feature_title: get_str(row, "title"),
         feature_state: FeatureState::from_str(&get_str(row, "state"))
             .unwrap_or(FeatureState::Proposed),
-        version_id: get_opt_str(row, "version_id")
-            .map(parse_id)
-            .transpose()?,
+        version_id: get_opt_str(row, "version_id").map(parse_id).transpose()?,
         version_name: get_opt_str(row, "name"),
         summary: details.summary,
         commits: details.commits,
@@ -403,8 +390,7 @@ pub(crate) fn row_to_project_remote(row: &libsql::Row) -> Result<ProjectRemote> 
     Ok(ProjectRemote {
         project_id: parse_id(get_str(row, "project_id"))?,
         remote_id: parse_id(get_str(row, "remote_id"))?,
-        sync_state: SyncState::from_str(&get_str(row, "sync_state"))
-            .unwrap_or(SyncState::Active),
+        sync_state: SyncState::from_str(&get_str(row, "sync_state")).unwrap_or(SyncState::Active),
         last_synced_at: get_opt_str(row, "last_synced_at")
             .map(parse_datetime)
             .transpose()?,
@@ -428,9 +414,7 @@ pub(crate) fn row_to_proof(row: &libsql::Row) -> Result<Proof> {
     Ok(Proof {
         id: parse_id(get_str(row, "id"))?,
         feature_id: parse_id(get_str(row, "feature_id"))?,
-        history_id: get_opt_str(row, "history_id")
-            .map(parse_id)
-            .transpose()?,
+        history_id: get_opt_str(row, "history_id").map(parse_id).transpose()?,
         command: get_str(row, "command"),
         exit_code: get_i32(row, "exit_code"),
         output: get_opt_str(row, "output"),

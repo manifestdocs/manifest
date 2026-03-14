@@ -56,7 +56,11 @@ impl Database {
         let id = TemplateId::new();
         let now = Utc::now();
 
-        let tx = self.conn.transaction().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let tx = self
+            .conn
+            .transaction()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // If this template is default, clear existing defaults
         if input.is_default {
@@ -120,7 +124,11 @@ impl Database {
         let content = input.content.unwrap_or(existing.content);
         let is_default = input.is_default.unwrap_or(existing.is_default);
 
-        let tx = self.conn.transaction().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let tx = self
+            .conn
+            .transaction()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // If becoming default, clear other defaults first
         if is_default && !existing.is_default {

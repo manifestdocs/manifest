@@ -238,7 +238,8 @@ impl Database {
             .map_err(|e| anyhow::anyhow!("Failed to get connection: {}", e))?;
 
         // Set SQLite PRAGMAs
-        conn.execute("PRAGMA foreign_keys = ON", ()).await
+        conn.execute("PRAGMA foreign_keys = ON", ())
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to enable foreign keys: {}", e))?;
 
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
@@ -254,11 +255,7 @@ impl Database {
     ///
     /// Reads are served from the local replica file (microsecond latency).
     /// Writes route through the Turso cloud primary.
-    pub async fn open_replica(
-        path: PathBuf,
-        url: String,
-        auth_token: String,
-    ) -> Result<Self> {
+    pub async fn open_replica(path: PathBuf, url: String, auth_token: String) -> Result<Self> {
         let parent = path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Database path has no parent directory"))?;
@@ -281,7 +278,8 @@ impl Database {
             .map_err(|e| anyhow::anyhow!("Failed to get connection: {}", e))?;
 
         // Set SQLite PRAGMAs
-        conn.execute("PRAGMA foreign_keys = ON", ()).await
+        conn.execute("PRAGMA foreign_keys = ON", ())
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to enable foreign keys: {}", e))?;
 
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
@@ -325,9 +323,12 @@ impl Database {
         }
 
         // Check if core tables exist
-        let features_count = self.query_scalar_i64(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features'"
-        ).await.unwrap_or(0);
+        let features_count = self
+            .query_scalar_i64(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features'",
+            )
+            .await
+            .unwrap_or(0);
 
         if features_count > 0 {
             tracing::info!("Detected existing database schema, running incremental migrations");
@@ -379,20 +380,24 @@ impl Database {
 
         self.conn.execute("PRAGMA foreign_keys = OFF", ()).await?;
 
-        self.conn.execute("ALTER TABLE projects ADD COLUMN slug TEXT", ()).await?;
+        self.conn
+            .execute("ALTER TABLE projects ADD COLUMN slug TEXT", ())
+            .await?;
 
         self.conn.execute(
             "UPDATE projects SET slug = LOWER(REPLACE(REPLACE(REPLACE(REPLACE(name, ' ', '-'), '_', '-'), '.', '-'), '--', '-'))",
             (),
         ).await?;
 
-        self.conn.execute(
-            "UPDATE projects SET slug = slug || '-' || rowid
+        self.conn
+            .execute(
+                "UPDATE projects SET slug = slug || '-' || rowid
              WHERE rowid NOT IN (
                  SELECT MIN(rowid) FROM projects GROUP BY slug
              )",
-            (),
-        ).await?;
+                (),
+            )
+            .await?;
 
         let statements = [
             "DROP TABLE IF EXISTS projects_new",
@@ -429,9 +434,11 @@ impl Database {
 
     /// Migrate 'deprecated' feature state to 'archived'.
     async fn migrate_deprecated_to_archived(&self) -> Result<()> {
-        let schema = self.query_scalar_optional_string(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'"
-        ).await?;
+        let schema = self
+            .query_scalar_optional_string(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
+            )
+            .await?;
 
         let has_deprecated = schema
             .as_ref()
@@ -486,7 +493,10 @@ impl Database {
 
     /// Add default_feature_destination column to projects table if it doesn't exist.
     async fn migrate_add_default_feature_destination(&self) -> Result<()> {
-        if self.has_column("projects", "default_feature_destination").await? {
+        if self
+            .has_column("projects", "default_feature_destination")
+            .await?
+        {
             return Ok(());
         }
         tracing::info!("Adding default_feature_destination column to projects table");
@@ -499,9 +509,11 @@ impl Database {
 
     /// Migrate default_feature_destination from "now" to "next".
     async fn migrate_feature_destination_now_to_next(&self) -> Result<()> {
-        let count = self.query_scalar_i64(
-            "SELECT COUNT(*) FROM projects WHERE default_feature_destination = 'now'"
-        ).await?;
+        let count = self
+            .query_scalar_i64(
+                "SELECT COUNT(*) FROM projects WHERE default_feature_destination = 'now'",
+            )
+            .await?;
         if count == 0 {
             return Ok(());
         }
@@ -519,7 +531,9 @@ impl Database {
             return Ok(());
         }
         tracing::info!("Adding details_summary column to features table");
-        self.conn.execute("ALTER TABLE features ADD COLUMN details_summary TEXT", ()).await?;
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN details_summary TEXT", ())
+            .await?;
         Ok(())
     }
 
@@ -527,15 +541,20 @@ impl Database {
     async fn migrate_add_feature_numbers(&self) -> Result<()> {
         if !self.has_column("projects", "key_prefix").await? {
             tracing::info!("Adding key_prefix column to projects table");
-            self.conn.execute(
-                "ALTER TABLE projects ADD COLUMN key_prefix TEXT NOT NULL DEFAULT ''", ()
-            ).await?;
+            self.conn
+                .execute(
+                    "ALTER TABLE projects ADD COLUMN key_prefix TEXT NOT NULL DEFAULT ''",
+                    (),
+                )
+                .await?;
 
             // Backfill key_prefix from slug
             use helpers::derive_key_prefix;
             let mut rows = self.conn.query("SELECT id, slug FROM projects", ()).await?;
             let mut updates = Vec::new();
-            while let Some(row) = rows.next().await
+            while let Some(row) = rows
+                .next()
+                .await
                 .map_err(|e| anyhow::anyhow!("Failed to fetch row: {}", e))?
             {
                 let id: String = row.get(0).map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -543,17 +562,21 @@ impl Database {
                 updates.push((derive_key_prefix(&slug), id));
             }
             for (prefix, id) in &updates {
-                self.conn.execute(
-                    "UPDATE projects SET key_prefix = ?1 WHERE id = ?2",
-                    libsql::params![prefix.as_str(), id.as_str()],
-                ).await?;
+                self.conn
+                    .execute(
+                        "UPDATE projects SET key_prefix = ?1 WHERE id = ?2",
+                        libsql::params![prefix.as_str(), id.as_str()],
+                    )
+                    .await?;
             }
             tracing::info!("Backfilled key_prefix for {} projects", updates.len());
         }
 
         if !self.has_column("features", "feature_number").await? {
             tracing::info!("Adding feature_number column to features table");
-            self.conn.execute("ALTER TABLE features ADD COLUMN feature_number INTEGER", ()).await?;
+            self.conn
+                .execute("ALTER TABLE features ADD COLUMN feature_number INTEGER", ())
+                .await?;
 
             self.conn.execute(
                 "UPDATE features SET feature_number = (
@@ -620,8 +643,9 @@ impl Database {
             self.conn.execute(sql, ()).await?;
         }
 
-        self.conn.execute(
-            "CREATE TABLE feature_blockers (
+        self.conn
+            .execute(
+                "CREATE TABLE feature_blockers (
                 feature_id TEXT NOT NULL,
                 blocker_feature_id TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -629,8 +653,9 @@ impl Database {
                 FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
                 FOREIGN KEY (blocker_feature_id) REFERENCES features(id) ON DELETE CASCADE
             )",
-            (),
-        ).await?;
+                (),
+            )
+            .await?;
 
         self.conn.execute("PRAGMA foreign_keys = ON", ()).await?;
 
@@ -673,14 +698,16 @@ impl Database {
             return Ok(());
         }
         tracing::info!("Creating project_focus table");
-        self.conn.execute(
-            "CREATE TABLE project_focus (
+        self.conn
+            .execute(
+                "CREATE TABLE project_focus (
                 project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
                 feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
                 updated_at TEXT NOT NULL
             )",
-            (),
-        ).await?;
+                (),
+            )
+            .await?;
         Ok(())
     }
 
@@ -720,8 +747,15 @@ impl Database {
             return Ok(());
         }
         tracing::info!("Adding verification_result and verified_at columns to features table");
-        self.conn.execute("ALTER TABLE features ADD COLUMN verification_result TEXT", ()).await?;
-        self.conn.execute("ALTER TABLE features ADD COLUMN verified_at TEXT", ()).await?;
+        self.conn
+            .execute(
+                "ALTER TABLE features ADD COLUMN verification_result TEXT",
+                (),
+            )
+            .await?;
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN verified_at TEXT", ())
+            .await?;
         Ok(())
     }
 
@@ -731,9 +765,15 @@ impl Database {
             return Ok(());
         }
         tracing::info!("Adding claimed_by, claimed_at, claim_metadata columns to features table");
-        self.conn.execute("ALTER TABLE features ADD COLUMN claimed_by TEXT", ()).await?;
-        self.conn.execute("ALTER TABLE features ADD COLUMN claimed_at TEXT", ()).await?;
-        self.conn.execute("ALTER TABLE features ADD COLUMN claim_metadata TEXT", ()).await?;
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN claimed_by TEXT", ())
+            .await?;
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN claimed_at TEXT", ())
+            .await?;
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN claim_metadata TEXT", ())
+            .await?;
         Ok(())
     }
 
@@ -761,8 +801,18 @@ impl Database {
             )",
             (),
         ).await?;
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_proofs_feature ON proofs(feature_id)", ()).await?;
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_proofs_history ON proofs(history_id)", ()).await?;
+        self.conn
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_proofs_feature ON proofs(feature_id)",
+                (),
+            )
+            .await?;
+        self.conn
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_proofs_history ON proofs(history_id)",
+                (),
+            )
+            .await?;
         Ok(())
     }
 
@@ -772,7 +822,12 @@ impl Database {
             return Ok(());
         }
         tracing::info!("Adding testing_policy column to projects table");
-        self.conn.execute("ALTER TABLE projects ADD COLUMN testing_policy TEXT NOT NULL DEFAULT 'tdd'", ()).await?;
+        self.conn
+            .execute(
+                "ALTER TABLE projects ADD COLUMN testing_policy TEXT NOT NULL DEFAULT 'tdd'",
+                (),
+            )
+            .await?;
         Ok(())
     }
 
@@ -782,7 +837,9 @@ impl Database {
             return Ok(());
         }
         tracing::info!("Adding test_adapter column to projects table");
-        self.conn.execute("ALTER TABLE projects ADD COLUMN test_adapter TEXT", ()).await?;
+        self.conn
+            .execute("ALTER TABLE projects ADD COLUMN test_adapter TEXT", ())
+            .await?;
         Ok(())
     }
 
@@ -811,14 +868,19 @@ impl Database {
 
         // Insert default template for any project that doesn't have one yet
         let now = chrono::Utc::now().to_rfc3339();
-        let mut rows = self.conn.query(
-            "SELECT p.id FROM projects p
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT p.id FROM projects p
              WHERE NOT EXISTS (SELECT 1 FROM spec_templates st WHERE st.project_id = p.id)",
-            (),
-        ).await?;
+                (),
+            )
+            .await?;
 
         let mut project_ids = Vec::new();
-        while let Some(row) = rows.next().await
+        while let Some(row) = rows
+            .next()
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to fetch row: {}", e))?
         {
             let id: String = row.get(0).map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -844,28 +906,36 @@ impl Database {
             ).await?;
         }
 
-        tracing::info!("Created default spec templates for {} projects", project_ids.len());
+        tracing::info!(
+            "Created default spec templates for {} projects",
+            project_ids.len()
+        );
         Ok(())
     }
 
     /// Add FTS5 full-text search index on features table.
     async fn migrate_add_features_fts(&self) -> Result<()> {
-        let has_fts = self.query_scalar_i64(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features_fts'"
-        ).await.unwrap_or(0);
+        let has_fts = self
+            .query_scalar_i64(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features_fts'",
+            )
+            .await
+            .unwrap_or(0);
 
         if has_fts > 0 {
             return Ok(());
         }
 
-        self.conn.execute(
-            "CREATE VIRTUAL TABLE features_fts USING fts5(
+        self.conn
+            .execute(
+                "CREATE VIRTUAL TABLE features_fts USING fts5(
                 title, details,
                 content=features,
                 content_rowid=rowid
             )",
-            (),
-        ).await?;
+                (),
+            )
+            .await?;
 
         self.conn.execute(
             "CREATE TRIGGER IF NOT EXISTS features_fts_insert AFTER INSERT ON features BEGIN
@@ -889,11 +959,13 @@ impl Database {
             (),
         ).await?;
 
-        self.conn.execute(
-            "INSERT INTO features_fts(rowid, title, details)
+        self.conn
+            .execute(
+                "INSERT INTO features_fts(rowid, title, details)
              SELECT rowid, title, COALESCE(details, '') FROM features",
-            (),
-        ).await?;
+                (),
+            )
+            .await?;
 
         tracing::info!("Created features_fts full-text search index");
         Ok(())
@@ -904,7 +976,9 @@ impl Database {
         if self.has_column("projects", "context_budget").await? {
             return Ok(());
         }
-        self.conn.execute("ALTER TABLE projects ADD COLUMN context_budget INTEGER", ()).await?;
+        self.conn
+            .execute("ALTER TABLE projects ADD COLUMN context_budget INTEGER", ())
+            .await?;
         tracing::info!("Added context_budget column to projects");
         Ok(())
     }
@@ -915,8 +989,9 @@ impl Database {
             return Ok(());
         }
 
-        self.conn.execute(
-            "CREATE TABLE remotes (
+        self.conn
+            .execute(
+                "CREATE TABLE remotes (
                 id TEXT PRIMARY KEY,
                 name TEXT UNIQUE NOT NULL,
                 provider TEXT NOT NULL DEFAULT 'turso',
@@ -927,19 +1002,22 @@ impl Database {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )",
-            (),
-        ).await?;
+                (),
+            )
+            .await?;
 
-        self.conn.execute(
-            "CREATE TABLE project_remotes (
+        self.conn
+            .execute(
+                "CREATE TABLE project_remotes (
                 project_id TEXT NOT NULL REFERENCES projects(id),
                 remote_id TEXT NOT NULL REFERENCES remotes(id) ON DELETE CASCADE,
                 sync_state TEXT NOT NULL DEFAULT 'active',
                 last_synced_at TEXT,
                 PRIMARY KEY (project_id, remote_id)
             )",
-            (),
-        ).await?;
+                (),
+            )
+            .await?;
 
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_project_remotes_remote ON project_remotes(remote_id)",
@@ -956,8 +1034,14 @@ impl Database {
             return Ok(());
         }
 
-        for col in ["state_updated_at", "details_updated_at", "parent_id_updated_at"] {
-            self.conn.execute(&format!("ALTER TABLE features ADD COLUMN {col} TEXT"), ()).await?;
+        for col in [
+            "state_updated_at",
+            "details_updated_at",
+            "parent_id_updated_at",
+        ] {
+            self.conn
+                .execute(&format!("ALTER TABLE features ADD COLUMN {col} TEXT"), ())
+                .await?;
         }
 
         tracing::info!("Added field-level timestamp columns to features table");
@@ -970,8 +1054,9 @@ impl Database {
             return Ok(());
         }
 
-        self.conn.execute(
-            "CREATE TABLE offline_queue (
+        self.conn
+            .execute(
+                "CREATE TABLE offline_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id TEXT NOT NULL,
                 remote_id TEXT NOT NULL,
@@ -981,13 +1066,16 @@ impl Database {
                 payload TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )",
-            (),
-        ).await?;
+                (),
+            )
+            .await?;
 
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_offline_queue_remote ON offline_queue(remote_id)",
-            (),
-        ).await?;
+        self.conn
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_offline_queue_remote ON offline_queue(remote_id)",
+                (),
+            )
+            .await?;
 
         tracing::info!("Added offline_queue table");
         Ok(())
@@ -1009,9 +1097,12 @@ impl Database {
 
     /// Check if a column exists on a table.
     async fn has_column(&self, table_name: &str, column_name: &str) -> Result<bool> {
-        let schema = self.query_scalar_optional_string(
-            &format!("SELECT sql FROM sqlite_master WHERE type='table' AND name='{}'", table_name)
-        ).await?;
+        let schema = self
+            .query_scalar_optional_string(&format!(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='{}'",
+                table_name
+            ))
+            .await?;
         Ok(schema
             .as_ref()
             .map(|s| s.to_lowercase().contains(column_name))
@@ -1020,12 +1111,18 @@ impl Database {
 
     /// Execute a query that returns a single i64 scalar.
     pub(crate) async fn query_scalar_i64(&self, sql: &str) -> Result<i64> {
-        let mut rows = self.conn.query(sql, ()).await
+        let mut rows = self
+            .conn
+            .query(sql, ())
+            .await
             .map_err(|e| anyhow::anyhow!("Query failed: {}", e))?;
-        if let Some(row) = rows.next().await
+        if let Some(row) = rows
+            .next()
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to fetch row: {}", e))?
         {
-            row.get::<i64>(0).map_err(|e| anyhow::anyhow!("Failed to get value: {}", e))
+            row.get::<i64>(0)
+                .map_err(|e| anyhow::anyhow!("Failed to get value: {}", e))
         } else {
             Ok(0)
         }
@@ -1033,12 +1130,19 @@ impl Database {
 
     /// Execute a query that returns an optional string scalar.
     pub(crate) async fn query_scalar_optional_string(&self, sql: &str) -> Result<Option<String>> {
-        let mut rows = self.conn.query(sql, ()).await
+        let mut rows = self
+            .conn
+            .query(sql, ())
+            .await
             .map_err(|e| anyhow::anyhow!("Query failed: {}", e))?;
-        if let Some(row) = rows.next().await
+        if let Some(row) = rows
+            .next()
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to fetch row: {}", e))?
         {
-            let val: Option<String> = row.get(0).map_err(|e| anyhow::anyhow!("Failed to get value: {}", e))?;
+            let val: Option<String> = row
+                .get(0)
+                .map_err(|e| anyhow::anyhow!("Failed to get value: {}", e))?;
             Ok(val)
         } else {
             Ok(None)
@@ -1084,7 +1188,8 @@ mod tests {
         db.migrate().await.expect("first migration");
         db.migrate().await.expect("second migration (idempotent)");
 
-        let count = db.query_scalar_i64("SELECT COUNT(*) FROM features")
+        let count = db
+            .query_scalar_i64("SELECT COUNT(*) FROM features")
             .await
             .expect("query features table");
         assert_eq!(count, 0);

@@ -239,11 +239,7 @@ impl Database {
                 self.conn
                     .execute(
                         "UPDATE features SET title = ?1, updated_at = ?2 WHERE id = ?3",
-                        libsql::params![
-                            name.clone(),
-                            now.to_rfc3339(),
-                            root_id.to_string()
-                        ],
+                        libsql::params![name.clone(), now.to_rfc3339(), root_id.to_string()],
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -488,11 +484,7 @@ impl Database {
                         "INSERT INTO project_focus (project_id, feature_id, updated_at)
                          VALUES (?1, ?2, ?3)
                          ON CONFLICT (project_id) DO UPDATE SET feature_id = ?2, updated_at = ?3",
-                        libsql::params![
-                            project_id.to_string(),
-                            fid.to_string(),
-                            now.to_rfc3339()
-                        ],
+                        libsql::params![project_id.to_string(), fid.to_string(), now.to_rfc3339()],
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("{}", e))?;

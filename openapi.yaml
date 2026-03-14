@@ -42,6 +42,8 @@ tags:
     description: Multi-project dashboard — aggregated health snapshots for all projects
   - name: Verification
     description: Feature implementation verification
+  - name: Remotes
+    description: Remote backend management (Turso sync)
   - name: Settings
     description: Server configuration management
   - name: Analysis
@@ -1174,6 +1176,28 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /features/{id}/dependents:
+    parameters:
+      - $ref: '#/components/parameters/FeatureId'
+    get:
+      tags: [Features]
+      summary: Get feature dependents
+      description: |
+        Returns the features that are blocked by this feature.
+        These are features that list this feature as a blocker.
+      operationId: getFeatureDependents
+      responses:
+        '200':
+          description: List of dependent features
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FeatureSummary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /features/{id}/blocked-ancestor:
     parameters:
       - $ref: '#/components/parameters/FeatureId'
@@ -1324,6 +1348,97 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Proof'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Remotes
+  # ============================================================
+  /remotes:
+    get:
+      tags: [Remotes]
+      summary: List all configured remotes
+      operationId: listRemotes
+      responses:
+        '200':
+          description: List of remote backends
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Remote'
+    post:
+      tags: [Remotes]
+      summary: Add a new remote backend
+      operationId: createRemote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, url, token]
+              properties:
+                name:
+                  type: string
+                  description: Name for this remote (e.g., "work", "team")
+                url:
+                  type: string
+                  description: Turso database URL
+                token:
+                  type: string
+                  description: Authentication token
+                provider:
+                  type: string
+                  description: Provider type (default "turso")
+      responses:
+        '201':
+          description: Remote created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Remote'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /remotes/{name}/status:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Remote name
+    get:
+      tags: [Remotes]
+      summary: Get sync status for a remote
+      operationId: getRemoteStatus
+      responses:
+        '200':
+          description: Remote sync status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  remote:
+                    $ref: '#/components/schemas/Remote'
+                  projects:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        project_id:
+                          type: string
+                          format: uuid
+                        sync_state:
+                          type: string
+                          enum: [active, paused, orphaned]
+                        last_synced_at:
+                          type: string
+                          format: date-time
+                          nullable: true
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1766,6 +1881,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProjectDirectory'
+
+    # ============================================================
+    # Remote schemas
+    # ============================================================
+    Remote:
+      type: object
+      required: [id, name, provider, url, sync_enabled, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Unique name for this remote (e.g., "work", "team")
+        provider:
+          type: string
+          description: Backend provider type (e.g., "turso")
+        url:
+          type: string
+          description: Remote database URL
+        sync_enabled:
+          type: boolean
+          description: Whether sync is active for this remote
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     # ============================================================
     # Feature schemas

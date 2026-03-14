@@ -1213,3 +1213,100 @@ mod feature_dependents {
         response.assert_status_not_found();
     }
 }
+
+// ============================================================
+// Remotes
+// ============================================================
+
+mod remotes {
+    use super::*;
+
+    #[tokio::test]
+    async fn list_remotes_returns_empty_initially() {
+        let server = setup().await;
+        let response = server.get("/api/v1/remotes").await;
+        response.assert_status_ok();
+        let remotes: Vec<serde_json::Value> = response.json();
+        assert!(remotes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_and_list_remote() {
+        let server = setup().await;
+
+        let response = server
+            .post("/api/v1/remotes")
+            .json(&serde_json::json!({
+                "name": "work",
+                "url": "libsql://test.turso.io",
+                "token": "test-token-123"
+            }))
+            .await;
+
+        response.assert_status(StatusCode::CREATED);
+        let remote: serde_json::Value = response.json();
+        assert_eq!(remote["name"], "work");
+        assert_eq!(remote["provider"], "turso");
+        assert_eq!(remote["url"], "libsql://test.turso.io");
+        assert!(remote["sync_enabled"].as_bool().unwrap());
+
+        // List should return the created remote
+        let response = server.get("/api/v1/remotes").await;
+        let remotes: Vec<serde_json::Value> = response.json();
+        assert_eq!(remotes.len(), 1);
+        assert_eq!(remotes[0]["name"], "work");
+    }
+
+    #[tokio::test]
+    async fn get_remote_status() {
+        let server = setup().await;
+
+        // Create a remote first
+        server
+            .post("/api/v1/remotes")
+            .json(&serde_json::json!({
+                "name": "team",
+                "url": "libsql://team.turso.io",
+                "token": "token-456"
+            }))
+            .await;
+
+        let response = server.get("/api/v1/remotes/team/status").await;
+        response.assert_status_ok();
+        let status: serde_json::Value = response.json();
+        assert_eq!(status["remote"]["name"], "team");
+        assert!(status["projects"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_status_returns_404_for_unknown_remote() {
+        let server = setup().await;
+        let response = server.get("/api/v1/remotes/nonexistent/status").await;
+        response.assert_status_not_found();
+    }
+
+    #[tokio::test]
+    async fn create_remote_rejects_duplicate_name() {
+        let server = setup().await;
+
+        server
+            .post("/api/v1/remotes")
+            .json(&serde_json::json!({
+                "name": "dup",
+                "url": "libsql://a.turso.io",
+                "token": "tok"
+            }))
+            .await;
+
+        let response = server
+            .post("/api/v1/remotes")
+            .json(&serde_json::json!({
+                "name": "dup",
+                "url": "libsql://b.turso.io",
+                "token": "tok2"
+            }))
+            .await;
+
+        response.assert_status(StatusCode::BAD_REQUEST);
+    }
+}
