@@ -7,6 +7,15 @@ confirm=true, creates the features. IMPORTANT: After confirming, (1) use update_
 feature, replacing the full PRD with high-level project context, and (2) create versions with create_version and
 assign features to them with set_feature_version.
 
+ADAPT BY PROJECT CLASSIFICATION (from init_project analysis):
+- Greenfield (commit_count == 0 or file_count < 5): Do NOT offer codebase analysis. Prompt for PRD or description.
+- Large with scoping: Pass the user's chosen scope (git ref or time range) as `since` to generate_feature_tree.
+  If focused on specific directories, run generate_feature_tree per directory.
+- Small/medium or unclassified: Offer all options (paste PRD, describe, or analyze codebase).
+
+VERSIONS: Call list_versions first. If versions already exist (e.g., from init_project setup), use them rather than
+creating duplicates.
+
 BOOTSTRAPPING EXISTING PROJECTS: Each feature can include an optional state field. Set state to 'implemented' for
 features that already exist in the codebase (e.g., detected by generate_feature_tree). These features are created
 directly in the implemented state, skipping the prove/complete cycle. The ideal bootstrap flow is:

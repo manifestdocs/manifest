@@ -17,6 +17,7 @@ mod version_guard_rails {
             .create_version(
                 project_id,
                 CreateVersionInput {
+                    id: None,
                     name: "v1.0.0".to_string(),
                     description: None,
                 },
@@ -54,6 +55,7 @@ mod version_guard_rails {
                 .create_version(
                     project.id,
                     CreateVersionInput {
+                        id: None,
                         name: name.to_string(),
                         description: None,
                     },
@@ -85,6 +87,7 @@ mod version_guard_rails {
                 .create_version(
                     project.id,
                     CreateVersionInput {
+                        id: None,
                         name: name.to_string(),
                         description: None,
                     },
@@ -109,6 +112,7 @@ mod version_guard_rails {
             db.create_version(
                 project.id,
                 CreateVersionInput {
+                    id: None,
                     name: format!("0.{}.0", i),
                     description: None,
                 },
@@ -121,6 +125,7 @@ mod version_guard_rails {
             .create_version(
                 project.id,
                 CreateVersionInput {
+                    id: None,
                     name: "0.7.0".to_string(),
                     description: None,
                 },
@@ -222,6 +227,7 @@ mod version_guard_rails {
             .create_version(
                 project.id,
                 CreateVersionInput {
+                    id: None,
                     name: "v2.0.0".to_string(),
                     description: None,
                 },

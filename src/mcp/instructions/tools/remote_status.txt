@@ -1,0 +1,2 @@
+DIAGNOSE: Show sync health for a named remote backend. Returns connection status, linked projects, sync state
+(active/paused/orphaned), and last sync timestamp. Use for diagnosing sync issues or verifying connectivity.

@@ -1,0 +1,3 @@
+SETUP: Add a new Turso remote backend for syncing features across machines and teams. Requires a name (e.g.,
+'work', 'team'), Turso database URL, and authentication token. For CI environments, use environment variables:
+manifest remote add ci --url $MANIFEST_TURSO_URL --token $MANIFEST_TURSO_TOKEN

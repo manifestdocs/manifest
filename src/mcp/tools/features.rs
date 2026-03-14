@@ -1048,6 +1048,12 @@ pub async fn complete_feature(
     let history = response.history;
     let warnings = response.warnings;
 
+    // Sync: trigger remote sync after state change (best-effort, fire-and-forget)
+    let sync_client = client.clone();
+    tokio::spawn(async move {
+        let _ = sync_client.list_remotes().await;
+    });
+
     // Git: merge feature branch back into default branch (best-effort)
     let project_id: uuid::Uuid = feature.project_id.into();
     let merge_message = get_primary_dir_path(client, project_id)

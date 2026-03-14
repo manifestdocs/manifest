@@ -73,15 +73,18 @@ pub async fn create_project(
     State(db): State<Database>,
     ValidatedJson(input): ValidatedJson<CreateProjectInput>,
 ) -> Result<(StatusCode, Json<Project>), ApiError> {
+    let skip_versions = input.skip_default_versions;
     let project = db.create_project(input).await.map_err(internal_error)?;
 
     // Bootstrap initial versions so agents and the web UI have versions to target
-    if let Err(e) = db.ensure_minimum_versions(project.id, 4).await {
-        tracing::warn!(
-            project_id = %project.id,
-            error = %e,
-            "Failed to ensure minimum versions for new project"
-        );
+    if !skip_versions {
+        if let Err(e) = db.ensure_minimum_versions(project.id, 4).await {
+            tracing::warn!(
+                project_id = %project.id,
+                error = %e,
+                "Failed to ensure minimum versions for new project"
+            );
+        }
     }
 
     Ok((StatusCode::CREATED, Json(project)))

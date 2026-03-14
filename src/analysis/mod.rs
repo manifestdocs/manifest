@@ -10,6 +10,7 @@ mod parsers;
 mod scanner;
 
 use std::path::Path;
+use std::process::Command;
 
 use crate::mcp::{
     DirectorySignal, DocumentationContent, FeatureHint, ModuleSignal, ProjectAnalysis, ProjectType,
@@ -36,6 +37,9 @@ pub fn analyze(root: &Path, include_docs: bool, max_depth: u32) -> ProjectAnalys
     };
 
     let hints = generate_feature_hints(root, &directories, &modules, &project_type);
+    let file_count = count_git_files(root);
+    let commit_count = count_git_commits(root);
+    let (has_subprojects, subproject_paths) = detect_subprojects(root);
 
     ProjectAnalysis {
         name,
@@ -46,7 +50,130 @@ pub fn analyze(root: &Path, include_docs: bool, max_depth: u32) -> ProjectAnalys
         modules,
         documentation,
         hints,
+        file_count,
+        commit_count,
+        has_subprojects,
+        subproject_paths,
     }
+}
+
+/// Count tracked files via `git ls-files`. Returns 0 if not a git repo.
+fn count_git_files(root: &Path) -> u32 {
+    Command::new("git")
+        .args(["ls-files"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().count() as u32)
+        .unwrap_or(0)
+}
+
+/// Count git commits on current branch. Returns 0 if not a git repo.
+fn count_git_commits(root: &Path) -> u32 {
+    Command::new("git")
+        .args(["rev-list", "--count", "HEAD"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .parse::<u32>()
+                .ok()
+        })
+        .unwrap_or(0)
+}
+
+/// Detect subprojects by scanning for build manifests at depth > 0.
+///
+/// Returns `(true, paths)` if 2+ manifest files found at different directory levels,
+/// indicating a monorepo structure.
+fn detect_subprojects(root: &Path) -> (bool, Vec<String>) {
+    use std::collections::HashSet;
+
+    let skip_dirs: HashSet<&str> = ["node_modules", "target", ".git", "vendor", "dist", "build"]
+        .into_iter()
+        .collect();
+
+    let mut subproject_roots: Vec<String> = Vec::new();
+
+    detect_subprojects_walk(root, root, 0, 3, &skip_dirs, &mut subproject_roots);
+
+    let has = subproject_roots.len() >= 2;
+    (has, subproject_roots)
+}
+
+fn detect_subprojects_walk(
+    root: &Path,
+    dir: &Path,
+    depth: u32,
+    max_depth: u32,
+    skip_dirs: &std::collections::HashSet<&str>,
+    results: &mut Vec<String>,
+) {
+    if depth > max_depth {
+        return;
+    }
+
+    // Only check depth > 0 (skip root-level manifests)
+    if depth > 0 {
+        let is_subproject = is_cargo_workspace_member(dir)
+            || has_package_json_workspaces(dir)
+            || dir.join("go.mod").exists()
+            || dir.join("pyproject.toml").exists();
+
+        if is_subproject {
+            if let Ok(rel) = dir.strip_prefix(root) {
+                results.push(rel.to_string_lossy().to_string());
+            }
+            return; // Don't recurse into subprojects
+        }
+    }
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with('.') || skip_dirs.contains(name_str.as_ref()) {
+            continue;
+        }
+        detect_subprojects_walk(root, &path, depth + 1, max_depth, skip_dirs, results);
+    }
+}
+
+/// Check if a directory has its own Cargo.toml (not a workspace root).
+fn is_cargo_workspace_member(dir: &Path) -> bool {
+    let cargo_toml = dir.join("Cargo.toml");
+    if !cargo_toml.exists() {
+        return false;
+    }
+    // It's a subproject if it has Cargo.toml but is NOT a workspace root
+    if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
+        return !content.contains("[workspace]");
+    }
+    false
+}
+
+/// Check if a directory has package.json (but not one with "workspaces" — that's a workspace root).
+fn has_package_json_workspaces(dir: &Path) -> bool {
+    let pkg = dir.join("package.json");
+    if !pkg.exists() {
+        return false;
+    }
+    if let Ok(content) = std::fs::read_to_string(&pkg) {
+        // It's a subproject if it has package.json without "workspaces"
+        return !content.contains("\"workspaces\"");
+    }
+    false
 }
 
 /// Read documentation files.

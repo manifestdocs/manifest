@@ -163,11 +163,13 @@ mod blocked_features {
         // Create a second project with a feature
         let project2 = db
             .create_project(CreateProjectInput {
+                id: None,
                 slug: None,
                 name: "Other Project".to_string(),
                 description: None,
                 instructions: None,
                 key_prefix: None,
+                skip_default_versions: false,
             })
             .await
             .unwrap();

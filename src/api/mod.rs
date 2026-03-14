@@ -310,6 +310,12 @@ fn build_protected_api_router() -> Router<AppState> {
             get(handlers::list_proofs_for_feature).post(handlers::create_proof_for_feature),
         )
         .route("/proofs/{id}", get(handlers::get_proof))
+        // Remotes
+        .route(
+            "/remotes",
+            get(handlers::list_remotes).post(handlers::create_remote),
+        )
+        .route("/remotes/{name}/status", get(handlers::get_remote_status))
         // Portfolio
         .route("/portfolio", get(handlers::get_portfolio))
         // Server settings

@@ -13,8 +13,9 @@ use super::types::{
     GetFeatureProofRequest, GetFeatureRequest, GetNextFeatureRequest, GetProjectHistoryRequest,
     GetProjectInstructionsRequest, InitProjectRequest, ListProjectsRequest, ListVersionsRequest,
     OrientRequest, PlanFeaturesRequest, ProveFeatureRequest, RecordVerificationRequest,
-    ReleaseVersionRequest, RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest,
-    SyncRequest, UpdateFeatureRequest, VerifyFeatureRequest,
+    ReleaseVersionRequest, RemoteAddRequest, RemoteStatusRequest, RemoteSyncRequest,
+    RenderFeatureTreeRequest, SetFeatureVersionRequest, StartFeatureRequest, SyncRequest,
+    UpdateFeatureRequest, VerifyFeatureRequest,
 };
 use super::ManifestClient;
 use rmcp::{
@@ -301,6 +302,34 @@ impl McpServer {
     ) -> Result<CallToolResult, McpError> {
         tools::versions::release_version(&self.client, params.0).await
     }
+
+    // ============================================================
+    // Remote Tools
+    // ============================================================
+
+    #[tool(description = "Sync remotes")]
+    async fn remote_sync(
+        &self,
+        params: Parameters<RemoteSyncRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::remotes::remote_sync(&self.client, params.0).await
+    }
+
+    #[tool(description = "Add remote")]
+    async fn remote_add(
+        &self,
+        params: Parameters<RemoteAddRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::remotes::remote_add(&self.client, params.0).await
+    }
+
+    #[tool(description = "Remote status")]
+    async fn remote_status(
+        &self,
+        params: Parameters<RemoteStatusRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        tools::remotes::remote_status(&self.client, params.0).await
+    }
 }
 
 impl ServerHandler for McpServer {
@@ -391,6 +420,9 @@ fn tool_description(name: &str) -> Option<&'static str> {
         "create_version" => include_str!("instructions/tools/create_version.txt"),
         "set_feature_version" => include_str!("instructions/tools/set_feature_version.txt"),
         "release_version" => include_str!("instructions/tools/release_version.txt"),
+        "remote_sync" => include_str!("instructions/tools/remote_sync.txt"),
+        "remote_add" => include_str!("instructions/tools/remote_add.txt"),
+        "remote_status" => include_str!("instructions/tools/remote_status.txt"),
         _ => return None,
     })
 }

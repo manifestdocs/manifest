@@ -38,6 +38,7 @@ mod feature_history {
                 .create_version(
                     project.id,
                     CreateVersionInput {
+                        id: None,
                         name: "v1.0.0".to_string(),
                         description: None,
                     },
@@ -568,22 +569,26 @@ mod feature_history {
             let db = setup().await;
             let project1 = db
                 .create_project(CreateProjectInput {
+                    id: None,
                     slug: None,
                     name: "Project 1".to_string(),
                     description: None,
                     instructions: None,
                     key_prefix: None,
+                    skip_default_versions: false,
                 })
                 .await
                 .expect("Failed to create");
 
             let project2 = db
                 .create_project(CreateProjectInput {
+                    id: None,
                     slug: None,
                     name: "Project 2".to_string(),
                     description: None,
                     instructions: None,
                     key_prefix: None,
+                    skip_default_versions: false,
                 })
                 .await
                 .expect("Failed to create");

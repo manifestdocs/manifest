@@ -630,22 +630,26 @@ mod features {
             let db = setup().await;
             let project1 = db
                 .create_project(CreateProjectInput {
+                    id: None,
                     slug: None,
                     name: "Project 1".to_string(),
                     description: None,
                     instructions: None,
                     key_prefix: None,
+                    skip_default_versions: false,
                 })
                 .await
                 .expect("Failed to create project");
 
             let project2 = db
                 .create_project(CreateProjectInput {
+                    id: None,
                     slug: None,
                     name: "Project 2".to_string(),
                     description: None,
                     instructions: None,
                     key_prefix: None,
+                    skip_default_versions: false,
                 })
                 .await
                 .expect("Failed to create project");

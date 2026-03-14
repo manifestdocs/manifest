@@ -58,11 +58,13 @@ async fn create_project(server: &TestServer) -> Project {
     server
         .post("/api/v1/projects")
         .json(&CreateProjectInput {
+            id: None,
             slug: None,
             name: "Test Project".to_string(),
             description: None,
             instructions: None,
             key_prefix: None,
+            skip_default_versions: false,
         })
         .await
         .json::<Project>()

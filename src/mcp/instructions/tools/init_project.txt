@@ -1,3 +1,23 @@
 SETUP: Initialize a project from a directory. Analyzes codebase, creates project (or links to existing), and returns
-analysis. Typical setup sequence: init_project → generate_feature_tree (existing codebases) → plan (decompose PRD)
-→ update_feature (distill root with project context) → create_version (define milestones).
+analysis with size signals (file_count, commit_count, has_subprojects, subproject_paths).
+
+Use skip_default_versions=true when you want to create versions interactively after classifying the project.
+
+CLASSIFICATION: Use the analysis response to classify the project and adapt setup:
+- GREENFIELD: commit_count == 0 OR file_count < 10. Skip codebase analysis, prompt for PRD/description.
+- LARGE: commit_count > 500 OR modules count > 50 OR has_subprojects == true. For monorepos (has_subprojects),
+  offer: (A) separate projects per subproject, (B) one project with module grouping, (C) pick specific modules.
+  For large non-monorepo projects, ask how far back to scope analysis (e.g., "6 months", a git tag, or "all").
+- SMALL/MEDIUM: everything else. Ask if new or existing codebase.
+
+VERSIONS: After classifying, detect the project's current version before asking the user:
+- Check git tags (git tag --sort=-v:refname) for semver patterns (v1.2.3, 1.2.3)
+- Check package manifests: version in Cargo.toml, package.json, pyproject.toml, etc.
+- If a version is detected, suggest it as the starting point: "It looks like you're on [version]. What version
+  are you working toward next?" If no version is found, ask from scratch.
+Create versions interactively:
+- New/greenfield: 3 versions (Now, Next, Backlog)
+- Existing codebase: 4 versions (released version for existing features, Now, Next, Backlog)
+
+Typical sequence: init_project → classify → create versions → plan (adapt by classification) → update_feature
+(distill root) → set_feature_version (distribute features).

@@ -32,6 +32,19 @@ impl Database {
         row.as_ref().map(row_to_remote).transpose()
     }
 
+    /// Get the auth token for a remote by ID.
+    ///
+    /// The token is stored in the DB but not included in the `Remote` struct
+    /// for safety. Use this method when you need the actual token value.
+    pub async fn get_remote_token(&self, id: RemoteId) -> Result<Option<String>> {
+        let token: Option<String> =
+            sqlx::query_scalar("SELECT auth_token FROM remotes WHERE id = $1")
+                .bind(id.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(token)
+    }
+
     /// Get a remote by name.
     pub async fn get_remote_by_name(&self, name: &str) -> Result<Option<Remote>> {
         let sql = format!("SELECT {REMOTE_COLS} FROM remotes WHERE name = $1");

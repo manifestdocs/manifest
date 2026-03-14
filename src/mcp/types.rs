@@ -915,6 +915,11 @@ pub struct InitProjectRequest {
     )]
     #[serde(default = "default_true")]
     pub include_docs: bool,
+    #[schemars(
+        description = "Skip auto-creating default versions. Set true when creating versions interactively."
+    )]
+    #[serde(default)]
+    pub skip_default_versions: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -978,6 +983,14 @@ pub struct ProjectAnalysis {
     pub documentation: Option<DocumentationContent>,
     /// AI-friendly hints for feature suggestions
     pub hints: Vec<FeatureHint>,
+    /// Total tracked files (git ls-files count). 0 if not a git repo.
+    pub file_count: u32,
+    /// Total git commits on current branch. 0 if not a git repo.
+    pub commit_count: u32,
+    /// Whether multiple build manifests were detected at different levels (monorepo signal)
+    pub has_subprojects: bool,
+    /// Paths to detected subproject roots (e.g., ["packages/api", "packages/web"])
+    pub subproject_paths: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -1085,4 +1098,36 @@ impl From<&FeatureWithContext> for FeatureInfoWithContext {
             breadcrumb: ctx.breadcrumb.iter().map(Into::into).collect(),
         }
     }
+}
+
+// ============================================================
+// Remote Request Types
+// ============================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RemoteSyncRequest {
+    #[schemars(
+        description = "Optional remote name to sync. If omitted, syncs all active remotes."
+    )]
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RemoteAddRequest {
+    #[schemars(description = "Name for this remote (e.g., 'work', 'team')")]
+    pub name: String,
+    #[schemars(description = "Turso database URL (e.g., 'libsql://mydb-org.turso.io')")]
+    pub url: String,
+    #[schemars(description = "Authentication token for the Turso database")]
+    pub token: String,
+    #[schemars(description = "Provider type (default: 'turso')")]
+    #[serde(default)]
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RemoteStatusRequest {
+    #[schemars(description = "Name of the remote to check status for")]
+    pub name: String,
 }

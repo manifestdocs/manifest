@@ -1,0 +1,3 @@
+SYNC: Trigger a sync with Turso remote backends. Contacts configured remotes and ensures embedded replicas are
+up-to-date. Use after making feature changes that should propagate to the team, or to pull the latest remote state.
+Optionally specify a remote name to sync only that remote; omit to sync all active remotes.

@@ -18,11 +18,13 @@ mod projects {
             let db = setup().await;
             let project = db
                 .create_project(CreateProjectInput {
+                    id: None,
                     slug: None,
                     name: "My Project".to_string(),
                     description: None,
                     instructions: None,
                     key_prefix: None,
+                    skip_default_versions: false,
                 })
                 .await
                 .expect("Failed to create project");
@@ -36,11 +38,13 @@ mod projects {
             let db = setup().await;
             let project = db
                 .create_project(CreateProjectInput {
+                    id: None,
                     slug: None,
                     name: "Full Project".to_string(),
                     description: Some("A complete project".to_string()),
                     instructions: Some("Use cargo test to run tests".to_string()),
                     key_prefix: None,
+                    skip_default_versions: false,
                 })
                 .await
                 .expect("Failed to create project");
@@ -72,11 +76,13 @@ mod projects {
             let db = setup().await;
             let created = db
                 .create_project(CreateProjectInput {
+                    id: None,
                     slug: None,
                     name: "Test".to_string(),
                     description: None,
                     instructions: None,
                     key_prefix: None,
+                    skip_default_versions: false,
                 })
                 .await
                 .expect("Failed to create");
@@ -101,21 +107,25 @@ mod projects {
         async fn returns_all_projects_ordered_by_name() {
             let db = setup().await;
             db.create_project(CreateProjectInput {
+                id: None,
                 slug: None,
                 name: "Zebra".to_string(),
                 description: None,
                 instructions: None,
                 key_prefix: None,
+                skip_default_versions: false,
             })
             .await
             .expect("Failed to create");
 
             db.create_project(CreateProjectInput {
+                id: None,
                 slug: None,
                 name: "Alpha".to_string(),
                 description: None,
                 instructions: None,
                 key_prefix: None,
+                skip_default_versions: false,
             })
             .await
             .expect("Failed to create");

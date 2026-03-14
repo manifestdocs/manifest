@@ -844,6 +844,80 @@ impl ManifestClient {
     }
 }
 
+// ============================================================
+// Remote Operations
+// ============================================================
+
+/// Response type for remote listing.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct RemoteInfo {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub url: String,
+    pub sync_enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Response type for remote sync status.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct RemoteSyncStatus {
+    pub remote: RemoteInfo,
+    pub projects: Vec<RemoteProjectEntry>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct RemoteProjectEntry {
+    pub project_id: String,
+    pub sync_state: String,
+    pub last_synced_at: Option<String>,
+}
+
+impl ManifestClient {
+    /// List all configured remotes.
+    pub async fn list_remotes(&self) -> Result<Vec<RemoteInfo>, ClientError> {
+        let response = self
+            .request(reqwest::Method::GET, "/remotes")
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+
+    /// Add a new remote backend.
+    pub async fn create_remote(
+        &self,
+        name: &str,
+        url: &str,
+        token: &str,
+        provider: Option<&str>,
+    ) -> Result<RemoteInfo, ClientError> {
+        let mut body = serde_json::json!({
+            "name": name,
+            "url": url,
+            "token": token,
+        });
+        if let Some(p) = provider {
+            body["provider"] = serde_json::Value::String(p.to_string());
+        }
+        let response = self
+            .request(reqwest::Method::POST, "/remotes")
+            .json(&body)
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+
+    /// Get sync status for a named remote.
+    pub async fn get_remote_status(&self, name: &str) -> Result<RemoteSyncStatus, ClientError> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/remotes/{}/status", name))
+            .send()
+            .await?;
+        self.handle_response(response).await
+    }
+}
+
 /// Response from the complete_feature endpoint.
 #[derive(Debug, serde::Deserialize)]
 pub struct CompleteFeatureResponse {
