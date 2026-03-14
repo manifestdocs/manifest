@@ -154,12 +154,17 @@ mod remote_crud {
         .expect("update should return Some");
 
         // Verify token was updated by checking DB directly
-        let row: (String,) = sqlx::query_as("SELECT auth_token FROM remotes WHERE id = $1")
-            .bind(remote.id.to_string())
-            .fetch_one(db.pool())
+        let mut rows = db
+            .conn()
+            .query(
+                "SELECT auth_token FROM remotes WHERE id = ?1",
+                libsql::params![remote.id.to_string()],
+            )
             .await
             .unwrap();
-        assert_eq!(row.0, "new-token");
+        let row = rows.next().await.unwrap().unwrap();
+        let token: String = row.get(0).unwrap();
+        assert_eq!(token, "new-token");
     }
 
     #[tokio::test]
@@ -279,14 +284,13 @@ mod project_remote_linking {
             .await
             .unwrap();
 
-        sqlx::query(
-            "UPDATE project_remotes SET sync_state = 'orphaned' WHERE project_id = $1 AND remote_id = $2",
-        )
-        .bind(project.id.to_string())
-        .bind(remote1.id.to_string())
-        .execute(db.pool())
-        .await
-        .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE project_remotes SET sync_state = 'orphaned' WHERE project_id = ?1 AND remote_id = ?2",
+                libsql::params![project.id.to_string(), remote1.id.to_string()],
+            )
+            .await
+            .unwrap();
 
         // Re-link should re-activate
         let link = db

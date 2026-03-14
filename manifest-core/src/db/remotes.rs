@@ -18,18 +18,32 @@ impl Database {
     /// Get all configured remotes.
     pub async fn list_remotes(&self) -> Result<Vec<Remote>> {
         let sql = format!("SELECT {REMOTE_COLS} FROM remotes ORDER BY name");
-        let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
-        rows.iter().map(row_to_remote).collect()
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            results.push(row_to_remote(&row)?);
+        }
+        Ok(results)
     }
 
     /// Get a remote by ID.
     pub async fn get_remote(&self, id: RemoteId) -> Result<Option<Remote>> {
-        let sql = format!("SELECT {REMOTE_COLS} FROM remotes WHERE id = $1");
-        let row = sqlx::query(&sql)
-            .bind(id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
-        row.as_ref().map(row_to_remote).transpose()
+        let sql = format!("SELECT {REMOTE_COLS} FROM remotes WHERE id = ?1");
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Ok(Some(row_to_remote(&row)?)),
+            None => Ok(None),
+        }
     }
 
     /// Get the auth token for a remote by ID.
@@ -37,22 +51,38 @@ impl Database {
     /// The token is stored in the DB but not included in the `Remote` struct
     /// for safety. Use this method when you need the actual token value.
     pub async fn get_remote_token(&self, id: RemoteId) -> Result<Option<String>> {
-        let token: Option<String> =
-            sqlx::query_scalar("SELECT auth_token FROM remotes WHERE id = $1")
-                .bind(id.to_string())
-                .fetch_optional(&self.pool)
-                .await?;
-        Ok(token)
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT auth_token FROM remotes WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => {
+                let token: Option<String> =
+                    row.get::<Option<String>>(0).map_err(|e| anyhow::anyhow!("{}", e))?;
+                Ok(token)
+            }
+            None => Ok(None),
+        }
     }
 
     /// Get a remote by name.
     pub async fn get_remote_by_name(&self, name: &str) -> Result<Option<Remote>> {
-        let sql = format!("SELECT {REMOTE_COLS} FROM remotes WHERE name = $1");
-        let row = sqlx::query(&sql)
-            .bind(name)
-            .fetch_optional(&self.pool)
-            .await?;
-        row.as_ref().map(row_to_remote).transpose()
+        let sql = format!("SELECT {REMOTE_COLS} FROM remotes WHERE name = ?1");
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![name.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Ok(Some(row_to_remote(&row)?)),
+            None => Ok(None),
+        }
     }
 
     /// Create a new remote.
@@ -74,19 +104,22 @@ impl Database {
         let now = Utc::now();
         let provider = input.provider.as_deref().unwrap_or("turso");
 
-        sqlx::query(
-            "INSERT INTO remotes (id, name, provider, url, auth_token, sync_enabled, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, 1, $6, $7)",
-        )
-        .bind(id.to_string())
-        .bind(&input.name)
-        .bind(provider)
-        .bind(&input.url)
-        .bind(&input.token)
-        .bind(now.to_rfc3339())
-        .bind(now.to_rfc3339())
-        .execute(&self.pool)
-        .await?;
+        self.conn
+            .execute(
+                "INSERT INTO remotes (id, name, provider, url, auth_token, sync_enabled, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7)",
+                libsql::params![
+                    id.to_string(),
+                    input.name.clone(),
+                    provider.to_string(),
+                    input.url.clone(),
+                    input.token.clone(),
+                    now.to_rfc3339(),
+                    now.to_rfc3339()
+                ],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         Ok(Remote {
             id,
@@ -117,26 +150,32 @@ impl Database {
         // We store it in the DB but don't include it in the Remote struct for safety.
         // If a new token is provided, use it; otherwise keep existing.
         if let Some(token) = &input.token {
-            sqlx::query(
-                "UPDATE remotes SET url = $1, auth_token = $2, sync_enabled = $3, updated_at = $4 WHERE id = $5",
-            )
-            .bind(url)
-            .bind(token.as_str())
-            .bind(sync_enabled)
-            .bind(now.to_rfc3339())
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await?;
+            self.conn
+                .execute(
+                    "UPDATE remotes SET url = ?1, auth_token = ?2, sync_enabled = ?3, updated_at = ?4 WHERE id = ?5",
+                    libsql::params![
+                        url.to_string(),
+                        token.clone(),
+                        sync_enabled,
+                        now.to_rfc3339(),
+                        id.to_string()
+                    ],
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
         } else {
-            sqlx::query(
-                "UPDATE remotes SET url = $1, sync_enabled = $2, updated_at = $3 WHERE id = $4",
-            )
-            .bind(url)
-            .bind(sync_enabled)
-            .bind(now.to_rfc3339())
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await?;
+            self.conn
+                .execute(
+                    "UPDATE remotes SET url = ?1, sync_enabled = ?2, updated_at = ?3 WHERE id = ?4",
+                    libsql::params![
+                        url.to_string(),
+                        sync_enabled,
+                        now.to_rfc3339(),
+                        id.to_string()
+                    ],
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
         }
 
         Ok(Some(Remote {
@@ -156,17 +195,24 @@ impl Database {
     /// remote, then deletes the remote. Local project data is preserved.
     pub async fn delete_remote(&self, id: RemoteId) -> Result<bool> {
         // Orphan linked projects first
-        sqlx::query("UPDATE project_remotes SET sync_state = 'orphaned' WHERE remote_id = $1")
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await?;
+        self.conn
+            .execute(
+                "UPDATE project_remotes SET sync_state = 'orphaned' WHERE remote_id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        let result = sqlx::query("DELETE FROM remotes WHERE id = $1")
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await?;
+        let rows_affected = self
+            .conn
+            .execute(
+                "DELETE FROM remotes WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(rows_affected > 0)
     }
 
     // ── Project-Remote Linking ─────────────────────────────────────────
@@ -197,13 +243,13 @@ impl Database {
                 .into());
             }
             // Re-activate orphaned link
-            sqlx::query(
-                "UPDATE project_remotes SET sync_state = 'active', last_synced_at = NULL WHERE project_id = $1 AND remote_id = $2",
-            )
-            .bind(project_id.to_string())
-            .bind(remote_id.to_string())
-            .execute(&self.pool)
-            .await?;
+            self.conn
+                .execute(
+                    "UPDATE project_remotes SET sync_state = 'active', last_synced_at = NULL WHERE project_id = ?1 AND remote_id = ?2",
+                    libsql::params![project_id.to_string(), remote_id.to_string()],
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
             return Ok(ProjectRemote {
                 project_id,
@@ -213,14 +259,14 @@ impl Database {
             });
         }
 
-        sqlx::query(
-            "INSERT INTO project_remotes (project_id, remote_id, sync_state)
-             VALUES ($1, $2, 'active')",
-        )
-        .bind(project_id.to_string())
-        .bind(remote_id.to_string())
-        .execute(&self.pool)
-        .await?;
+        self.conn
+            .execute(
+                "INSERT INTO project_remotes (project_id, remote_id, sync_state)
+                 VALUES (?1, ?2, 'active')",
+                libsql::params![project_id.to_string(), remote_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         Ok(ProjectRemote {
             project_id,
@@ -236,14 +282,16 @@ impl Database {
         project_id: ProjectId,
         remote_id: RemoteId,
     ) -> Result<bool> {
-        let result =
-            sqlx::query("DELETE FROM project_remotes WHERE project_id = $1 AND remote_id = $2")
-                .bind(project_id.to_string())
-                .bind(remote_id.to_string())
-                .execute(&self.pool)
-                .await?;
+        let rows_affected = self
+            .conn
+            .execute(
+                "DELETE FROM project_remotes WHERE project_id = ?1 AND remote_id = ?2",
+                libsql::params![project_id.to_string(), remote_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(rows_affected > 0)
     }
 
     /// Get a specific project-remote binding.
@@ -253,37 +301,56 @@ impl Database {
         remote_id: RemoteId,
     ) -> Result<Option<ProjectRemote>> {
         let sql = format!(
-            "SELECT {PROJECT_REMOTE_COLS} FROM project_remotes WHERE project_id = $1 AND remote_id = $2"
+            "SELECT {PROJECT_REMOTE_COLS} FROM project_remotes WHERE project_id = ?1 AND remote_id = ?2"
         );
-        let row = sqlx::query(&sql)
-            .bind(project_id.to_string())
-            .bind(remote_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
-        row.as_ref().map(row_to_project_remote).transpose()
+        let mut rows = self
+            .conn
+            .query(
+                &sql,
+                libsql::params![project_id.to_string(), remote_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Ok(Some(row_to_project_remote(&row)?)),
+            None => Ok(None),
+        }
     }
 
     /// Get all project-remote bindings for a remote.
     pub async fn get_remote_projects(&self, remote_id: RemoteId) -> Result<Vec<ProjectRemote>> {
         let sql = format!(
-            "SELECT {PROJECT_REMOTE_COLS} FROM project_remotes WHERE remote_id = $1 ORDER BY project_id"
+            "SELECT {PROJECT_REMOTE_COLS} FROM project_remotes WHERE remote_id = ?1 ORDER BY project_id"
         );
-        let rows = sqlx::query(&sql)
-            .bind(remote_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-        rows.iter().map(row_to_project_remote).collect()
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![remote_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            results.push(row_to_project_remote(&row)?);
+        }
+        Ok(results)
     }
 
     /// Get all remotes linked to a project.
     pub async fn get_project_remotes(&self, project_id: ProjectId) -> Result<Vec<ProjectRemote>> {
         let sql = format!(
-            "SELECT {PROJECT_REMOTE_COLS} FROM project_remotes WHERE project_id = $1 ORDER BY remote_id"
+            "SELECT {PROJECT_REMOTE_COLS} FROM project_remotes WHERE project_id = ?1 ORDER BY remote_id"
         );
-        let rows = sqlx::query(&sql)
-            .bind(project_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-        rows.iter().map(row_to_project_remote).collect()
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![project_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            results.push(row_to_project_remote(&row)?);
+        }
+        Ok(results)
     }
 }

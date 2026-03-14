@@ -1,7 +1,6 @@
 //! Turso embedded replica connection tests.
 //!
-//! These tests run in a separate binary to avoid SQLite symbol conflicts
-//! between libsql-sys and sqlx-sqlite (both bundle their own SQLite).
+//! These tests validate the Turso embedded replica connection layer.
 
 use std::time::Duration;
 

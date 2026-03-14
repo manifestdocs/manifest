@@ -142,7 +142,7 @@ pub struct RootFeatureMigrationReport {
 /// automatic sync. Without a remote, it behaves identically to standard SQLite.
 pub struct Database {
     db: Arc<libsql::Database>,
-    conn: libsql::Connection,
+    conn: Arc<libsql::Connection>,
     events: broadcast::Sender<FeatureEvent>,
 }
 
@@ -178,7 +178,7 @@ impl Database {
 
         Ok(Self {
             db: Arc::new(db),
-            conn,
+            conn: Arc::new(conn),
             events,
         })
     }
@@ -245,7 +245,7 @@ impl Database {
 
         Ok(Self {
             db: Arc::new(db),
-            conn,
+            conn: Arc::new(conn),
             events,
         })
     }
@@ -288,14 +288,14 @@ impl Database {
 
         Ok(Self {
             db: Arc::new(db),
-            conn,
+            conn: Arc::new(conn),
             events,
         })
     }
 
     /// Get the libsql connection for executing queries.
     pub fn conn(&self) -> &libsql::Connection {
-        &self.conn
+        &*self.conn
     }
 
     /// Get the underlying libsql Database (for sync operations).
@@ -1048,11 +1048,9 @@ impl Database {
 
 impl Clone for Database {
     fn clone(&self) -> Self {
-        // libsql::Database is behind Arc, Connection can be re-obtained
-        let conn = self.db.connect().expect("Failed to get connection on clone");
         Self {
             db: self.db.clone(),
-            conn,
+            conn: self.conn.clone(),
             events: self.events.clone(),
         }
     }

@@ -2,7 +2,6 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use chrono::Utc;
-use sqlx::Row;
 
 use super::helpers::*;
 use super::{
@@ -34,25 +33,25 @@ impl Database {
     ) -> Result<Vec<Feature>> {
         let mut next_param = 1u32;
         let mut sql = format!("SELECT {FEATURE_COLS} FROM features");
-        if version_id.is_some() {
-            sql.push_str(&format!(" WHERE target_version_id = ${next_param}"));
+        let mut params: Vec<libsql::Value> = Vec::new();
+        if let Some(vid) = version_id {
+            sql.push_str(&format!(" WHERE target_version_id = ?{next_param}"));
             next_param += 1;
+            params.push(libsql::Value::Text(vid.to_string()));
         }
         sql.push_str(" ORDER BY priority, title");
-        append_pagination(&mut sql, limit, offset, next_param, &self.dialect);
-
-        let mut q = sqlx::query(&sql);
-        if let Some(vid) = version_id {
-            q = q.bind(vid.to_string());
-        }
+        append_pagination(&mut sql, limit, offset, next_param);
         if let Some(lim) = limit {
-            q = q.bind(lim as i64);
+            params.push(libsql::Value::Integer(lim as i64));
         }
         if let Some(off) = offset {
-            q = q.bind(off as i64);
+            params.push(libsql::Value::Integer(off as i64));
         }
-        let rows = q.fetch_all(&self.pool).await?;
-        let mut features: Vec<Feature> = rows.iter().map(row_to_feature).collect::<Result<_>>()?;
+        let mut rows = self.conn.query(&sql, params).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut features = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            features.push(row_to_feature(&row)?);
+        }
         self.resolve_derived_states(&mut features).await?;
         Ok(features)
     }
@@ -71,26 +70,26 @@ impl Database {
         offset: Option<u32>,
     ) -> Result<Vec<Feature>> {
         let mut next_param = 2u32;
-        let mut sql = format!("SELECT {FEATURE_COLS} FROM features WHERE project_id = $1");
-        if version_id.is_some() {
-            sql.push_str(&format!(" AND target_version_id = ${next_param}"));
+        let mut sql = format!("SELECT {FEATURE_COLS} FROM features WHERE project_id = ?1");
+        let mut params: Vec<libsql::Value> = vec![libsql::Value::Text(project_id.to_string())];
+        if let Some(vid) = version_id {
+            sql.push_str(&format!(" AND target_version_id = ?{next_param}"));
             next_param += 1;
+            params.push(libsql::Value::Text(vid.to_string()));
         }
         sql.push_str(" ORDER BY priority, title");
-        append_pagination(&mut sql, limit, offset, next_param, &self.dialect);
-
-        let mut q = sqlx::query(&sql).bind(project_id.to_string());
-        if let Some(vid) = version_id {
-            q = q.bind(vid.to_string());
-        }
+        append_pagination(&mut sql, limit, offset, next_param);
         if let Some(lim) = limit {
-            q = q.bind(lim as i64);
+            params.push(libsql::Value::Integer(lim as i64));
         }
         if let Some(off) = offset {
-            q = q.bind(off as i64);
+            params.push(libsql::Value::Integer(off as i64));
         }
-        let rows = q.fetch_all(&self.pool).await?;
-        let mut features: Vec<Feature> = rows.iter().map(row_to_feature).collect::<Result<_>>()?;
+        let mut rows = self.conn.query(&sql, params).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut features = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            features.push(row_to_feature(&row)?);
+        }
         self.resolve_derived_states(&mut features).await?;
         Ok(features)
     }
@@ -103,11 +102,9 @@ impl Database {
 
     /// Get a single feature by ID.
     pub async fn get_feature(&self, id: FeatureId) -> Result<Option<Feature>> {
-        let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id = $1");
-        let row = sqlx::query(&sql)
-            .bind(id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
+        let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id = ?1");
+        let mut rows = self.conn.query(&sql, libsql::params![id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let row = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         match row.as_ref().map(row_to_feature).transpose()? {
             Some(mut feature) => {
@@ -130,30 +127,30 @@ impl Database {
         project_id: Option<ProjectId>,
     ) -> Result<Option<Feature>> {
         let pattern = format!("{}%", prefix);
-        let rows = match project_id {
+        let mut result_features = Vec::new();
+        match project_id {
             Some(pid) => {
                 let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features WHERE id LIKE $1 AND project_id = $2 LIMIT 2"
+                    "SELECT {FEATURE_COLS} FROM features WHERE id LIKE ?1 AND project_id = ?2 LIMIT 2"
                 );
-                sqlx::query(&sql)
-                    .bind(&pattern)
-                    .bind(pid.to_string())
-                    .fetch_all(&self.pool)
-                    .await?
+                let mut rows = self.conn.query(&sql, libsql::params![pattern.as_str(), pid.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                    result_features.push(row_to_feature(&row)?);
+                }
             }
             None => {
-                let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id LIKE $1 LIMIT 2");
-                sqlx::query(&sql)
-                    .bind(&pattern)
-                    .fetch_all(&self.pool)
-                    .await?
+                let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id LIKE ?1 LIMIT 2");
+                let mut rows = self.conn.query(&sql, libsql::params![pattern.as_str()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                    result_features.push(row_to_feature(&row)?);
+                }
             }
         };
 
-        match rows.len() {
+        match result_features.len() {
             0 => Ok(None),
             1 => {
-                let mut feature = row_to_feature(&rows[0])?;
+                let mut feature = result_features.into_iter().next().unwrap();
                 self.resolve_derived_state_single(&mut feature).await?;
                 Ok(Some(feature))
             }
@@ -179,11 +176,11 @@ impl Database {
         let prefix_upper = prefix.to_ascii_uppercase();
 
         // Look up project by key_prefix (case-insensitive via UPPER)
-        let project_id: Option<String> =
-            sqlx::query_scalar("SELECT id FROM projects WHERE UPPER(key_prefix) = $1")
-                .bind(&prefix_upper)
-                .fetch_optional(&self.pool)
-                .await?;
+        let mut pid_rows = self.conn.query("SELECT id FROM projects WHERE UPPER(key_prefix) = ?1", libsql::params![prefix_upper.as_str()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let project_id: Option<String> = match pid_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Some(row.get::<String>(0).map_err(|e| anyhow::anyhow!("{}", e))?),
+            None => None,
+        };
 
         let Some(project_id) = project_id else {
             return Ok(None);
@@ -191,13 +188,10 @@ impl Database {
 
         // Look up feature by project_id + feature_number
         let sql = format!(
-            "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 AND feature_number = $2"
+            "SELECT {FEATURE_COLS} FROM features WHERE project_id = ?1 AND feature_number = ?2"
         );
-        let row = sqlx::query(&sql)
-            .bind(&project_id)
-            .bind(feature_number)
-            .fetch_optional(&self.pool)
-            .await?;
+        let mut fn_rows = self.conn.query(&sql, libsql::params![project_id.as_str(), feature_number]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let row = fn_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         match row.as_ref().map(row_to_feature).transpose()? {
             Some(mut feature) => {
@@ -274,30 +268,30 @@ impl Database {
             };
 
         // Assign next sequential feature_number
-        let feature_number: i32 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = $1",
-        )
-        .bind(project_id.to_string())
-        .fetch_one(&self.pool)
-        .await?;
+        let mut fn_rows = self.conn.query(
+            "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = ?1",
+            libsql::params![project_id.to_string()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let fn_row = fn_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+        let feature_number: i32 = fn_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))? as i32;
 
-        sqlx::query(
+        self.conn.execute(
             "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, feature_number, target_version_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-        )
-        .bind(id.to_string())
-        .bind(project_id.to_string())
-        .bind(Some(parent_id.to_string()))
-        .bind(&input.title)
-        .bind(&input.details)
-        .bind(state.as_str())
-        .bind(priority)
-        .bind(feature_number)
-        .bind(target_version_id.map(|u| u.to_string()))
-        .bind(now.to_rfc3339())
-        .bind(now.to_rfc3339())
-        .execute(&self.pool)
-        .await?;
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            libsql::params![
+                id.to_string(),
+                project_id.to_string(),
+                parent_id.to_string(),
+                input.title.as_str(),
+                match &input.details { Some(d) => libsql::Value::Text(d.clone()), None => libsql::Value::Null },
+                state.as_str(),
+                priority as i64,
+                feature_number as i64,
+                match target_version_id { Some(u) => libsql::Value::Text(u.to_string()), None => libsql::Value::Null },
+                now.to_rfc3339(),
+                now.to_rfc3339()
+            ],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let _ = self.events.send(FeatureEvent::Created { project_id });
 
@@ -355,15 +349,15 @@ impl Database {
             }
         }
 
-        let mut tx = self.pool.begin().await?;
+        let tx = self.conn.transaction().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Get the starting feature_number for this batch
-        let mut next_number: i32 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = $1",
-        )
-        .bind(project_id.to_string())
-        .fetch_one(&mut *tx)
-        .await?;
+        let mut fn_rows = tx.query(
+            "SELECT COALESCE(MAX(feature_number), 0) + 1 FROM features WHERE project_id = ?1",
+            libsql::params![project_id.to_string()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let fn_row = fn_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+        let mut next_number: i32 = fn_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))? as i32;
 
         for input in inputs {
             let id = input.id.unwrap_or_default();
@@ -387,23 +381,23 @@ impl Database {
             let feature_number = next_number;
             next_number += 1;
 
-            sqlx::query(
+            tx.execute(
                 "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, feature_number, target_version_id, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-            )
-            .bind(id.to_string())
-            .bind(project_id.to_string())
-            .bind(Some(parent_id.to_string()))
-            .bind(&input.title)
-            .bind(&input.details)
-            .bind(state.as_str())
-            .bind(priority)
-            .bind(feature_number)
-            .bind(target_version_id.map(|u| u.to_string()))
-            .bind(now.to_rfc3339())
-            .bind(now.to_rfc3339())
-            .execute(&mut *tx)
-            .await?;
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                libsql::params![
+                    id.to_string(),
+                    project_id.to_string(),
+                    parent_id.to_string(),
+                    input.title.as_str(),
+                    match &input.details { Some(d) => libsql::Value::Text(d.clone()), None => libsql::Value::Null },
+                    state.as_str(),
+                    priority as i64,
+                    feature_number as i64,
+                    match target_version_id { Some(u) => libsql::Value::Text(u.to_string()), None => libsql::Value::Null },
+                    now.to_rfc3339(),
+                    now.to_rfc3339()
+                ],
+            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
             features.push(Feature {
                 id,
@@ -427,7 +421,7 @@ impl Database {
             });
         }
 
-        tx.commit().await?;
+        tx.commit().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let _ = self.events.send(FeatureEvent::Created { project_id });
 
@@ -524,12 +518,11 @@ impl Database {
                     .map(|id| format!("'{}'", id))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let count: i64 = sqlx::query_scalar(&format!(
-                    "SELECT COUNT(*) FROM features WHERE id IN ({placeholders}) AND project_id = $1"
-                ))
-                .bind(existing.project_id.to_string())
-                .fetch_one(&self.pool)
-                .await?;
+                let mut cnt_rows = self.conn.query(&format!(
+                    "SELECT COUNT(*) FROM features WHERE id IN ({placeholders}) AND project_id = ?1"
+                ), libsql::params![existing.project_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                let cnt_row = cnt_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+                let count = cnt_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))?;
                 if count != blocker_ids.len() as i64 {
                     return Err(ManifestError::validation(
                         "All blocker features must exist in the same project.",
@@ -597,24 +590,24 @@ impl Database {
             None
         };
 
-        sqlx::query(
-            "UPDATE features SET parent_id = $1, title = $2, details = $3, desired_details = $4, details_summary = $5, state = $6, priority = $7, target_version_id = $8, updated_at = $9, state_updated_at = COALESCE($11, state_updated_at), details_updated_at = COALESCE($12, details_updated_at), parent_id_updated_at = COALESCE($13, parent_id_updated_at) WHERE id = $10",
-        )
-        .bind(parent_id.map(|u| u.to_string()))
-        .bind(&title)
-        .bind(&details)
-        .bind(&desired_details)
-        .bind(&details_summary)
-        .bind(state.as_str())
-        .bind(priority)
-        .bind(target_version_id.map(|u| u.to_string()))
-        .bind(&now_str)
-        .bind(id.to_string())
-        .bind(state_updated_at)
-        .bind(details_updated_at)
-        .bind(parent_id_updated_at)
-        .execute(&self.pool)
-        .await?;
+        self.conn.execute(
+            "UPDATE features SET parent_id = ?1, title = ?2, details = ?3, desired_details = ?4, details_summary = ?5, state = ?6, priority = ?7, target_version_id = ?8, updated_at = ?9, state_updated_at = COALESCE(?11, state_updated_at), details_updated_at = COALESCE(?12, details_updated_at), parent_id_updated_at = COALESCE(?13, parent_id_updated_at) WHERE id = ?10",
+            libsql::params![
+                match parent_id { Some(u) => libsql::Value::Text(u.to_string()), None => libsql::Value::Null },
+                title.as_str(),
+                match &details { Some(d) => libsql::Value::Text(d.clone()), None => libsql::Value::Null },
+                match &desired_details { Some(d) => libsql::Value::Text(d.clone()), None => libsql::Value::Null },
+                match &details_summary { Some(d) => libsql::Value::Text(d.clone()), None => libsql::Value::Null },
+                state.as_str(),
+                priority as i64,
+                match target_version_id { Some(u) => libsql::Value::Text(u.to_string()), None => libsql::Value::Null },
+                now_str.as_str(),
+                id.to_string(),
+                match state_updated_at { Some(s) => libsql::Value::Text(s.to_string()), None => libsql::Value::Null },
+                match details_updated_at { Some(s) => libsql::Value::Text(s.to_string()), None => libsql::Value::Null },
+                match parent_id_updated_at { Some(s) => libsql::Value::Text(s.to_string()), None => libsql::Value::Null }
+            ],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Handle blocker storage
         if state == FeatureState::Blocked {
@@ -664,84 +657,76 @@ impl Database {
     #[must_use = "check whether the feature existed"]
     pub async fn delete_feature(&self, id: FeatureId) -> Result<bool> {
         // Get project_id before deleting
-        let project_id: Option<ProjectId> =
-            sqlx::query_scalar("SELECT project_id FROM features WHERE id = $1")
-                .bind(id.to_string())
-                .fetch_optional(&self.pool)
-                .await?
-                .map(|s: String| parse_id::<ProjectId>(s))
-                .transpose()?;
+        let mut pid_rows = self.conn.query("SELECT project_id FROM features WHERE id = ?1", libsql::params![id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let project_id: Option<ProjectId> = match pid_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Some(parse_id::<ProjectId>(row.get::<String>(0).map_err(|e| anyhow::anyhow!("{}", e))?)?),
+            None => None,
+        };
 
         let id_str = id.to_string();
 
         // Delete feature history for descendants (recursive CTE)
-        sqlx::query(
+        self.conn.execute(
             "DELETE FROM feature_history WHERE feature_id IN (
                 WITH RECURSIVE descendants AS (
-                    SELECT id FROM features WHERE id = $1
+                    SELECT id FROM features WHERE id = ?1
                     UNION ALL
                     SELECT f.id FROM features f
                     INNER JOIN descendants d ON f.parent_id = d.id
                 )
                 SELECT id FROM descendants
             )",
-        )
-        .bind(&id_str)
-        .execute(&self.pool)
-        .await?;
+            libsql::params![id_str.as_str()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Delete descendants and feature
-        let result = sqlx::query(
+        let rows_affected = self.conn.execute(
             "DELETE FROM features WHERE id IN (
                 WITH RECURSIVE descendants AS (
-                    SELECT id FROM features WHERE id = $1
+                    SELECT id FROM features WHERE id = ?1
                     UNION ALL
                     SELECT f.id FROM features f
                     INNER JOIN descendants d ON f.parent_id = d.id
                 )
                 SELECT id FROM descendants
             )",
-        )
-        .bind(&id_str)
-        .execute(&self.pool)
-        .await?;
+            libsql::params![id_str.as_str()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        if result.rows_affected() > 0 {
+        if rows_affected > 0 {
             if let Some(project_id) = project_id {
                 let _ = self.events.send(FeatureEvent::Deleted { project_id });
             }
         }
 
-        Ok(result.rows_affected() > 0)
+        Ok(rows_affected > 0)
     }
 
     /// Get the top-level features for a project (direct children of the root feature).
     pub async fn get_root_features(&self, project_id: ProjectId) -> Result<Vec<Feature>> {
         let project = self.get_project(project_id).await?;
 
-        let rows = match project.and_then(|p| p.root_feature_id) {
+        let mut features = Vec::new();
+        match project.and_then(|p| p.root_feature_id) {
             Some(root_id) => {
                 let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 AND parent_id = $2 ORDER BY priority, title"
+                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = ?1 AND parent_id = ?2 ORDER BY priority, title"
                 );
-                sqlx::query(&sql)
-                    .bind(project_id.to_string())
-                    .bind(root_id.to_string())
-                    .fetch_all(&self.pool)
-                    .await?
+                let mut rows = self.conn.query(&sql, libsql::params![project_id.to_string(), root_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                    features.push(row_to_feature(&row)?);
+                }
             }
             None => {
                 let sql = format!(
-                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = $1 AND parent_id IS NULL ORDER BY priority, title"
+                    "SELECT {FEATURE_COLS} FROM features WHERE project_id = ?1 AND parent_id IS NULL ORDER BY priority, title"
                 );
-                sqlx::query(&sql)
-                    .bind(project_id.to_string())
-                    .fetch_all(&self.pool)
-                    .await?
+                let mut rows = self.conn.query(&sql, libsql::params![project_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                    features.push(row_to_feature(&row)?);
+                }
             }
         };
-
-        let mut features: Vec<Feature> = rows.iter().map(row_to_feature).collect::<Result<_>>()?;
         self.resolve_derived_states(&mut features).await?;
         Ok(features)
     }
@@ -749,24 +734,22 @@ impl Database {
     /// Get the direct children of a feature.
     pub async fn get_children(&self, parent_id: FeatureId) -> Result<Vec<Feature>> {
         let sql = format!(
-            "SELECT {FEATURE_COLS} FROM features WHERE parent_id = $1 ORDER BY priority, title"
+            "SELECT {FEATURE_COLS} FROM features WHERE parent_id = ?1 ORDER BY priority, title"
         );
-        let rows = sqlx::query(&sql)
-            .bind(parent_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-
-        let mut features: Vec<Feature> = rows.iter().map(row_to_feature).collect::<Result<_>>()?;
+        let mut rows = self.conn.query(&sql, libsql::params![parent_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut features = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            features.push(row_to_feature(&row)?);
+        }
         self.resolve_derived_states(&mut features).await?;
         Ok(features)
     }
 
     /// Check whether a feature is a leaf node (has no children).
     pub async fn is_leaf(&self, feature_id: FeatureId) -> Result<bool> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM features WHERE parent_id = $1")
-            .bind(feature_id.to_string())
-            .fetch_one(&self.pool)
-            .await?;
+        let mut cnt_rows = self.conn.query("SELECT COUNT(*) FROM features WHERE parent_id = ?1", libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let cnt_row = cnt_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+        let count = cnt_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(count == 0)
     }
 
@@ -787,14 +770,14 @@ impl Database {
         let sql =
             format!("SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})");
 
-        let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
+        let mut rows = self.conn.query(&sql, ()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Group child states by parent_id
         let mut children_states: std::collections::HashMap<FeatureId, Vec<FeatureState>> =
             std::collections::HashMap::new();
-        for row in &rows {
-            let parent_id: FeatureId = parse_id(row.get::<String, _>("parent_id"))?;
-            let state = FeatureState::from_str(&row.get::<String, _>("state"))
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            let parent_id: FeatureId = parse_id(row_get_str(&row, "parent_id"))?;
+            let state = FeatureState::from_str(&row_get_str(&row, "state"))
                 .unwrap_or(FeatureState::Proposed);
             children_states.entry(parent_id).or_default().push(state);
         }
@@ -818,19 +801,13 @@ impl Database {
             return Ok(());
         }
 
-        let rows = sqlx::query("SELECT state FROM features WHERE parent_id = $1")
-            .bind(feature.id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
+        let mut rows = self.conn.query("SELECT state FROM features WHERE parent_id = ?1", libsql::params![feature.id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut states = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            states.push(FeatureState::from_str(&row_get_str(&row, "state")).unwrap_or(FeatureState::Proposed));
+        }
 
-        if !rows.is_empty() {
-            let states: Vec<FeatureState> = rows
-                .iter()
-                .map(|r| {
-                    FeatureState::from_str(&r.get::<String, _>("state"))
-                        .unwrap_or(FeatureState::Proposed)
-                })
-                .collect();
+        if !states.is_empty() {
             if let Some(derived) = FeatureState::derive_from_children(&states) {
                 feature.state = derived;
             }
@@ -857,13 +834,13 @@ impl Database {
         let sql =
             format!("SELECT parent_id, state FROM features WHERE parent_id IN ({placeholders})");
 
-        let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
+        let mut rows = self.conn.query(&sql, ()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let mut children_states: std::collections::HashMap<FeatureId, Vec<FeatureState>> =
             std::collections::HashMap::new();
-        for row in &rows {
-            let parent_id: FeatureId = parse_id(row.get::<String, _>("parent_id"))?;
-            let state = FeatureState::from_str(&row.get::<String, _>("state"))
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            let parent_id: FeatureId = parse_id(row_get_str(&row, "parent_id"))?;
+            let state = FeatureState::from_str(&row_get_str(&row, "state"))
                 .unwrap_or(FeatureState::Proposed);
             children_states.entry(parent_id).or_default().push(state);
         }
@@ -900,89 +877,82 @@ impl Database {
 
         let rows = match (project_id, feature_number) {
             (Some(pid), Some(num)) => {
-                sqlx::query(
+                let mut r = self.conn.query(
                     "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
                      FROM features
-                     WHERE project_id = $1 AND (
-                         feature_number = $4
-                         OR title LIKE $2 ESCAPE '\\'
-                         OR details LIKE $2 ESCAPE '\\'
+                     WHERE project_id = ?1 AND (
+                         feature_number = ?4
+                         OR title LIKE ?2 ESCAPE '\\'
+                         OR details LIKE ?2 ESCAPE '\\'
                      )
                      ORDER BY
-                         CASE WHEN feature_number = $4 THEN 0
-                              WHEN title LIKE $2 ESCAPE '\\' THEN 1
+                         CASE WHEN feature_number = ?4 THEN 0
+                              WHEN title LIKE ?2 ESCAPE '\\' THEN 1
                               ELSE 2 END,
                          priority,
                          title
-                     LIMIT $3",
-                )
-                .bind(pid.to_string())
-                .bind(&search_pattern)
-                .bind(limit_val)
-                .bind(num)
-                .fetch_all(&self.pool)
-                .await?
+                     LIMIT ?3",
+                    libsql::params![pid.to_string(), search_pattern.as_str(), limit_val, num],
+                ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                let mut v = Vec::new();
+                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary(&row)?); }
+                v
             }
             (Some(pid), None) => {
-                sqlx::query(
+                let mut r = self.conn.query(
                     "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
                      FROM features
-                     WHERE project_id = $1 AND (title LIKE $2 ESCAPE '\\' OR details LIKE $2 ESCAPE '\\')
+                     WHERE project_id = ?1 AND (title LIKE ?2 ESCAPE '\\' OR details LIKE ?2 ESCAPE '\\')
                      ORDER BY
-                         CASE WHEN title LIKE $2 ESCAPE '\\' THEN 0 ELSE 1 END,
+                         CASE WHEN title LIKE ?2 ESCAPE '\\' THEN 0 ELSE 1 END,
                          priority,
                          title
-                     LIMIT $3",
-                )
-                .bind(pid.to_string())
-                .bind(&search_pattern)
-                .bind(limit_val)
-                .fetch_all(&self.pool)
-                .await?
+                     LIMIT ?3",
+                    libsql::params![pid.to_string(), search_pattern.as_str(), limit_val],
+                ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                let mut v = Vec::new();
+                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary(&row)?); }
+                v
             }
             (None, Some(num)) => {
-                sqlx::query(
+                let mut r = self.conn.query(
                     "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
                      FROM features
-                     WHERE feature_number = $3
-                         OR title LIKE $1 ESCAPE '\\'
-                         OR details LIKE $1 ESCAPE '\\'
+                     WHERE feature_number = ?3
+                         OR title LIKE ?1 ESCAPE '\\'
+                         OR details LIKE ?1 ESCAPE '\\'
                      ORDER BY
-                         CASE WHEN feature_number = $3 THEN 0
-                              WHEN title LIKE $1 ESCAPE '\\' THEN 1
+                         CASE WHEN feature_number = ?3 THEN 0
+                              WHEN title LIKE ?1 ESCAPE '\\' THEN 1
                               ELSE 2 END,
                          priority,
                          title
-                     LIMIT $2",
-                )
-                .bind(&search_pattern)
-                .bind(limit_val)
-                .bind(num)
-                .fetch_all(&self.pool)
-                .await?
+                     LIMIT ?2",
+                    libsql::params![search_pattern.as_str(), limit_val, num],
+                ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                let mut v = Vec::new();
+                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary(&row)?); }
+                v
             }
             (None, None) => {
-                sqlx::query(
+                let mut r = self.conn.query(
                     "SELECT id, project_id, parent_id, title, state, priority, feature_number, target_version_id
                      FROM features
-                     WHERE title LIKE $1 ESCAPE '\\' OR details LIKE $1 ESCAPE '\\'
+                     WHERE title LIKE ?1 ESCAPE '\\' OR details LIKE ?1 ESCAPE '\\'
                      ORDER BY
-                         CASE WHEN title LIKE $1 ESCAPE '\\' THEN 0 ELSE 1 END,
+                         CASE WHEN title LIKE ?1 ESCAPE '\\' THEN 0 ELSE 1 END,
                          priority,
                          title
-                     LIMIT $2",
-                )
-                .bind(&search_pattern)
-                .bind(limit_val)
-                .fetch_all(&self.pool)
-                .await?
+                     LIMIT ?2",
+                    libsql::params![search_pattern.as_str(), limit_val],
+                ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                let mut v = Vec::new();
+                while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary(&row)?); }
+                v
             }
         };
 
-        let mut summaries: Vec<FeatureSummary> = rows
-            .iter()
-            .map(row_to_feature_summary)
-            .collect::<Result<_>>()?;
+        let mut summaries: Vec<FeatureSummary> = rows;
         self.resolve_derived_states_summary(&mut summaries).await?;
         Ok(summaries)
     }
@@ -1009,83 +979,79 @@ impl Database {
 
         let rows = match (project_id, state) {
             (Some(pid), Some(st)) => {
-                sqlx::query(
+                match self.conn.query(
                     "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                      FROM features f
                      INNER JOIN features_fts fts ON f.rowid = fts.rowid
-                     WHERE features_fts MATCH $1
-                       AND f.project_id = $3
-                       AND f.state = $4
+                     WHERE features_fts MATCH ?1
+                       AND f.project_id = ?3
+                       AND f.state = ?4
                      ORDER BY fts.rank
-                     LIMIT $2",
-                )
-                .bind(&fts_query)
-                .bind(limit_val)
-                .bind(pid.to_string())
-                .bind(st)
-                .fetch_all(&self.pool)
-                .await
+                     LIMIT ?2",
+                    libsql::params![fts_query.as_str(), limit_val, pid.to_string(), st],
+                ).await {
+                    Ok(mut r) => { let mut v = Vec::new(); while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row); } Ok(v) }
+                    Err(e) => Err(e)
+                }
             }
             (Some(pid), None) => {
-                sqlx::query(
+                match self.conn.query(
                     "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                      FROM features f
                      INNER JOIN features_fts fts ON f.rowid = fts.rowid
-                     WHERE features_fts MATCH $1
-                       AND f.project_id = $3
+                     WHERE features_fts MATCH ?1
+                       AND f.project_id = ?3
                      ORDER BY fts.rank
-                     LIMIT $2",
-                )
-                .bind(&fts_query)
-                .bind(limit_val)
-                .bind(pid.to_string())
-                .fetch_all(&self.pool)
-                .await
+                     LIMIT ?2",
+                    libsql::params![fts_query.as_str(), limit_val, pid.to_string()],
+                ).await {
+                    Ok(mut r) => { let mut v = Vec::new(); while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row); } Ok(v) }
+                    Err(e) => Err(e)
+                }
             }
             (None, Some(st)) => {
-                sqlx::query(
+                match self.conn.query(
                     "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                      FROM features f
                      INNER JOIN features_fts fts ON f.rowid = fts.rowid
-                     WHERE features_fts MATCH $1
-                       AND f.state = $3
+                     WHERE features_fts MATCH ?1
+                       AND f.state = ?3
                      ORDER BY fts.rank
-                     LIMIT $2",
-                )
-                .bind(&fts_query)
-                .bind(limit_val)
-                .bind(st)
-                .fetch_all(&self.pool)
-                .await
+                     LIMIT ?2",
+                    libsql::params![fts_query.as_str(), limit_val, st],
+                ).await {
+                    Ok(mut r) => { let mut v = Vec::new(); while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row); } Ok(v) }
+                    Err(e) => Err(e)
+                }
             }
             (None, None) => {
-                sqlx::query(
+                match self.conn.query(
                     "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                      FROM features f
                      INNER JOIN features_fts fts ON f.rowid = fts.rowid
-                     WHERE features_fts MATCH $1
+                     WHERE features_fts MATCH ?1
                      ORDER BY fts.rank
-                     LIMIT $2",
-                )
-                .bind(&fts_query)
-                .bind(limit_val)
-                .fetch_all(&self.pool)
-                .await
+                     LIMIT ?2",
+                    libsql::params![fts_query.as_str(), limit_val],
+                ).await {
+                    Ok(mut r) => { let mut v = Vec::new(); while let Some(row) = r.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row); } Ok(v) }
+                    Err(e) => Err(e)
+                }
             }
         };
 
         // Fall back to LIKE search if FTS5 table doesn't exist
-        let rows = match rows {
+        let fts_rows = match rows {
             Ok(r) => r,
             Err(_) => {
                 return self.search_features(query, project_id, limit).await;
             }
         };
 
-        let mut summaries: Vec<FeatureSummary> = rows
-            .iter()
-            .map(row_to_feature_summary)
-            .collect::<Result<_>>()?;
+        let mut summaries: Vec<FeatureSummary> = Vec::new();
+        for row in &fts_rows {
+            summaries.push(row_to_feature_summary(row)?);
+        }
         self.resolve_derived_states_summary(&mut summaries).await?;
         Ok(summaries)
     }
@@ -1172,65 +1138,50 @@ impl Database {
 
         // Get parent
         let parent = if let Some(parent_id) = feature.parent_id {
-            sqlx::query("SELECT id, title, state FROM features WHERE id = $1")
-                .bind(parent_id.to_string())
-                .fetch_optional(&self.pool)
-                .await?
-                .map(|row| row_to_feature_summary_context(&row))
-                .transpose()?
+            let mut pr = self.conn.query("SELECT id, title, state FROM features WHERE id = ?1", libsql::params![parent_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            match pr.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                Some(row) => Some(row_to_feature_summary_context(&row)?),
+                None => None,
+            }
         } else {
             None
         };
 
         // Get siblings
         let siblings: Vec<FeatureSummaryContext> = if let Some(parent_id) = feature.parent_id {
-            let rows = sqlx::query(
-                "SELECT id, title, state FROM features
-                 WHERE parent_id = $1 AND id != $2
-                 ORDER BY priority, title",
-            )
-            .bind(parent_id.to_string())
-            .bind(id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-            rows.iter()
-                .map(row_to_feature_summary_context)
-                .collect::<Result<Vec<_>>>()?
+            let mut sr = self.conn.query(
+                "SELECT id, title, state FROM features WHERE parent_id = ?1 AND id != ?2 ORDER BY priority, title",
+                libsql::params![parent_id.to_string(), id.to_string()],
+            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            let mut v = Vec::new();
+            while let Some(row) = sr.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary_context(&row)?); }
+            v
         } else {
-            let rows = sqlx::query(
-                "SELECT id, title, state FROM features
-                 WHERE project_id = $1 AND parent_id IS NULL AND id != $2
-                 ORDER BY priority, title",
-            )
-            .bind(feature.project_id.to_string())
-            .bind(id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-            rows.iter()
-                .map(row_to_feature_summary_context)
-                .collect::<Result<Vec<_>>>()?
+            let mut sr = self.conn.query(
+                "SELECT id, title, state FROM features WHERE project_id = ?1 AND parent_id IS NULL AND id != ?2 ORDER BY priority, title",
+                libsql::params![feature.project_id.to_string(), id.to_string()],
+            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            let mut v = Vec::new();
+            while let Some(row) = sr.next().await.map_err(|e| anyhow::anyhow!("{}", e))? { v.push(row_to_feature_summary_context(&row)?); }
+            v
         };
 
         // Get children
-        let children_rows = sqlx::query(
-            "SELECT id, title, state FROM features
-             WHERE parent_id = $1
-             ORDER BY priority, title",
-        )
-        .bind(id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
-        let children: Vec<FeatureSummaryContext> = children_rows
-            .iter()
-            .map(row_to_feature_summary_context)
-            .collect::<Result<Vec<_>>>()?;
+        let mut cr = self.conn.query(
+            "SELECT id, title, state FROM features WHERE parent_id = ?1 ORDER BY priority, title",
+            libsql::params![id.to_string()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut children: Vec<FeatureSummaryContext> = Vec::new();
+        while let Some(row) = cr.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            children.push(row_to_feature_summary_context(&row)?);
+        }
 
         // Get breadcrumb using recursive CTE (includes details for ancestor context)
         // For root features (parent_id IS NULL), return details_summary if available to avoid
         // sending full project instructions on every breadcrumb response.
-        let breadcrumb_rows = sqlx::query(
+        let mut br = self.conn.query(
             "WITH RECURSIVE ancestors AS (
-                SELECT id, parent_id, title, details, details_summary, 0 as depth FROM features WHERE id = $1
+                SELECT id, parent_id, title, details, details_summary, 0 as depth FROM features WHERE id = ?1
                 UNION ALL
                 SELECT f.id, f.parent_id, f.title, f.details, f.details_summary, a.depth + 1
                 FROM features f
@@ -1242,21 +1193,17 @@ impl Database {
                      ELSE details
                 END as details
             FROM ancestors ORDER BY depth DESC",
-        )
-        .bind(id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
+            libsql::params![id.to_string()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        let breadcrumb: Vec<BreadcrumbItem> = breadcrumb_rows
-            .iter()
-            .map(|row| -> Result<BreadcrumbItem> {
-                Ok(BreadcrumbItem {
-                    id: parse_id(row.get::<String, _>("id"))?,
-                    title: row.get("title"),
-                    details: row.get("details"),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut breadcrumb: Vec<BreadcrumbItem> = Vec::new();
+        while let Some(row) = br.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            breadcrumb.push(BreadcrumbItem {
+                id: parse_id(row_get_str(&row, "id"))?,
+                title: row_get_str(&row, "title"),
+                details: row_get_opt_str(&row, "details"),
+            });
+        }
 
         // Derive parent state from children (zero-cost: children already in memory)
         let mut feature = feature;
@@ -1291,8 +1238,8 @@ impl Database {
             let sql = format!(
                 "SELECT {FEATURE_COLS}
                  FROM features f
-                 WHERE f.project_id = $1
-                   AND f.target_version_id = $2
+                 WHERE f.project_id = ?1
+                   AND f.target_version_id = ?2
                    AND f.state IN ('proposed', 'in_progress')
                    AND f.parent_id IS NOT NULL
                    AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
@@ -1301,22 +1248,19 @@ impl Database {
                      f.priority ASC, f.created_at ASC
                  LIMIT 1"
             );
-            sqlx::query(&sql)
-                .bind(project_id.to_string())
-                .bind(vid.to_string())
-                .fetch_optional(&self.pool)
-                .await?
+            let mut r = self.conn.query(&sql, libsql::params![project_id.to_string(), vid.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            r.next().await.map_err(|e| anyhow::anyhow!("{}", e))?
         } else {
             let sql = format!(
                 "WITH next_version AS (
                     SELECT id FROM versions
-                    WHERE project_id = $1 AND released_at IS NULL
+                    WHERE project_id = ?1 AND released_at IS NULL
                     ORDER BY created_at ASC LIMIT 1
                 )
                 SELECT {FEATURE_COLS_F}
                 FROM features f
                 LEFT JOIN next_version nv ON f.target_version_id = nv.id
-                WHERE f.project_id = $1
+                WHERE f.project_id = ?1
                   AND f.state IN ('proposed', 'in_progress')
                   AND f.parent_id IS NOT NULL
                   AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
@@ -1329,10 +1273,8 @@ impl Database {
                     f.created_at ASC
                 LIMIT 1"
             );
-            sqlx::query(&sql)
-                .bind(project_id.to_string())
-                .fetch_optional(&self.pool)
-                .await?
+            let mut r = self.conn.query(&sql, libsql::params![project_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            r.next().await.map_err(|e| anyhow::anyhow!("{}", e))?
         };
 
         row.as_ref().map(row_to_feature).transpose()
@@ -1349,21 +1291,14 @@ impl Database {
         blocker_ids: &[FeatureId],
     ) -> Result<()> {
         // Clear existing
-        sqlx::query("DELETE FROM feature_blockers WHERE feature_id = $1")
-            .bind(feature_id.to_string())
-            .execute(&self.pool)
-            .await?;
+        self.conn.execute("DELETE FROM feature_blockers WHERE feature_id = ?1", libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let now = Utc::now().to_rfc3339();
         for blocker_id in blocker_ids {
-            sqlx::query(
-                "INSERT INTO feature_blockers (feature_id, blocker_feature_id, created_at) VALUES ($1, $2, $3)",
-            )
-            .bind(feature_id.to_string())
-            .bind(blocker_id.to_string())
-            .bind(&now)
-            .execute(&self.pool)
-            .await?;
+            self.conn.execute(
+                "INSERT INTO feature_blockers (feature_id, blocker_feature_id, created_at) VALUES (?1, ?2, ?3)",
+                libsql::params![feature_id.to_string(), blocker_id.to_string(), now.as_str()],
+            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
         }
 
         Ok(())
@@ -1371,10 +1306,7 @@ impl Database {
 
     /// Clear all blocker entries for a feature.
     pub async fn clear_feature_blockers(&self, feature_id: FeatureId) -> Result<()> {
-        sqlx::query("DELETE FROM feature_blockers WHERE feature_id = $1")
-            .bind(feature_id.to_string())
-            .execute(&self.pool)
-            .await?;
+        self.conn.execute("DELETE FROM feature_blockers WHERE feature_id = ?1", libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(())
     }
 
@@ -1383,14 +1315,14 @@ impl Database {
         let sql = "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                    FROM feature_blockers fb
                    JOIN features f ON f.id = fb.blocker_feature_id
-                   WHERE fb.feature_id = $1
+                   WHERE fb.feature_id = ?1
                    ORDER BY f.priority, f.title";
-        let rows = sqlx::query(sql)
-            .bind(feature_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-
-        rows.iter().map(row_to_feature_summary).collect()
+        let mut rows = self.conn.query(sql, libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            results.push(row_to_feature_summary(&row)?);
+        }
+        Ok(results)
     }
 
     /// Get features that depend on (are blocked by) this feature.
@@ -1402,14 +1334,14 @@ impl Database {
         let sql = "SELECT f.id, f.project_id, f.parent_id, f.title, f.state, f.priority, f.feature_number, f.target_version_id
                    FROM feature_blockers fb
                    JOIN features f ON f.id = fb.feature_id
-                   WHERE fb.blocker_feature_id = $1
+                   WHERE fb.blocker_feature_id = ?1
                    ORDER BY f.priority, f.title";
-        let rows = sqlx::query(sql)
-            .bind(feature_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
-
-        rows.iter().map(row_to_feature_summary).collect()
+        let mut rows = self.conn.query(sql, libsql::params![feature_id.to_string()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            results.push(row_to_feature_summary(&row)?);
+        }
+        Ok(results)
     }
 
     /// When a feature transitions to `implemented`, check if any features blocked by it
@@ -1420,40 +1352,35 @@ impl Database {
         implemented_id: FeatureId,
     ) -> Result<Vec<FeatureId>> {
         // Find all features that are blocked by the newly-implemented feature
-        let blocked_feature_ids: Vec<String> = sqlx::query_scalar(
-            "SELECT feature_id FROM feature_blockers WHERE blocker_feature_id = $1",
-        )
-        .bind(implemented_id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
+        let mut bf_rows = self.conn.query(
+            "SELECT feature_id FROM feature_blockers WHERE blocker_feature_id = ?1",
+            libsql::params![implemented_id.to_string()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut blocked_feature_ids: Vec<String> = Vec::new();
+        while let Some(row) = bf_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            blocked_feature_ids.push(row.get::<String>(0).map_err(|e| anyhow::anyhow!("{}", e))?);
+        }
 
         let mut unblocked = Vec::new();
         let now = Utc::now().to_rfc3339();
 
         for blocked_id_str in blocked_feature_ids {
             // Check if ALL blockers of this feature are now implemented
-            let remaining: i64 = sqlx::query_scalar(
+            let mut rem_rows = self.conn.query(
                 "SELECT COUNT(*) FROM feature_blockers fb
                  JOIN features f ON f.id = fb.blocker_feature_id
-                 WHERE fb.feature_id = $1 AND f.state != 'implemented'",
-            )
-            .bind(&blocked_id_str)
-            .fetch_one(&self.pool)
-            .await?;
+                 WHERE fb.feature_id = ?1 AND f.state != 'implemented'",
+                libsql::params![blocked_id_str.as_str()],
+            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            let rem_row = rem_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?.ok_or_else(|| anyhow::anyhow!("Expected row"))?;
+            let remaining = rem_row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))?;
 
             if remaining == 0 {
                 // All blockers implemented — transition to proposed
-                sqlx::query("UPDATE features SET state = 'proposed', updated_at = $1 WHERE id = $2 AND state = 'blocked'")
-                    .bind(&now)
-                    .bind(&blocked_id_str)
-                    .execute(&self.pool)
-                    .await?;
+                self.conn.execute("UPDATE features SET state = 'proposed', updated_at = ?1 WHERE id = ?2 AND state = 'blocked'", libsql::params![now.as_str(), blocked_id_str.as_str()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
                 // Clear blocker entries
-                sqlx::query("DELETE FROM feature_blockers WHERE feature_id = $1")
-                    .bind(&blocked_id_str)
-                    .execute(&self.pool)
-                    .await?;
+                self.conn.execute("DELETE FROM feature_blockers WHERE feature_id = ?1", libsql::params![blocked_id_str.as_str()]).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
                 let feature_id: FeatureId = parse_id(blocked_id_str)?;
                 unblocked.push(feature_id);
@@ -1469,9 +1396,9 @@ impl Database {
         &self,
         feature_id: FeatureId,
     ) -> Result<Option<(FeatureId, String)>> {
-        let row = sqlx::query(
+        let mut anc_rows = self.conn.query(
             "WITH RECURSIVE ancestors AS (
-                SELECT parent_id FROM features WHERE id = $1
+                SELECT parent_id FROM features WHERE id = ?1
                 UNION ALL
                 SELECT f.parent_id FROM features f
                 INNER JOIN ancestors a ON f.id = a.parent_id
@@ -1480,15 +1407,14 @@ impl Database {
             INNER JOIN ancestors a ON f.id = a.parent_id
             WHERE f.state = 'blocked'
             LIMIT 1",
-        )
-        .bind(feature_id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+            libsql::params![feature_id.to_string()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        let row = anc_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         match row {
             Some(row) => {
-                let id: FeatureId = parse_id(row.get::<String, _>("id"))?;
-                let title: String = row.get("title");
+                let id: FeatureId = parse_id(row_get_str(&row, "id"))?;
+                let title: String = row_get_str(&row, "title");
                 Ok(Some((id, title)))
             }
             None => Ok(None),
@@ -1509,16 +1435,10 @@ impl Database {
         let now = Utc::now().to_rfc3339();
         let json = serde_json::to_string(comments)?;
 
-        let rows_affected = sqlx::query(
-            "UPDATE features SET verification_result = $1, verified_at = $2, updated_at = $3 WHERE id = $4",
-        )
-        .bind(&json)
-        .bind(&now)
-        .bind(&now)
-        .bind(feature_id.to_string())
-        .execute(&self.pool)
-        .await?
-        .rows_affected();
+        let rows_affected = self.conn.execute(
+            "UPDATE features SET verification_result = ?1, verified_at = ?2, updated_at = ?3 WHERE id = ?4",
+            libsql::params![json.as_str(), now.as_str(), now.as_str(), feature_id.to_string()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         if rows_affected == 0 {
             return Err(anyhow::anyhow!("Feature not found: {}", feature_id));
@@ -1547,41 +1467,36 @@ impl Database {
             let now = Utc::now();
             let root_feature_id = FeatureId::new();
 
-            let mut tx = self.pool.begin().await?;
+            let tx = self.conn.transaction().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
             // Create root feature
-            sqlx::query(
+            tx.execute(
                 "INSERT INTO features (id, project_id, parent_id, title, details, state, priority, created_at, updated_at)
-                 VALUES ($1, $2, NULL, $3, $4, 'implemented', 0, $5, $6)",
-            )
-            .bind(root_feature_id.to_string())
-            .bind(project.id.to_string())
-            .bind(&project.name)
-            .bind(&project.instructions)
-            .bind(now.to_rfc3339())
-            .bind(now.to_rfc3339())
-            .execute(&mut *tx)
-            .await?;
+                 VALUES (?1, ?2, NULL, ?3, ?4, 'implemented', 0, ?5, ?6)",
+                libsql::params![
+                    root_feature_id.to_string(),
+                    project.id.to_string(),
+                    project.name.as_str(),
+                    match &project.instructions { Some(i) => libsql::Value::Text(i.clone()), None => libsql::Value::Null },
+                    now.to_rfc3339(),
+                    now.to_rfc3339()
+                ],
+            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
             // Re-parent existing root features
-            let result = sqlx::query(
-                "UPDATE features SET parent_id = $1 WHERE project_id = $2 AND parent_id IS NULL AND id != $1",
-            )
-            .bind(root_feature_id.to_string())
-            .bind(project.id.to_string())
-            .execute(&mut *tx)
-            .await?;
-            report.features_reparented += result.rows_affected() as usize;
+            let reparented = tx.execute(
+                "UPDATE features SET parent_id = ?1 WHERE project_id = ?2 AND parent_id IS NULL AND id != ?1",
+                libsql::params![root_feature_id.to_string(), project.id.to_string()],
+            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            report.features_reparented += reparented as usize;
 
             // Update project
-            sqlx::query("UPDATE projects SET root_feature_id = $1, updated_at = $2 WHERE id = $3")
-                .bind(root_feature_id.to_string())
-                .bind(now.to_rfc3339())
-                .bind(project.id.to_string())
-                .execute(&mut *tx)
-                .await?;
+            tx.execute(
+                "UPDATE projects SET root_feature_id = ?1, updated_at = ?2 WHERE id = ?3",
+                libsql::params![root_feature_id.to_string(), now.to_rfc3339(), project.id.to_string()],
+            ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
-            tx.commit().await?;
+            tx.commit().await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
             report.projects_migrated += 1;
         }
@@ -1597,16 +1512,16 @@ impl Database {
         metadata: Option<&str>,
     ) -> Result<()> {
         let now = Utc::now();
-        sqlx::query(
-            "UPDATE features SET claimed_by = $1, claimed_at = $2, claim_metadata = $3, updated_at = $4 WHERE id = $5",
-        )
-        .bind(agent_type)
-        .bind(now.to_rfc3339())
-        .bind(metadata)
-        .bind(now.to_rfc3339())
-        .bind(id.to_string())
-        .execute(&self.pool)
-        .await?;
+        self.conn.execute(
+            "UPDATE features SET claimed_by = ?1, claimed_at = ?2, claim_metadata = ?3, updated_at = ?4 WHERE id = ?5",
+            libsql::params![
+                agent_type,
+                now.to_rfc3339(),
+                match metadata { Some(m) => libsql::Value::Text(m.to_string()), None => libsql::Value::Null },
+                now.to_rfc3339(),
+                id.to_string()
+            ],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(())
     }
 
@@ -1627,39 +1542,27 @@ impl Database {
         metadata: Option<&str>,
         force: bool,
     ) -> Result<Feature> {
-        let mut conn = self.pool.acquire().await?;
-
-        // Use BEGIN IMMEDIATE for SQLite to acquire write lock immediately,
+        // Use BEGIN IMMEDIATE to acquire write lock immediately,
         // preventing concurrent readers from proceeding with stale data.
-        // PostgreSQL uses standard BEGIN (row-level locking via SELECT FOR UPDATE).
-        if self.dialect.is_sqlite() {
-            sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
-        } else {
-            sqlx::query("BEGIN").execute(&mut *conn).await?;
-        }
+        self.conn.execute("BEGIN IMMEDIATE", ()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Fetch the feature within the transaction
-        let row = sqlx::query(&format!(
-            "SELECT {FEATURE_COLS} FROM features WHERE id = $1{}",
-            if self.dialect.is_postgres() {
-                " FOR UPDATE"
-            } else {
-                ""
-            }
-        ))
-        .bind(id.to_string())
-        .fetch_optional(&mut *conn)
-        .await;
-
-        let row = match row {
-            Ok(Some(row)) => row,
-            Ok(None) => {
-                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
-                return Err(ManifestError::not_found("Feature").into());
-            }
+        let sql = format!("SELECT {FEATURE_COLS} FROM features WHERE id = ?1");
+        let row = match self.conn.query(&sql, libsql::params![id.to_string()]).await {
+            Ok(mut rows) => match rows.next().await {
+                Ok(Some(row)) => row,
+                Ok(None) => {
+                    let _ = self.conn.execute("ROLLBACK", ()).await;
+                    return Err(ManifestError::not_found("Feature").into());
+                }
+                Err(e) => {
+                    let _ = self.conn.execute("ROLLBACK", ()).await;
+                    return Err(anyhow::anyhow!("{}", e).into());
+                }
+            },
             Err(e) => {
-                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
-                return Err(e.into());
+                let _ = self.conn.execute("ROLLBACK", ()).await;
+                return Err(anyhow::anyhow!("{}", e).into());
             }
         };
 
@@ -1676,7 +1579,7 @@ impl Database {
                     .unwrap_or_default(),
                 claim_metadata: feature.claim_metadata.clone(),
             };
-            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            let _ = self.conn.execute("ROLLBACK", ()).await;
             return Err(ManifestError::ClaimConflict(conflict).into());
         }
 
@@ -1699,38 +1602,42 @@ impl Database {
         {
             // Look up the next version (outside the critical path is fine,
             // but we do it inside the txn for consistency)
-            let next_ver: Option<String> = sqlx::query_scalar(
-                "SELECT id FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at LIMIT 1",
-            )
-            .bind(feature.project_id.to_string())
-            .fetch_optional(&mut *conn)
-            .await?;
+            let next_ver: Option<String> = match self.conn.query(
+                "SELECT id FROM versions WHERE project_id = ?1 AND released_at IS NULL ORDER BY created_at LIMIT 1",
+                libsql::params![feature.project_id.to_string()],
+            ).await {
+                Ok(mut r) => match r.next().await {
+                    Ok(Some(row)) => Some(row.get::<String>(0).unwrap_or_default()),
+                    _ => None,
+                },
+                Err(_) => None,
+            };
             next_ver.or(feature.target_version_id.map(|v| v.to_string()))
         } else {
             feature.target_version_id.map(|v| v.to_string())
         };
 
         // Atomically update state + claim in a single UPDATE
-        let result = sqlx::query(
-            "UPDATE features SET state = $1, claimed_by = $2, claimed_at = $3, claim_metadata = $4, target_version_id = $5, updated_at = $6, state_updated_at = $6 WHERE id = $7",
-        )
-        .bind(new_state.as_str())
-        .bind(agent_type)
-        .bind(now.to_rfc3339())
-        .bind(metadata)
-        .bind(&target_version_id)
-        .bind(now.to_rfc3339())
-        .bind(id.to_string())
-        .execute(&mut *conn)
-        .await;
+        let result = self.conn.execute(
+            "UPDATE features SET state = ?1, claimed_by = ?2, claimed_at = ?3, claim_metadata = ?4, target_version_id = ?5, updated_at = ?6, state_updated_at = ?6 WHERE id = ?7",
+            libsql::params![
+                new_state.as_str(),
+                agent_type,
+                now.to_rfc3339(),
+                match metadata { Some(m) => libsql::Value::Text(m.to_string()), None => libsql::Value::Null },
+                match &target_version_id { Some(v) => libsql::Value::Text(v.clone()), None => libsql::Value::Null },
+                now.to_rfc3339(),
+                id.to_string()
+            ],
+        ).await;
 
         if let Err(e) = result {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
-            return Err(e.into());
+            let _ = self.conn.execute("ROLLBACK", ()).await;
+            return Err(anyhow::anyhow!("{}", e).into());
         }
 
         // Commit the transaction
-        sqlx::query("COMMIT").execute(&mut *conn).await?;
+        self.conn.execute("COMMIT", ()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Emit event
         let _ = self.events.send(FeatureEvent::Updated {
@@ -1749,13 +1656,10 @@ impl Database {
     /// Clear claim fields on a feature (called when work is completed).
     pub async fn clear_feature_claim(&self, id: FeatureId) -> Result<()> {
         let now = Utc::now();
-        sqlx::query(
-            "UPDATE features SET claimed_by = NULL, claimed_at = NULL, claim_metadata = NULL, updated_at = $1 WHERE id = $2",
-        )
-        .bind(now.to_rfc3339())
-        .bind(id.to_string())
-        .execute(&self.pool)
-        .await?;
+        self.conn.execute(
+            "UPDATE features SET claimed_by = NULL, claimed_at = NULL, claim_metadata = NULL, updated_at = ?1 WHERE id = ?2",
+            libsql::params![now.to_rfc3339(), id.to_string()],
+        ).await.map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(())
     }
 

@@ -527,7 +527,6 @@ async fn main() -> anyhow::Result<()> {
                         return Ok(());
                     }
 
-                    let coordinator = manifest_core::sync::MergeCoordinator::new();
                     let mut synced = 0;
 
                     for remote in &remotes {
@@ -547,9 +546,11 @@ async fn main() -> anyhow::Result<()> {
 
                         match manifest_core::turso::TursoConnection::open(config).await {
                             Ok(conn) => {
-                                coordinator
-                                    .add_connection(&remote.id.to_string(), conn)
-                                    .await;
+                                // Trigger sync on the embedded replica
+                                if let Err(e) = conn.sync().await {
+                                    eprintln!("Warning: Sync failed for '{}': {}", remote.name, e);
+                                    continue;
+                                }
 
                                 let links = database.get_remote_projects(remote.id).await?;
                                 for link in &links {

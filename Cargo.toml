@@ -76,4 +76,4 @@ tokio-test = "0.4"
 speculate2 = "0.2"
 axum-test = "17"
 tempfile = "3"
-sqlx = "0.8"
+libsql = { version = "0.9", default-features = false, features = ["core", "replication", "remote", "sync", "tls"] }

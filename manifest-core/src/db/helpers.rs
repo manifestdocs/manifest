@@ -143,7 +143,7 @@ pub(crate) fn compute_next_version_name(versions: &[Version]) -> String {
 ///
 /// Builds a column name→index map from the row and retrieves the value.
 /// This provides named-column access over libsql's index-based Row API.
-fn get_str(row: &libsql::Row, col: &str) -> String {
+pub(crate) fn get_str(row: &libsql::Row, col: &str) -> String {
     // libsql Row has column_name(idx) to find column names
     let count = row.column_count();
     for i in 0..count {
@@ -157,7 +157,7 @@ fn get_str(row: &libsql::Row, col: &str) -> String {
 }
 
 /// Helper to get an optional String from a libsql Row by column name.
-fn get_opt_str(row: &libsql::Row, col: &str) -> Option<String> {
+pub(crate) fn get_opt_str(row: &libsql::Row, col: &str) -> Option<String> {
     let count = row.column_count();
     for i in 0..count {
         if let Some(name) = row.column_name(i) {
@@ -170,7 +170,7 @@ fn get_opt_str(row: &libsql::Row, col: &str) -> Option<String> {
 }
 
 /// Helper to get an i32 from a libsql Row by column name.
-fn get_i32(row: &libsql::Row, col: &str) -> i32 {
+pub(crate) fn get_i32(row: &libsql::Row, col: &str) -> i32 {
     let count = row.column_count();
     for i in 0..count {
         if let Some(name) = row.column_name(i) {
@@ -183,7 +183,7 @@ fn get_i32(row: &libsql::Row, col: &str) -> i32 {
 }
 
 /// Helper to get an optional i32 from a libsql Row by column name.
-fn get_opt_i32(row: &libsql::Row, col: &str) -> Option<i32> {
+pub(crate) fn get_opt_i32(row: &libsql::Row, col: &str) -> Option<i32> {
     let count = row.column_count();
     for i in 0..count {
         if let Some(name) = row.column_name(i) {
@@ -196,7 +196,7 @@ fn get_opt_i32(row: &libsql::Row, col: &str) -> Option<i32> {
 }
 
 /// Helper to get an i64 from a libsql Row by column name.
-fn get_i64(row: &libsql::Row, col: &str) -> i64 {
+pub(crate) fn get_i64(row: &libsql::Row, col: &str) -> i64 {
     let count = row.column_count();
     for i in 0..count {
         if let Some(name) = row.column_name(i) {
@@ -209,7 +209,7 @@ fn get_i64(row: &libsql::Row, col: &str) -> i64 {
 }
 
 /// Helper to get an optional i64 from a libsql Row by column name.
-fn get_opt_i64(row: &libsql::Row, col: &str) -> Option<i64> {
+pub(crate) fn get_opt_i64(row: &libsql::Row, col: &str) -> Option<i64> {
     let count = row.column_count();
     for i in 0..count {
         if let Some(name) = row.column_name(i) {

@@ -1,8 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
-use sqlx::Row;
 
-use super::helpers::{parse_datetime, parse_id};
+use super::helpers::*;
 use super::Database;
 use crate::models::{
     Portfolio, PortfolioCompletion, PortfolioFeatureRef, PortfolioNextFeature, PortfolioProject,
@@ -53,8 +52,7 @@ impl Database {
         &self,
         project_id: ProjectId,
     ) -> Result<Option<PortfolioVersionSummary>> {
-        let row = sqlx::query(
-            "SELECT
+        let sql = "SELECT
                 v.id as version_id,
                 v.name as version_name,
                 COUNT(CASE WHEN f.state != 'archived' THEN 1 END) as feature_count,
@@ -62,27 +60,29 @@ impl Database {
              FROM versions v
              LEFT JOIN features f
                 ON f.target_version_id = v.id
-               AND f.project_id = $1
+               AND f.project_id = ?1
                AND f.parent_id IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
-             WHERE v.project_id = $1 AND v.released_at IS NULL
+             WHERE v.project_id = ?1 AND v.released_at IS NULL
              GROUP BY v.id, v.name
              ORDER BY v.created_at ASC
-             LIMIT 1",
-        )
-        .bind(project_id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+             LIMIT 1";
 
-        row.map(|r| {
-            Ok(PortfolioVersionSummary {
-                id: parse_id::<VersionId>(r.get("version_id"))?,
-                name: r.get("version_name"),
-                feature_count: r.get::<i64, _>("feature_count"),
-                implemented_count: r.get::<i64, _>("implemented_count"),
-            })
-        })
-        .transpose()
+        let mut rows = self
+            .conn
+            .query(sql, libsql::params![project_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Ok(Some(PortfolioVersionSummary {
+                id: parse_id(row_get_str(&row, "version_id"))?,
+                name: row_get_str(&row, "version_name"),
+                feature_count: row_get_i64(&row, "feature_count"),
+                implemented_count: row_get_i64(&row, "implemented_count"),
+            })),
+            None => Ok(None),
+        }
     }
 
     /// Get the highest-priority proposed leaf feature, preferring version-assigned over backlog.
@@ -91,11 +91,10 @@ impl Database {
         project_id: ProjectId,
         next_version_id: Option<VersionId>,
     ) -> Result<Option<PortfolioNextFeature>> {
-        let row = sqlx::query(
-            "SELECT f.id, f.title, f.target_version_id
+        let sql = "SELECT f.id, f.title, f.target_version_id
              FROM features f
              LEFT JOIN versions v ON v.id = f.target_version_id AND v.released_at IS NULL
-             WHERE f.project_id = $1
+             WHERE f.project_id = ?1
                AND f.state = 'proposed'
                AND f.parent_id IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
@@ -103,27 +102,31 @@ impl Database {
                CASE WHEN v.id IS NOT NULL THEN 0 ELSE 1 END,
                f.priority ASC,
                f.created_at ASC
-             LIMIT 1",
-        )
-        .bind(project_id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+             LIMIT 1";
 
-        row.map(|r| {
-            let feature_id = parse_id(r.get("id"))?;
-            let target_version_id: Option<String> = r.get("target_version_id");
-            let in_version = next_version_id.is_some()
-                && target_version_id
-                    .as_ref()
-                    .map(|id| id == &next_version_id.unwrap().to_string())
-                    .unwrap_or(false);
-            Ok(PortfolioNextFeature {
-                id: feature_id,
-                title: r.get("title"),
-                in_version,
-            })
-        })
-        .transpose()
+        let mut rows = self
+            .conn
+            .query(sql, libsql::params![project_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => {
+                let feature_id = parse_id(row_get_str(&row, "id"))?;
+                let target_version_id: Option<String> = row_get_opt_str(&row, "target_version_id");
+                let in_version = next_version_id.is_some()
+                    && target_version_id
+                        .as_ref()
+                        .map(|id| id == &next_version_id.unwrap().to_string())
+                        .unwrap_or(false);
+                Ok(Some(PortfolioNextFeature {
+                    id: feature_id,
+                    title: row_get_str(&row, "title"),
+                    in_version,
+                }))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Get in-progress leaf features (up to 5) and their total count.
@@ -131,29 +134,29 @@ impl Database {
         &self,
         project_id: ProjectId,
     ) -> Result<(Vec<PortfolioFeatureRef>, i64)> {
-        let rows = sqlx::query(
-            "SELECT f.id, f.title FROM features f
-             WHERE f.project_id = $1
+        let sql = "SELECT f.id, f.title FROM features f
+             WHERE f.project_id = ?1
                AND f.state = 'in_progress'
                AND f.parent_id IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
-             ORDER BY f.priority ASC, f.created_at ASC",
-        )
-        .bind(project_id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
+             ORDER BY f.priority ASC, f.created_at ASC";
 
-        let total = rows.len() as i64;
-        let features = rows
-            .iter()
-            .take(5)
-            .map(|r| {
-                Ok(PortfolioFeatureRef {
-                    id: parse_id(r.get("id"))?,
-                    title: r.get("title"),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut rows = self
+            .conn
+            .query(sql, libsql::params![project_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let mut all = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            all.push(PortfolioFeatureRef {
+                id: parse_id(row_get_str(&row, "id"))?,
+                title: row_get_str(&row, "title"),
+            });
+        }
+
+        let total = all.len() as i64;
+        let features = all.into_iter().take(5).collect();
 
         Ok((features, total))
     }
@@ -163,29 +166,28 @@ impl Database {
         &self,
         project_id: ProjectId,
     ) -> Result<(Vec<PortfolioFeatureRef>, i64)> {
-        let rows = sqlx::query(
-            "SELECT f.id, f.title FROM features f
-             WHERE f.project_id = $1
+        let sql = "SELECT f.id, f.title FROM features f
+             WHERE f.project_id = ?1
                AND f.state = 'blocked'
                AND f.parent_id IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM features c WHERE c.parent_id = f.id)
-             ORDER BY f.priority ASC, f.created_at ASC",
-        )
-        .bind(project_id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
+             ORDER BY f.priority ASC, f.created_at ASC";
 
-        let count = rows.len() as i64;
-        let features = rows
-            .iter()
-            .map(|r| {
-                Ok(PortfolioFeatureRef {
-                    id: parse_id(r.get("id"))?,
-                    title: r.get("title"),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut rows = self
+            .conn
+            .query(sql, libsql::params![project_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
+        let mut features = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            features.push(PortfolioFeatureRef {
+                id: parse_id(row_get_str(&row, "id"))?,
+                title: row_get_str(&row, "title"),
+            });
+        }
+
+        let count = features.len() as i64;
         Ok((features, count))
     }
 
@@ -196,47 +198,52 @@ impl Database {
     ) -> Result<(Vec<PortfolioCompletion>, Option<chrono::DateTime<Utc>>)> {
         let since = (Utc::now() - chrono::Duration::days(7)).to_rfc3339();
 
-        let recent_rows = sqlx::query(
-            "SELECT f.id, f.title, MAX(fh.created_at) as created_at
+        let sql = "SELECT f.id, f.title, MAX(fh.created_at) as created_at
              FROM feature_history fh
              JOIN features f ON fh.feature_id = f.id
-             WHERE f.project_id = $1
-               AND fh.created_at > $2
+             WHERE f.project_id = ?1
+               AND fh.created_at > ?2
              GROUP BY f.id, f.title
              ORDER BY created_at DESC
-             LIMIT 5",
-        )
-        .bind(project_id.to_string())
-        .bind(&since)
-        .fetch_all(&self.pool)
-        .await?;
+             LIMIT 5";
 
-        let recent_completions = recent_rows
-            .iter()
-            .map(|r| {
-                Ok(PortfolioCompletion {
-                    id: parse_id(r.get("id"))?,
-                    title: r.get("title"),
-                    completed_at: parse_datetime(r.get("created_at"))?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut rows = self
+            .conn
+            .query(
+                sql,
+                libsql::params![project_id.to_string(), since],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let mut recent_completions = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            recent_completions.push(PortfolioCompletion {
+                id: parse_id(row_get_str(&row, "id"))?,
+                title: row_get_str(&row, "title"),
+                completed_at: parse_datetime(row_get_str(&row, "created_at"))?,
+            });
+        }
 
         // Last activity: most recent history entry across all time.
-        let last_row = sqlx::query(
-            "SELECT MAX(fh.created_at) as last_at
+        let last_sql = "SELECT MAX(fh.created_at) as last_at
              FROM feature_history fh
              JOIN features f ON fh.feature_id = f.id
-             WHERE f.project_id = $1",
-        )
-        .bind(project_id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+             WHERE f.project_id = ?1";
 
-        let last_activity_at = last_row
-            .and_then(|r| r.get::<Option<String>, _>("last_at"))
-            .map(parse_datetime)
-            .transpose()?;
+        let mut last_rows = self
+            .conn
+            .query(last_sql, libsql::params![project_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let last_activity_at =
+            match last_rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+                Some(row) => row_get_opt_str(&row, "last_at")
+                    .map(parse_datetime)
+                    .transpose()?,
+                None => None,
+            };
 
         Ok((recent_completions, last_activity_at))
     }
