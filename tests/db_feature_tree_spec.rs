@@ -950,14 +950,14 @@ mod data_resilience {
         let project = create_test_project(&db).await;
 
         // Insert a feature with a corrupt UUID via raw SQL
-        sqlx::query(
-            "INSERT INTO features (id, project_id, title, state, priority, created_at, updated_at)
-             VALUES ('not-a-uuid', ?1, 'Corrupt Feature', 'proposed', 0, datetime('now'), datetime('now'))",
-        )
-        .bind(project.id.to_string())
-        .execute(db.pool())
-        .await
-        .expect("Raw insert should succeed");
+        db.conn()
+            .execute(
+                "INSERT INTO features (id, project_id, title, state, priority, created_at, updated_at)
+                 VALUES ('not-a-uuid', ?1, 'Corrupt Feature', 'proposed', 0, datetime('now'), datetime('now'))",
+                libsql::params![project.id.to_string()],
+            )
+            .await
+            .expect("Raw insert should succeed");
 
         // Reading all features should return an error, not panic
         let result = db.get_features_by_project(project.id).await;
@@ -970,15 +970,14 @@ mod data_resilience {
         let project = create_test_project(&db).await;
 
         // Insert a feature with a corrupt datetime via raw SQL
-        sqlx::query(
-            "INSERT INTO features (id, project_id, title, state, priority, created_at, updated_at)
-             VALUES (?1, ?2, 'Corrupt Dates', 'proposed', 0, 'not-a-date', 'also-not-a-date')",
-        )
-        .bind(Uuid::new_v4().to_string())
-        .bind(project.id.to_string())
-        .execute(db.pool())
-        .await
-        .expect("Raw insert should succeed");
+        db.conn()
+            .execute(
+                "INSERT INTO features (id, project_id, title, state, priority, created_at, updated_at)
+                 VALUES (?1, ?2, 'Corrupt Dates', 'proposed', 0, 'not-a-date', 'also-not-a-date')",
+                libsql::params![uuid::Uuid::new_v4().to_string(), project.id.to_string()],
+            )
+            .await
+            .expect("Raw insert should succeed");
 
         // Reading should return an error, not panic
         let result = db.get_features_by_project(project.id).await;
@@ -994,15 +993,15 @@ mod data_resilience {
         let fake_project_id = Uuid::new_v4();
 
         // Inserting a feature with a non-existent project_id should fail
-        // because PRAGMA foreign_keys = ON is set pool-wide
-        let result = sqlx::query(
-            "INSERT INTO features (id, project_id, title, state, priority, created_at, updated_at)
-             VALUES (?1, ?2, 'Orphan', 'proposed', 0, datetime('now'), datetime('now'))",
-        )
-        .bind(Uuid::new_v4().to_string())
-        .bind(fake_project_id.to_string())
-        .execute(db.pool())
-        .await;
+        // because PRAGMA foreign_keys = ON is set
+        let result = db
+            .conn()
+            .execute(
+                "INSERT INTO features (id, project_id, title, state, priority, created_at, updated_at)
+                 VALUES (?1, ?2, 'Orphan', 'proposed', 0, datetime('now'), datetime('now'))",
+                libsql::params![uuid::Uuid::new_v4().to_string(), fake_project_id.to_string()],
+            )
+            .await;
 
         assert!(result.is_err(), "Expected FK violation error, got Ok");
     }

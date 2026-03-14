@@ -1,15 +1,10 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
-use sqlx::any::AnyPoolOptions;
-use sqlx::{AnyPool, Executor};
 use tokio::sync::broadcast;
 
 use crate::models::ProjectId;
-
-// Re-export sqlx types for use by the API layer's error handling
-pub use sqlx::error::DatabaseError;
-pub use sqlx::Error as SqlxError;
 
 mod features;
 mod helpers;
@@ -22,78 +17,6 @@ mod proofs;
 mod remotes;
 mod templates;
 mod versions;
-
-// ============================================================
-// Database Dialect
-// ============================================================
-
-/// Database dialect for SQL syntax differences.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DbDialect {
-    Sqlite,
-    Postgres,
-}
-
-impl DbDialect {
-    /// Detect dialect from a database URL.
-    pub fn from_url(url: &str) -> Self {
-        if url.starts_with("postgres://") || url.starts_with("postgresql://") {
-            DbDialect::Postgres
-        } else {
-            DbDialect::Sqlite
-        }
-    }
-
-    /// Returns SQL to check if a table exists.
-    ///
-    /// # Panics
-    /// Panics if `table_name` contains non-alphanumeric/underscore characters,
-    /// since the name is interpolated directly into SQL. All callers must pass
-    /// hardcoded string literals.
-    #[must_use]
-    pub fn table_exists_sql(&self, table_name: &str) -> String {
-        assert!(
-            !table_name.is_empty()
-                && table_name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_'),
-            "table_exists_sql: table name must be [a-zA-Z0-9_]+, got '{}'",
-            table_name
-        );
-        match self {
-            DbDialect::Sqlite => format!(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{}'",
-                table_name
-            ),
-            DbDialect::Postgres => format!(
-                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='{}'",
-                table_name
-            ),
-        }
-    }
-
-    /// Returns true if this dialect is SQLite.
-    #[must_use]
-    pub fn is_sqlite(&self) -> bool {
-        matches!(self, DbDialect::Sqlite)
-    }
-
-    /// Returns true if this dialect is PostgreSQL.
-    #[must_use]
-    pub fn is_postgres(&self) -> bool {
-        matches!(self, DbDialect::Postgres)
-    }
-
-    /// SQL fragment for unlimited results with an offset.
-    /// SQLite uses `LIMIT -1 OFFSET n`, PostgreSQL uses `LIMIT ALL OFFSET n`.
-    #[must_use]
-    pub fn unlimited_offset_sql(&self) -> &'static str {
-        match self {
-            DbDialect::Sqlite => "LIMIT -1",
-            DbDialect::Postgres => "LIMIT ALL",
-        }
-    }
-}
 
 // ============================================================
 // Security Utilities
@@ -212,73 +135,60 @@ pub struct RootFeatureMigrationReport {
     pub projects_skipped: usize,
 }
 
-/// Core database handle wrapping a connection pool, dialect info, and event broadcaster.
+/// Core database handle wrapping a libSQL database, connection, and event broadcaster.
+///
+/// Uses libSQL (a SQLite fork by Turso) as the sole storage engine. When configured
+/// with a Turso remote URL, the database operates as an embedded replica with
+/// automatic sync. Without a remote, it behaves identically to standard SQLite.
 pub struct Database {
-    pool: AnyPool,
-    dialect: DbDialect,
+    db: Arc<libsql::Database>,
+    conn: Arc<libsql::Connection>,
     events: broadcast::Sender<FeatureEvent>,
 }
 
 impl Database {
-    /// Connect to a database using a URL.
-    /// URL format: `sqlite:path/to/db.db` or `postgres://user:pass@host/db`
-    pub async fn connect(url: &str) -> Result<Self> {
-        // Install the SQLx any driver for the URL scheme
-        sqlx::any::install_default_drivers();
-
-        let dialect = DbDialect::from_url(url);
-
-        let mut pool_opts = AnyPoolOptions::new();
-
-        // For SQLite, set PRAGMAs on every new connection in the pool
-        if dialect == DbDialect::Sqlite {
-            pool_opts = pool_opts.after_connect(|conn, _meta| {
-                Box::pin(async move {
-                    conn.execute("PRAGMA journal_mode = WAL").await?;
-                    conn.execute("PRAGMA foreign_keys = ON").await?;
-                    conn.execute("PRAGMA busy_timeout = 5000").await?;
-                    Ok(())
-                })
-            });
-        }
-
-        let pool = pool_opts.connect(url).await?;
-
-        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
-
-        Ok(Self {
-            pool,
-            dialect,
-            events,
-        })
-    }
-
-    /// Returns the database dialect (SQLite or PostgreSQL).
-    #[must_use]
-    pub fn dialect(&self) -> DbDialect {
-        self.dialect
-    }
-
-    /// Open a SQLite database at the specified path.
+    /// Open a local SQLite database at the specified path via libSQL.
     pub async fn open(path: PathBuf) -> Result<Self> {
         let parent = path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Database path has no parent directory"))?;
         std::fs::create_dir_all(parent)?;
 
-        let url = format!("sqlite:{}?mode=rwc", path.display());
-        Self::connect(&url).await
+        let db = libsql::Builder::new_local(path)
+            .build()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to open database: {}", e))?;
+
+        let conn = db
+            .connect()
+            .map_err(|e| anyhow::anyhow!("Failed to get connection: {}", e))?;
+
+        // Set SQLite PRAGMAs
+        conn.execute("PRAGMA journal_mode = WAL", ())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to set journal_mode: {}", e))?;
+        conn.execute("PRAGMA foreign_keys = ON", ())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to enable foreign keys: {}", e))?;
+        conn.execute("PRAGMA busy_timeout = 5000", ())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to set busy_timeout: {}", e))?;
+
+        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+
+        Ok(Self {
+            db: Arc::new(db),
+            conn: Arc::new(conn),
+            events,
+        })
     }
 
-    /// Open the default SQLite database location.
+    /// Open the default database location.
     pub async fn open_default() -> Result<Self> {
         let db_path = if let Ok(data_dir) = std::env::var("MANIFEST_DATA_DIR") {
             let path = PathBuf::from(data_dir).join("manifest.db");
             tracing::info!("Using database from MANIFEST_DATA_DIR: {}", path.display());
             path
-        } else if let Ok(url) = std::env::var("DATABASE_URL") {
-            tracing::info!("Using database from DATABASE_URL");
-            return Self::connect(&url).await;
         } else {
             let dirs = directories::ProjectDirs::from("", "", "manifest")
                 .ok_or_else(|| anyhow::anyhow!("Could not determine data directory"))?;
@@ -296,8 +206,7 @@ impl Database {
     /// 1. `db_path_override` (from --db flag or MANIFEST_DB env)
     /// 2. `config.json` database_path
     /// 3. MANIFEST_DATA_DIR env
-    /// 4. DATABASE_URL env
-    /// 5. Platform default
+    /// 4. Platform default
     pub async fn open_with_override(db_path_override: Option<PathBuf>) -> Result<Self> {
         if let Some(path) = db_path_override {
             tracing::info!("Using database from --db flag: {}", path.display());
@@ -317,14 +226,79 @@ impl Database {
         Self::open_default().await
     }
 
-    /// Open an in-memory SQLite database for testing.
-    /// Uses shared cache mode so all connections in the pool see the same database.
+    /// Open an in-memory database for testing.
     pub async fn open_memory() -> Result<Self> {
-        // Use a unique named in-memory database with shared cache
-        // This ensures all connections in the pool share the same database
-        let unique_id = uuid::Uuid::new_v4();
-        let url = format!("sqlite:file:memdb_{}?mode=memory&cache=shared", unique_id);
-        Self::connect(&url).await
+        let db = libsql::Builder::new_local(":memory:")
+            .build()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to open in-memory database: {}", e))?;
+
+        let conn = db
+            .connect()
+            .map_err(|e| anyhow::anyhow!("Failed to get connection: {}", e))?;
+
+        // Set SQLite PRAGMAs
+        conn.execute("PRAGMA foreign_keys = ON", ())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to enable foreign keys: {}", e))?;
+
+        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+
+        Ok(Self {
+            db: Arc::new(db),
+            conn: Arc::new(conn),
+            events,
+        })
+    }
+
+    /// Open an embedded replica connected to a Turso remote.
+    ///
+    /// Reads are served from the local replica file (microsecond latency).
+    /// Writes route through the Turso cloud primary.
+    pub async fn open_replica(path: PathBuf, url: String, auth_token: String) -> Result<Self> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Database path has no parent directory"))?;
+        std::fs::create_dir_all(parent)?;
+
+        let db = libsql::Builder::new_remote_replica(path, url, auth_token)
+            .sync_interval(std::time::Duration::from_secs(5))
+            .read_your_writes(true)
+            .build()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to open replica: {}", e))?;
+
+        // Initial sync to pull remote state
+        db.sync()
+            .await
+            .map_err(|e| anyhow::anyhow!("Initial sync failed: {}", e))?;
+
+        let conn = db
+            .connect()
+            .map_err(|e| anyhow::anyhow!("Failed to get connection: {}", e))?;
+
+        // Set SQLite PRAGMAs
+        conn.execute("PRAGMA foreign_keys = ON", ())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to enable foreign keys: {}", e))?;
+
+        let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+
+        Ok(Self {
+            db: Arc::new(db),
+            conn: Arc::new(conn),
+            events,
+        })
+    }
+
+    /// Get the libsql connection for executing queries.
+    pub fn conn(&self) -> &libsql::Connection {
+        &*self.conn
+    }
+
+    /// Get the underlying libsql Database (for sync operations).
+    pub fn libsql_db(&self) -> &Arc<libsql::Database> {
+        &self.db
     }
 
     /// Subscribe to feature change events.
@@ -336,14 +310,11 @@ impl Database {
     /// Run database migrations.
     pub async fn migrate(&self) -> Result<()> {
         // Check if this is an existing database with our custom schema_migrations table
-        let migration_sql = self.dialect.table_exists_sql("schema_migrations");
-        let migration_count: i64 = sqlx::query_scalar(&migration_sql)
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or(0);
+        let migration_count = self.query_scalar_i64(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        ).await.unwrap_or(0);
 
         if migration_count > 0 {
-            // Existing database with old migration system - run incremental migrations
             tracing::info!(
                 "Detected existing database with schema_migrations, running incremental migrations"
             );
@@ -352,9 +323,10 @@ impl Database {
         }
 
         // Check if core tables exist
-        let features_sql = self.dialect.table_exists_sql("features");
-        let features_count: i64 = sqlx::query_scalar(&features_sql)
-            .fetch_one(&self.pool)
+        let features_count = self
+            .query_scalar_i64(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features'",
+            )
             .await
             .unwrap_or(0);
 
@@ -364,7 +336,7 @@ impl Database {
             return Ok(());
         }
 
-        // Run embedded schema directly (sqlx::migrate! has issues with the any driver)
+        // Run embedded schema directly
         self.run_schema().await?;
         // FTS5 triggers contain semicolons that break the schema splitter,
         // so they're created separately via the migration function.
@@ -374,39 +346,22 @@ impl Database {
 
     /// Run incremental migrations on existing databases.
     async fn run_incremental_migrations(&self) -> Result<()> {
-        // Migration: rename 'deprecated' state to 'archived'
         self.migrate_deprecated_to_archived().await?;
-        // Migration: add slug column to projects
         self.migrate_add_project_slug().await?;
-        // Migration: add default_feature_destination column to projects
         self.migrate_add_default_feature_destination().await?;
-        // Migration: rename default_feature_destination value "now" → "next"
         self.migrate_feature_destination_now_to_next().await?;
-        // Migration: add details_summary column to features
         self.migrate_add_details_summary().await?;
-        // Migration: add project_focus table
         self.migrate_add_project_focus().await?;
-        // Migration: add 'copilot' to tasks.agent_type CHECK constraint
         self.migrate_add_copilot_agent_type().await?;
-        // Migration: add key_prefix to projects, feature_number to features
         self.migrate_add_feature_numbers().await?;
-        // Migration: add 'blocked' state and feature_blockers table
         self.migrate_add_blocked_state().await?;
-        // Migration: add verification_result and verified_at to features
         self.migrate_add_verification_columns().await?;
-        // Migration: add claim tracking columns to features
         self.migrate_add_claim_columns().await?;
-        // Migration: add testing_policy column to projects
         self.migrate_add_testing_policy().await?;
-        // Migration: add proofs table
         self.migrate_add_proofs_table().await?;
-        // Migration: add test_adapter column to projects
         self.migrate_add_test_adapter().await?;
-        // Migration: add spec_templates table
         self.migrate_add_spec_templates().await?;
-        // Migration: add FTS5 index on features for full-text search
         self.migrate_add_features_fts().await?;
-        // Migration: add context_budget column to projects
         self.migrate_add_context_budget().await?;
         self.migrate_add_remotes().await?;
         self.migrate_add_field_timestamps().await?;
@@ -416,134 +371,62 @@ impl Database {
 
     /// Add slug column to projects table if it doesn't exist.
     async fn migrate_add_project_slug(&self) -> Result<()> {
-        // Check if slug column already exists
-        let has_slug = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("slug"))
-                .unwrap_or(false)
-        } else {
-            // PostgreSQL: check information_schema
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'projects' AND column_name = 'slug'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_slug {
+        if self.has_column("projects", "slug").await? {
             tracing::debug!("Project slug migration already applied");
             return Ok(());
         }
 
         tracing::info!("Adding slug column to projects table");
 
-        if self.dialect.is_sqlite() {
-            // SQLite: Add column, populate, then recreate table with constraints
-            let mut conn = self.pool.acquire().await?;
+        self.conn.execute("PRAGMA foreign_keys = OFF", ()).await?;
 
-            // Disable foreign keys
-            sqlx::query("PRAGMA foreign_keys = OFF")
-                .execute(&mut *conn)
-                .await?;
-
-            // Add slug column (nullable initially)
-            sqlx::query("ALTER TABLE projects ADD COLUMN slug TEXT")
-                .execute(&mut *conn)
-                .await?;
-
-            // Generate slugs from names
-            sqlx::query(
-                "UPDATE projects SET slug = LOWER(REPLACE(REPLACE(REPLACE(REPLACE(name, ' ', '-'), '_', '-'), '.', '-'), '--', '-'))"
-            )
-            .execute(&mut *conn)
+        self.conn
+            .execute("ALTER TABLE projects ADD COLUMN slug TEXT", ())
             .await?;
 
-            // Handle duplicates by appending rowid
-            sqlx::query(
+        self.conn.execute(
+            "UPDATE projects SET slug = LOWER(REPLACE(REPLACE(REPLACE(REPLACE(name, ' ', '-'), '_', '-'), '.', '-'), '--', '-'))",
+            (),
+        ).await?;
+
+        self.conn
+            .execute(
                 "UPDATE projects SET slug = slug || '-' || rowid
-                 WHERE rowid NOT IN (
-                     SELECT MIN(rowid) FROM projects GROUP BY slug
-                 )",
+             WHERE rowid NOT IN (
+                 SELECT MIN(rowid) FROM projects GROUP BY slug
+             )",
+                (),
             )
-            .execute(&mut *conn)
             .await?;
 
-            // Recreate table with NOT NULL and UNIQUE constraint
-            let statements = [
-                "DROP TABLE IF EXISTS projects_new",
-                "CREATE TABLE projects_new (
-                    id TEXT PRIMARY KEY,
-                    slug TEXT NOT NULL UNIQUE,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    instructions TEXT,
-                    current_version_id TEXT,
-                    root_feature_id TEXT,
-                    owner_id TEXT,
-                    visibility TEXT NOT NULL DEFAULT 'private',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    CONSTRAINT chk_projects_visibility CHECK (visibility IN ('private', 'public'))
-                )",
-                "INSERT INTO projects_new SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, owner_id, visibility, created_at, updated_at FROM projects",
-                "DROP TABLE projects",
-                "ALTER TABLE projects_new RENAME TO projects",
-                "CREATE INDEX idx_projects_root_feature ON projects(root_feature_id)",
-                "CREATE INDEX idx_projects_slug ON projects(slug)",
-            ];
+        let statements = [
+            "DROP TABLE IF EXISTS projects_new",
+            "CREATE TABLE projects_new (
+                id TEXT PRIMARY KEY,
+                slug TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                description TEXT,
+                instructions TEXT,
+                current_version_id TEXT,
+                root_feature_id TEXT,
+                owner_id TEXT,
+                visibility TEXT NOT NULL DEFAULT 'private',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CONSTRAINT chk_projects_visibility CHECK (visibility IN ('private', 'public'))
+            )",
+            "INSERT INTO projects_new SELECT id, slug, name, description, instructions, current_version_id, root_feature_id, owner_id, visibility, created_at, updated_at FROM projects",
+            "DROP TABLE projects",
+            "ALTER TABLE projects_new RENAME TO projects",
+            "CREATE INDEX idx_projects_root_feature ON projects(root_feature_id)",
+            "CREATE INDEX idx_projects_slug ON projects(slug)",
+        ];
 
-            for sql in statements {
-                sqlx::query(sql).execute(&mut *conn).await?;
-            }
-
-            // Re-enable foreign keys
-            sqlx::query("PRAGMA foreign_keys = ON")
-                .execute(&mut *conn)
-                .await?;
-        } else {
-            // PostgreSQL: simpler migration
-            sqlx::query("ALTER TABLE projects ADD COLUMN slug TEXT")
-                .execute(&self.pool)
-                .await?;
-
-            sqlx::query(
-                "UPDATE projects SET slug = LOWER(REGEXP_REPLACE(REGEXP_REPLACE(name, '[^a-zA-Z0-9]', '-', 'g'), '-+', '-', 'g'))"
-            )
-            .execute(&self.pool)
-            .await?;
-
-            // Handle duplicates
-            sqlx::query(
-                "UPDATE projects p1 SET slug = slug || '-' || (
-                    SELECT COUNT(*) FROM projects p2
-                    WHERE p2.slug = p1.slug AND p2.created_at < p1.created_at
-                ) WHERE slug IN (SELECT slug FROM projects GROUP BY slug HAVING COUNT(*) > 1)",
-            )
-            .execute(&self.pool)
-            .await?;
-
-            sqlx::query("ALTER TABLE projects ALTER COLUMN slug SET NOT NULL")
-                .execute(&self.pool)
-                .await?;
-
-            sqlx::query("ALTER TABLE projects ADD CONSTRAINT projects_slug_unique UNIQUE (slug)")
-                .execute(&self.pool)
-                .await?;
-
-            sqlx::query("CREATE INDEX idx_projects_slug ON projects(slug)")
-                .execute(&self.pool)
-                .await?;
+        for sql in statements {
+            self.conn.execute(sql, ()).await?;
         }
+
+        self.conn.execute("PRAGMA foreign_keys = ON", ()).await?;
 
         tracing::info!("Project slug migration complete");
         Ok(())
@@ -551,104 +434,58 @@ impl Database {
 
     /// Migrate 'deprecated' feature state to 'archived'.
     async fn migrate_deprecated_to_archived(&self) -> Result<()> {
-        // Check if migration is needed by looking for 'deprecated' in the constraint
-        // We do this by checking if we can insert 'archived' - if not, migration needed
-        let test_result = if self.dialect.is_sqlite() {
-            // For SQLite, check the table schema
-            let schema: Option<String> = sqlx::query_scalar(
+        let schema = self
+            .query_scalar_optional_string(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
             )
-            .fetch_optional(&self.pool)
             .await?;
 
-            schema
-                .as_ref()
-                .map(|s| s.contains("'deprecated'"))
-                .unwrap_or(false)
-        } else {
-            // For PostgreSQL, check constraint definition
-            let constraint_def: Option<String> = sqlx::query_scalar(
-                "SELECT pg_get_constraintdef(oid) FROM pg_constraint
-                 WHERE conname = 'chk_features_state'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
+        let has_deprecated = schema
+            .as_ref()
+            .map(|s| s.contains("'deprecated'"))
+            .unwrap_or(false);
 
-            constraint_def
-                .as_ref()
-                .map(|s| s.contains("deprecated"))
-                .unwrap_or(false)
-        };
-
-        if !test_result {
+        if !has_deprecated {
             tracing::debug!("Feature state migration already applied");
             return Ok(());
         }
 
         tracing::info!("Migrating feature state: deprecated -> archived");
 
-        if self.dialect.is_sqlite() {
-            // SQLite: recreate table with new constraint
-            // Must use a single connection for PRAGMA foreign_keys to work
-            let mut conn = self.pool.acquire().await?;
+        self.conn.execute("PRAGMA foreign_keys = OFF", ()).await?;
 
-            // Disable foreign keys on this connection
-            sqlx::query("PRAGMA foreign_keys = OFF")
-                .execute(&mut *conn)
-                .await?;
+        let statements = [
+            "DROP TABLE IF EXISTS features_new",
+            "CREATE TABLE features_new (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                parent_id TEXT REFERENCES features_new(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                details TEXT,
+                desired_details TEXT,
+                state TEXT NOT NULL DEFAULT 'proposed' CHECK (state IN ('proposed', 'in_progress', 'implemented', 'archived')),
+                priority INTEGER NOT NULL DEFAULT 0,
+                target_version_id TEXT REFERENCES versions(id) ON DELETE SET NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+            "INSERT INTO features_new (id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at)
+            SELECT id, project_id, parent_id, title, details, desired_details,
+                CASE WHEN state = 'deprecated' THEN 'archived' ELSE state END,
+                priority, target_version_id, created_at, updated_at
+            FROM features",
+            "DROP TABLE features",
+            "ALTER TABLE features_new RENAME TO features",
+            "CREATE INDEX idx_features_project ON features(project_id)",
+            "CREATE INDEX idx_features_parent ON features(parent_id)",
+            "CREATE INDEX idx_features_target_version ON features(target_version_id) WHERE target_version_id IS NOT NULL",
+        ];
 
-            let statements = [
-                "DROP TABLE IF EXISTS features_new",
-                "CREATE TABLE features_new (
-                    id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                    parent_id TEXT REFERENCES features_new(id) ON DELETE CASCADE,
-                    title TEXT NOT NULL,
-                    details TEXT,
-                    desired_details TEXT,
-                    state TEXT NOT NULL DEFAULT 'proposed' CHECK (state IN ('proposed', 'in_progress', 'implemented', 'archived')),
-                    priority INTEGER NOT NULL DEFAULT 0,
-                    target_version_id TEXT REFERENCES versions(id) ON DELETE SET NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )",
-                "INSERT INTO features_new (id, project_id, parent_id, title, details, desired_details, state, priority, target_version_id, created_at, updated_at)
-                SELECT id, project_id, parent_id, title, details, desired_details,
-                    CASE WHEN state = 'deprecated' THEN 'archived' ELSE state END,
-                    priority, target_version_id, created_at, updated_at
-                FROM features",
-                "DROP TABLE features",
-                "ALTER TABLE features_new RENAME TO features",
-                "CREATE INDEX idx_features_project ON features(project_id)",
-                "CREATE INDEX idx_features_parent ON features(parent_id)",
-                "CREATE INDEX idx_features_target_version ON features(target_version_id) WHERE target_version_id IS NOT NULL",
-            ];
-
-            for sql in statements {
-                sqlx::query(sql).execute(&mut *conn).await?;
-            }
-
-            // Re-enable foreign keys
-            sqlx::query("PRAGMA foreign_keys = ON")
-                .execute(&mut *conn)
-                .await?;
-        } else {
-            // PostgreSQL: update data and alter constraint
-            sqlx::query("UPDATE features SET state = 'archived' WHERE state = 'deprecated'")
-                .execute(&self.pool)
-                .await?;
-
-            sqlx::query("ALTER TABLE features DROP CONSTRAINT IF EXISTS chk_features_state")
-                .execute(&self.pool)
-                .await?;
-
-            sqlx::query(
-                "ALTER TABLE features ADD CONSTRAINT chk_features_state
-                 CHECK (state IN ('proposed', 'in_progress', 'implemented', 'archived'))",
-            )
-            .execute(&self.pool)
-            .await?;
+        for sql in statements {
+            self.conn.execute(sql, ()).await?;
         }
+
+        self.conn.execute("PRAGMA foreign_keys = ON", ()).await?;
 
         tracing::info!("Feature state migration complete");
         Ok(())
@@ -656,210 +493,105 @@ impl Database {
 
     /// Add default_feature_destination column to projects table if it doesn't exist.
     async fn migrate_add_default_feature_destination(&self) -> Result<()> {
-        let has_column = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("default_feature_destination"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'projects' AND column_name = 'default_feature_destination'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_column {
-            tracing::debug!("default_feature_destination migration already applied");
+        if self
+            .has_column("projects", "default_feature_destination")
+            .await?
+        {
             return Ok(());
         }
-
         tracing::info!("Adding default_feature_destination column to projects table");
-        sqlx::query(
+        self.conn.execute(
             "ALTER TABLE projects ADD COLUMN default_feature_destination TEXT NOT NULL DEFAULT 'backlog'",
-        )
-        .execute(&self.pool)
-        .await?;
-
+            (),
+        ).await?;
         Ok(())
     }
 
     /// Migrate default_feature_destination from "now" to "next".
     async fn migrate_feature_destination_now_to_next(&self) -> Result<()> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM projects WHERE default_feature_destination = 'now'",
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
+        let count = self
+            .query_scalar_i64(
+                "SELECT COUNT(*) FROM projects WHERE default_feature_destination = 'now'",
+            )
+            .await?;
         if count == 0 {
             return Ok(());
         }
-
         tracing::info!("Migrating default_feature_destination from 'now' to 'next'");
-        sqlx::query(
+        self.conn.execute(
             "UPDATE projects SET default_feature_destination = 'next' WHERE default_feature_destination = 'now'",
-        )
-        .execute(&self.pool)
-        .await?;
-
+            (),
+        ).await?;
         Ok(())
     }
 
     /// Add details_summary column to features table if it doesn't exist.
     async fn migrate_add_details_summary(&self) -> Result<()> {
-        let has_column = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("details_summary"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'features' AND column_name = 'details_summary'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_column {
-            tracing::debug!("details_summary migration already applied");
+        if self.has_column("features", "details_summary").await? {
             return Ok(());
         }
-
         tracing::info!("Adding details_summary column to features table");
-        sqlx::query("ALTER TABLE features ADD COLUMN details_summary TEXT")
-            .execute(&self.pool)
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN details_summary TEXT", ())
             .await?;
-
         Ok(())
     }
 
     /// Add key_prefix column to projects and feature_number column to features.
-    /// Backfills existing data: key_prefix from slug, feature_number in created_at order.
     async fn migrate_add_feature_numbers(&self) -> Result<()> {
-        // Check if key_prefix column already exists on projects
-        let has_key_prefix = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("key_prefix"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'projects' AND column_name = 'key_prefix'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if !has_key_prefix {
+        if !self.has_column("projects", "key_prefix").await? {
             tracing::info!("Adding key_prefix column to projects table");
-            sqlx::query("ALTER TABLE projects ADD COLUMN key_prefix TEXT NOT NULL DEFAULT ''")
-                .execute(&self.pool)
+            self.conn
+                .execute(
+                    "ALTER TABLE projects ADD COLUMN key_prefix TEXT NOT NULL DEFAULT ''",
+                    (),
+                )
                 .await?;
 
             // Backfill key_prefix from slug
             use helpers::derive_key_prefix;
-            let rows = sqlx::query("SELECT id, slug FROM projects")
-                .fetch_all(&self.pool)
-                .await?;
-            for row in &rows {
-                let id: String = sqlx::Row::get(row, "id");
-                let slug: String = sqlx::Row::get(row, "slug");
-                let prefix = derive_key_prefix(&slug);
-                sqlx::query("UPDATE projects SET key_prefix = $1 WHERE id = $2")
-                    .bind(&prefix)
-                    .bind(&id)
-                    .execute(&self.pool)
+            let mut rows = self.conn.query("SELECT id, slug FROM projects", ()).await?;
+            let mut updates = Vec::new();
+            while let Some(row) = rows
+                .next()
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to fetch row: {}", e))?
+            {
+                let id: String = row.get(0).map_err(|e| anyhow::anyhow!("{}", e))?;
+                let slug: String = row.get(1).map_err(|e| anyhow::anyhow!("{}", e))?;
+                updates.push((derive_key_prefix(&slug), id));
+            }
+            for (prefix, id) in &updates {
+                self.conn
+                    .execute(
+                        "UPDATE projects SET key_prefix = ?1 WHERE id = ?2",
+                        libsql::params![prefix.as_str(), id.as_str()],
+                    )
                     .await?;
             }
-            tracing::info!("Backfilled key_prefix for {} projects", rows.len());
+            tracing::info!("Backfilled key_prefix for {} projects", updates.len());
         }
 
-        // Check if feature_number column already exists on features
-        let has_feature_number = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("feature_number"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'features' AND column_name = 'feature_number'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if !has_feature_number {
+        if !self.has_column("features", "feature_number").await? {
             tracing::info!("Adding feature_number column to features table");
-            sqlx::query("ALTER TABLE features ADD COLUMN feature_number INTEGER")
-                .execute(&self.pool)
+            self.conn
+                .execute("ALTER TABLE features ADD COLUMN feature_number INTEGER", ())
                 .await?;
 
-            // Backfill feature_number per project using ROW_NUMBER
-            if self.dialect.is_sqlite() {
-                sqlx::query(
-                    "UPDATE features SET feature_number = (
-                        SELECT rn FROM (
-                            SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at) as rn
-                            FROM features
-                        ) numbered WHERE numbered.id = features.id
-                    )",
-                )
-                .execute(&self.pool)
-                .await?;
-            } else {
-                sqlx::query(
-                    "UPDATE features SET feature_number = sub.rn FROM (
+            self.conn.execute(
+                "UPDATE features SET feature_number = (
+                    SELECT rn FROM (
                         SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at) as rn
                         FROM features
-                    ) sub WHERE features.id = sub.id",
-                )
-                .execute(&self.pool)
-                .await?;
-            }
+                    ) numbered WHERE numbered.id = features.id
+                )",
+                (),
+            ).await?;
 
-            // Add unique index
-            sqlx::query(
+            self.conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_features_number ON features(project_id, feature_number)",
-            )
-            .execute(&self.pool)
-            .await?;
+                (),
+            ).await?;
 
             tracing::info!("Backfilled feature_number and created unique index");
         }
@@ -869,105 +601,63 @@ impl Database {
 
     /// Add 'blocked' to features state CHECK constraint and create feature_blockers table.
     async fn migrate_add_blocked_state(&self) -> Result<()> {
-        // Check if feature_blockers table already exists (indicates migration was applied)
-        let has_blockers_table = {
-            let count: i64 = sqlx::query_scalar(&self.dialect.table_exists_sql("feature_blockers"))
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or(0);
-            count > 0
-        };
-
-        if has_blockers_table {
+        if self.table_exists("feature_blockers").await? {
             tracing::debug!("Blocked state migration already applied");
             return Ok(());
         }
 
         tracing::info!("Adding blocked state and feature_blockers table");
 
-        if self.dialect.is_sqlite() {
-            let mut conn = self.pool.acquire().await?;
+        self.conn.execute("PRAGMA foreign_keys = OFF", ()).await?;
 
-            sqlx::query("PRAGMA foreign_keys = OFF")
-                .execute(&mut *conn)
-                .await?;
+        let statements = [
+            "DROP TABLE IF EXISTS features_new",
+            "CREATE TABLE features_new (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                parent_id TEXT,
+                title TEXT NOT NULL,
+                details TEXT,
+                desired_details TEXT,
+                details_summary TEXT,
+                state TEXT NOT NULL DEFAULT 'proposed',
+                priority INTEGER NOT NULL DEFAULT 0,
+                feature_number INTEGER,
+                target_version_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CONSTRAINT fk_features_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                CONSTRAINT fk_features_parent FOREIGN KEY (parent_id) REFERENCES features_new(id) ON DELETE CASCADE,
+                CONSTRAINT fk_features_version FOREIGN KEY (target_version_id) REFERENCES versions(id) ON DELETE SET NULL,
+                CONSTRAINT chk_features_state CHECK (state IN ('proposed', 'blocked', 'in_progress', 'implemented', 'archived'))
+            )",
+            "INSERT INTO features_new SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, feature_number, target_version_id, created_at, updated_at FROM features",
+            "DROP TABLE features",
+            "ALTER TABLE features_new RENAME TO features",
+            "CREATE INDEX idx_features_project ON features(project_id)",
+            "CREATE INDEX idx_features_parent ON features(parent_id)",
+            "CREATE UNIQUE INDEX idx_features_number ON features(project_id, feature_number)",
+        ];
 
-            let statements = [
-                "DROP TABLE IF EXISTS features_new",
-                "CREATE TABLE features_new (
-                    id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL,
-                    parent_id TEXT,
-                    title TEXT NOT NULL,
-                    details TEXT,
-                    desired_details TEXT,
-                    details_summary TEXT,
-                    state TEXT NOT NULL DEFAULT 'proposed',
-                    priority INTEGER NOT NULL DEFAULT 0,
-                    feature_number INTEGER,
-                    target_version_id TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    CONSTRAINT fk_features_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                    CONSTRAINT fk_features_parent FOREIGN KEY (parent_id) REFERENCES features_new(id) ON DELETE CASCADE,
-                    CONSTRAINT fk_features_version FOREIGN KEY (target_version_id) REFERENCES versions(id) ON DELETE SET NULL,
-                    CONSTRAINT chk_features_state CHECK (state IN ('proposed', 'blocked', 'in_progress', 'implemented', 'archived'))
-                )",
-                "INSERT INTO features_new SELECT id, project_id, parent_id, title, details, desired_details, details_summary, state, priority, feature_number, target_version_id, created_at, updated_at FROM features",
-                "DROP TABLE features",
-                "ALTER TABLE features_new RENAME TO features",
-                "CREATE INDEX idx_features_project ON features(project_id)",
-                "CREATE INDEX idx_features_parent ON features(parent_id)",
-                "CREATE UNIQUE INDEX idx_features_number ON features(project_id, feature_number)",
-            ];
-
-            for sql in statements {
-                sqlx::query(sql).execute(&mut *conn).await?;
-            }
-
-            // Create feature_blockers table
-            sqlx::query(
-                "CREATE TABLE feature_blockers (
-                    feature_id TEXT NOT NULL,
-                    blocker_feature_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (feature_id, blocker_feature_id),
-                    FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
-                    FOREIGN KEY (blocker_feature_id) REFERENCES features(id) ON DELETE CASCADE
-                )",
-            )
-            .execute(&mut *conn)
-            .await?;
-
-            sqlx::query("PRAGMA foreign_keys = ON")
-                .execute(&mut *conn)
-                .await?;
-        } else {
-            // PostgreSQL
-            sqlx::query("ALTER TABLE features DROP CONSTRAINT IF EXISTS chk_features_state")
-                .execute(&self.pool)
-                .await?;
-
-            sqlx::query(
-                "ALTER TABLE features ADD CONSTRAINT chk_features_state
-                 CHECK (state IN ('proposed', 'blocked', 'in_progress', 'implemented', 'archived'))",
-            )
-            .execute(&self.pool)
-            .await?;
-
-            sqlx::query(
-                "CREATE TABLE IF NOT EXISTS feature_blockers (
-                    feature_id TEXT NOT NULL,
-                    blocker_feature_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (feature_id, blocker_feature_id),
-                    FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
-                    FOREIGN KEY (blocker_feature_id) REFERENCES features(id) ON DELETE CASCADE
-                )",
-            )
-            .execute(&self.pool)
-            .await?;
+        for sql in statements {
+            self.conn.execute(sql, ()).await?;
         }
+
+        self.conn
+            .execute(
+                "CREATE TABLE feature_blockers (
+                feature_id TEXT NOT NULL,
+                blocker_feature_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (feature_id, blocker_feature_id),
+                FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
+                FOREIGN KEY (blocker_feature_id) REFERENCES features(id) ON DELETE CASCADE
+            )",
+                (),
+            )
+            .await?;
+
+        self.conn.execute("PRAGMA foreign_keys = ON", ()).await?;
 
         tracing::info!("Blocked state migration complete");
         Ok(())
@@ -977,9 +667,7 @@ impl Database {
     async fn run_schema(&self) -> Result<()> {
         let schema = include_str!("../../migrations/20240101000000_initial.sql");
 
-        // Split on semicolons and execute each statement
         for statement in schema.split(';') {
-            // Filter out comment lines and empty lines, then rejoin
             let sql: String = statement
                 .lines()
                 .filter(|line| {
@@ -991,7 +679,7 @@ impl Database {
 
             let sql = sql.trim();
             if !sql.is_empty() {
-                sqlx::query(sql).execute(&self.pool).await.map_err(|e| {
+                self.conn.execute(sql, ()).await.map_err(|e| {
                     anyhow::anyhow!(
                         "Migration failed: {} - SQL: {}",
                         e,
@@ -1006,58 +694,30 @@ impl Database {
 
     /// Add project_focus table if it doesn't exist.
     async fn migrate_add_project_focus(&self) -> Result<()> {
-        let has_table = {
-            let count: i64 = sqlx::query_scalar(&self.dialect.table_exists_sql("project_focus"))
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or(0);
-            count > 0
-        };
-
-        if has_table {
-            tracing::debug!("project_focus migration already applied");
+        if self.table_exists("project_focus").await? {
             return Ok(());
         }
-
         tracing::info!("Creating project_focus table");
-        sqlx::query(
-            "CREATE TABLE project_focus (
+        self.conn
+            .execute(
+                "CREATE TABLE project_focus (
                 project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
                 feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
                 updated_at TEXT NOT NULL
             )",
-        )
-        .execute(&self.pool)
-        .await?;
-
+                (),
+            )
+            .await?;
         Ok(())
     }
 
     /// Add 'copilot' to tasks.agent_type CHECK constraint.
-    /// The tasks table is ephemeral (rows deleted when sessions complete) and
-    /// only exists in databases created with the old 001_initial.sql schema.
     async fn migrate_add_copilot_agent_type(&self) -> Result<()> {
-        // Only relevant for SQLite databases with the old tasks table
-        if !self.dialect.is_sqlite() {
-            return Ok(());
-        }
-
-        let has_table = {
-            let count: i64 = sqlx::query_scalar(&self.dialect.table_exists_sql("tasks"))
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or(0);
-            count > 0
-        };
-
-        if !has_table {
+        if !self.table_exists("tasks").await? {
             tracing::debug!("copilot migration: no tasks table, skipping");
             return Ok(());
         }
 
-        // Check if 'copilot' is already in the CHECK constraint by trying an insert
-        // This is simpler than parsing SQLite's table_info for CHECK constraints.
-        // Since the table is always empty in practice, just recreate it.
         let sql = include_str!("../db/migrations/019_add_copilot_agent_type.sql");
         for statement in sql.split(';') {
             let trimmed: String = statement
@@ -1070,8 +730,7 @@ impl Database {
                 .join("\n");
             let trimmed = trimmed.trim();
             if !trimmed.is_empty() {
-                // Ignore errors from already-applied migration (e.g., tasks_new doesn't exist)
-                if let Err(e) = sqlx::query(trimmed).execute(&self.pool).await {
+                if let Err(e) = self.conn.execute(trimmed, ()).await {
                     tracing::debug!("copilot migration statement skipped: {}", e);
                     return Ok(());
                 }
@@ -1084,115 +743,47 @@ impl Database {
 
     /// Add verification_result and verified_at columns to features table.
     async fn migrate_add_verification_columns(&self) -> Result<()> {
-        let has_column = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("verification_result"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'features' AND column_name = 'verification_result'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_column {
-            tracing::debug!("verification columns migration already applied");
+        if self.has_column("features", "verification_result").await? {
             return Ok(());
         }
-
         tracing::info!("Adding verification_result and verified_at columns to features table");
-        sqlx::query("ALTER TABLE features ADD COLUMN verification_result TEXT")
-            .execute(&self.pool)
+        self.conn
+            .execute(
+                "ALTER TABLE features ADD COLUMN verification_result TEXT",
+                (),
+            )
             .await?;
-        sqlx::query("ALTER TABLE features ADD COLUMN verified_at TEXT")
-            .execute(&self.pool)
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN verified_at TEXT", ())
             .await?;
-
         Ok(())
     }
 
     /// Add claimed_by, claimed_at, and claim_metadata columns to features table.
     async fn migrate_add_claim_columns(&self) -> Result<()> {
-        let has_column = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("claimed_by"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'features' AND column_name = 'claimed_by'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_column {
-            tracing::debug!("claim columns migration already applied");
+        if self.has_column("features", "claimed_by").await? {
             return Ok(());
         }
-
         tracing::info!("Adding claimed_by, claimed_at, claim_metadata columns to features table");
-        sqlx::query("ALTER TABLE features ADD COLUMN claimed_by TEXT")
-            .execute(&self.pool)
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN claimed_by TEXT", ())
             .await?;
-        sqlx::query("ALTER TABLE features ADD COLUMN claimed_at TEXT")
-            .execute(&self.pool)
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN claimed_at TEXT", ())
             .await?;
-        sqlx::query("ALTER TABLE features ADD COLUMN claim_metadata TEXT")
-            .execute(&self.pool)
+        self.conn
+            .execute("ALTER TABLE features ADD COLUMN claim_metadata TEXT", ())
             .await?;
-
         Ok(())
     }
 
     /// Add proofs table for test evidence.
     async fn migrate_add_proofs_table(&self) -> Result<()> {
-        let table_exists = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='proofs'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema.is_some()
-        } else {
-            let exists: Option<String> = sqlx::query_scalar(
-                "SELECT table_name FROM information_schema.tables
-                 WHERE table_name = 'proofs'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            exists.is_some()
-        };
-
-        if table_exists {
-            tracing::debug!("proofs table migration already applied");
+        if self.table_exists("proofs").await? {
             return Ok(());
         }
-
         tracing::info!("Creating proofs table");
-        sqlx::query(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS proofs (
                 id TEXT PRIMARY KEY,
                 feature_id TEXT NOT NULL,
@@ -1208,99 +799,53 @@ impl Database {
                 CONSTRAINT fk_proofs_feature FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE,
                 CONSTRAINT fk_proofs_history FOREIGN KEY (history_id) REFERENCES feature_history(id) ON DELETE SET NULL
             )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_proofs_feature ON proofs(feature_id)")
-            .execute(&self.pool)
+            (),
+        ).await?;
+        self.conn
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_proofs_feature ON proofs(feature_id)",
+                (),
+            )
             .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_proofs_history ON proofs(history_id)")
-            .execute(&self.pool)
+        self.conn
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_proofs_history ON proofs(history_id)",
+                (),
+            )
             .await?;
-
         Ok(())
     }
 
     /// Add testing_policy column to projects table.
     async fn migrate_add_testing_policy(&self) -> Result<()> {
-        let has_column = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("testing_policy"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'projects' AND column_name = 'testing_policy'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_column {
-            tracing::debug!("testing_policy migration already applied");
+        if self.has_column("projects", "testing_policy").await? {
             return Ok(());
         }
-
         tracing::info!("Adding testing_policy column to projects table");
-        sqlx::query("ALTER TABLE projects ADD COLUMN testing_policy TEXT NOT NULL DEFAULT 'tdd'")
-            .execute(&self.pool)
+        self.conn
+            .execute(
+                "ALTER TABLE projects ADD COLUMN testing_policy TEXT NOT NULL DEFAULT 'tdd'",
+                (),
+            )
             .await?;
-
         Ok(())
     }
 
     /// Add test_adapter column to projects table.
     async fn migrate_add_test_adapter(&self) -> Result<()> {
-        let has_column = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("test_adapter"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'projects' AND column_name = 'test_adapter'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_column {
-            tracing::debug!("test_adapter migration already applied");
+        if self.has_column("projects", "test_adapter").await? {
             return Ok(());
         }
-
         tracing::info!("Adding test_adapter column to projects table");
-        sqlx::query("ALTER TABLE projects ADD COLUMN test_adapter TEXT")
-            .execute(&self.pool)
+        self.conn
+            .execute("ALTER TABLE projects ADD COLUMN test_adapter TEXT", ())
             .await?;
-
         Ok(())
     }
 
-    /// Add spec_templates table if it doesn't exist, insert default template for existing projects.
+    /// Add spec_templates table if it doesn't exist.
     async fn migrate_add_spec_templates(&self) -> Result<()> {
-        // Create table if it doesn't exist
-        sqlx::query(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS spec_templates (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
@@ -1313,111 +858,114 @@ impl Database {
                 CONSTRAINT fk_spec_templates_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 UNIQUE(project_id, name)
             )",
-        )
-        .execute(&self.pool)
-        .await?;
+            (),
+        ).await?;
 
-        sqlx::query(
+        self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_spec_templates_project ON spec_templates(project_id)",
-        )
-        .execute(&self.pool)
-        .await?;
+            (),
+        ).await?;
 
         // Insert default template for any project that doesn't have one yet
         let now = chrono::Utc::now().to_rfc3339();
-        let rows = sqlx::query(
-            "SELECT p.id FROM projects p
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT p.id FROM projects p
              WHERE NOT EXISTS (SELECT 1 FROM spec_templates st WHERE st.project_id = p.id)",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+                (),
+            )
+            .await?;
 
-        if rows.is_empty() {
+        let mut project_ids = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch row: {}", e))?
+        {
+            let id: String = row.get(0).map_err(|e| anyhow::anyhow!("{}", e))?;
+            project_ids.push(id);
+        }
+
+        if project_ids.is_empty() {
             return Ok(());
         }
 
-        for row in &rows {
-            let project_id: String = sqlx::Row::get(row, "id");
+        for project_id in &project_ids {
             let template_id = uuid::Uuid::new_v4().to_string();
-            sqlx::query(
+            self.conn.execute(
                 "INSERT INTO spec_templates (id, project_id, name, description, content, is_default, created_at, updated_at)
-                 VALUES ($1, $2, 'Default', 'General-purpose feature specification template', $3, 1, $4, $5)",
-            )
-            .bind(&template_id)
-            .bind(&project_id)
-            .bind(crate::models::DEFAULT_TEMPLATE_CONTENT)
-            .bind(&now)
-            .bind(&now)
-            .execute(&self.pool)
-            .await?;
+                 VALUES (?1, ?2, 'Default', 'General-purpose feature specification template', ?3, 1, ?4, ?5)",
+                libsql::params![
+                    template_id.as_str(),
+                    project_id.as_str(),
+                    crate::models::DEFAULT_TEMPLATE_CONTENT,
+                    now.as_str(),
+                    now.as_str()
+                ],
+            ).await?;
         }
 
-        tracing::info!("Created default spec templates for {} projects", rows.len());
+        tracing::info!(
+            "Created default spec templates for {} projects",
+            project_ids.len()
+        );
         Ok(())
     }
 
     /// Add FTS5 full-text search index on features table.
     async fn migrate_add_features_fts(&self) -> Result<()> {
-        if !self.dialect.is_sqlite() {
-            return Ok(());
-        }
-
-        // Check if FTS table already exists
-        let has_fts: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features_fts'",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .unwrap_or(0);
+        let has_fts = self
+            .query_scalar_i64(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='features_fts'",
+            )
+            .await
+            .unwrap_or(0);
 
         if has_fts > 0 {
             return Ok(());
         }
 
-        // Create FTS5 virtual table (content-synced with features table)
-        sqlx::query(
-            "CREATE VIRTUAL TABLE features_fts USING fts5(
+        self.conn
+            .execute(
+                "CREATE VIRTUAL TABLE features_fts USING fts5(
                 title, details,
                 content=features,
                 content_rowid=rowid
             )",
-        )
-        .execute(&self.pool)
-        .await?;
+                (),
+            )
+            .await?;
 
-        // Triggers to keep FTS in sync
-        sqlx::query(
+        self.conn.execute(
             "CREATE TRIGGER IF NOT EXISTS features_fts_insert AFTER INSERT ON features BEGIN
                 INSERT INTO features_fts(rowid, title, details) VALUES (new.rowid, new.title, COALESCE(new.details, ''));
             END",
-        )
-        .execute(&self.pool)
-        .await?;
+            (),
+        ).await?;
 
-        sqlx::query(
+        self.conn.execute(
             "CREATE TRIGGER IF NOT EXISTS features_fts_update AFTER UPDATE OF title, details ON features BEGIN
                 INSERT INTO features_fts(features_fts, rowid, title, details) VALUES ('delete', old.rowid, old.title, COALESCE(old.details, ''));
                 INSERT INTO features_fts(rowid, title, details) VALUES (new.rowid, new.title, COALESCE(new.details, ''));
             END",
-        )
-        .execute(&self.pool)
-        .await?;
+            (),
+        ).await?;
 
-        sqlx::query(
+        self.conn.execute(
             "CREATE TRIGGER IF NOT EXISTS features_fts_delete AFTER DELETE ON features BEGIN
                 INSERT INTO features_fts(features_fts, rowid, title, details) VALUES ('delete', old.rowid, old.title, COALESCE(old.details, ''));
             END",
-        )
-        .execute(&self.pool)
-        .await?;
+            (),
+        ).await?;
 
-        // Populate FTS index with existing data
-        sqlx::query(
-            "INSERT INTO features_fts(rowid, title, details)
+        self.conn
+            .execute(
+                "INSERT INTO features_fts(rowid, title, details)
              SELECT rowid, title, COALESCE(details, '') FROM features",
-        )
-        .execute(&self.pool)
-        .await?;
+                (),
+            )
+            .await?;
 
         tracing::info!("Created features_fts full-text search index");
         Ok(())
@@ -1425,126 +973,64 @@ impl Database {
 
     /// Add context_budget column to projects table.
     async fn migrate_add_context_budget(&self) -> Result<()> {
-        let has_column = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("context_budget"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'projects' AND column_name = 'context_budget'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-
-            col_exists.is_some()
-        };
-
-        if has_column {
+        if self.has_column("projects", "context_budget").await? {
             return Ok(());
         }
-
-        sqlx::query("ALTER TABLE projects ADD COLUMN context_budget INTEGER")
-            .execute(&self.pool)
+        self.conn
+            .execute("ALTER TABLE projects ADD COLUMN context_budget INTEGER", ())
             .await?;
-
         tracing::info!("Added context_budget column to projects");
         Ok(())
     }
 
-    /// Add remotes and project_remotes tables for Turso backend support.
+    /// Add remotes and project_remotes tables for Turso sync.
     async fn migrate_add_remotes(&self) -> Result<()> {
-        let has_table = if self.dialect.is_sqlite() {
-            let exists: Option<String> = sqlx::query_scalar(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='remotes'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-            exists.is_some()
-        } else {
-            let exists: Option<String> = sqlx::query_scalar(
-                "SELECT table_name FROM information_schema.tables WHERE table_name = 'remotes'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-            exists.is_some()
-        };
-
-        if has_table {
+        if self.table_exists("remotes").await? {
             return Ok(());
         }
 
-        sqlx::query(
-            "CREATE TABLE remotes (
+        self.conn
+            .execute(
+                "CREATE TABLE remotes (
                 id TEXT PRIMARY KEY,
                 name TEXT UNIQUE NOT NULL,
                 provider TEXT NOT NULL DEFAULT 'turso',
                 url TEXT NOT NULL,
                 auth_token TEXT NOT NULL,
+                sync_mode TEXT NOT NULL DEFAULT 'full',
                 sync_enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )",
-        )
-        .execute(&self.pool)
-        .await?;
+                (),
+            )
+            .await?;
 
-        sqlx::query(
-            "CREATE TABLE project_remotes (
+        self.conn
+            .execute(
+                "CREATE TABLE project_remotes (
                 project_id TEXT NOT NULL REFERENCES projects(id),
                 remote_id TEXT NOT NULL REFERENCES remotes(id) ON DELETE CASCADE,
                 sync_state TEXT NOT NULL DEFAULT 'active',
                 last_synced_at TEXT,
                 PRIMARY KEY (project_id, remote_id)
             )",
-        )
-        .execute(&self.pool)
-        .await?;
+                (),
+            )
+            .await?;
 
-        sqlx::query(
+        self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_project_remotes_remote ON project_remotes(remote_id)",
-        )
-        .execute(&self.pool)
-        .await?;
+            (),
+        ).await?;
 
         tracing::info!("Added remotes and project_remotes tables");
         Ok(())
     }
 
-    /// Migration: add field-level `_updated_at` columns to features table.
-    ///
-    /// These columns enable field-level conflict resolution during sync:
-    /// each tracked field has its own timestamp so concurrent edits to
-    /// different fields of the same feature both survive.
+    /// Add field-level timestamp columns to features table for conflict resolution.
     async fn migrate_add_field_timestamps(&self) -> Result<()> {
-        let has_col = if self.dialect.is_sqlite() {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='features'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-            schema
-                .as_ref()
-                .map(|s| s.to_lowercase().contains("state_updated_at"))
-                .unwrap_or(false)
-        } else {
-            let col_exists: Option<String> = sqlx::query_scalar(
-                "SELECT column_name FROM information_schema.columns
-                 WHERE table_name = 'features' AND column_name = 'state_updated_at'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-            col_exists.is_some()
-        };
-
-        if has_col {
+        if self.has_column("features", "state_updated_at").await? {
             return Ok(());
         }
 
@@ -1553,8 +1039,8 @@ impl Database {
             "details_updated_at",
             "parent_id_updated_at",
         ] {
-            sqlx::query(&format!("ALTER TABLE features ADD COLUMN {col} TEXT"))
-                .execute(&self.pool)
+            self.conn
+                .execute(&format!("ALTER TABLE features ADD COLUMN {col} TEXT"), ())
                 .await?;
         }
 
@@ -1562,30 +1048,15 @@ impl Database {
         Ok(())
     }
 
-    /// Migration: add offline_queue table for queuing writes when remotes are unreachable.
+    /// Add offline_queue table for queuing writes when remotes are unreachable.
     async fn migrate_add_offline_queue(&self) -> Result<()> {
-        let has_table = if self.dialect.is_sqlite() {
-            let exists: Option<String> = sqlx::query_scalar(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='offline_queue'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-            exists.is_some()
-        } else {
-            let exists: Option<String> = sqlx::query_scalar(
-                "SELECT table_name FROM information_schema.tables WHERE table_name = 'offline_queue'",
-            )
-            .fetch_optional(&self.pool)
-            .await?;
-            exists.is_some()
-        };
-
-        if has_table {
+        if self.table_exists("offline_queue").await? {
             return Ok(());
         }
 
-        sqlx::query(
-            "CREATE TABLE offline_queue (
+        self.conn
+            .execute(
+                "CREATE TABLE offline_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id TEXT NOT NULL,
                 remote_id TEXT NOT NULL,
@@ -1595,32 +1066,95 @@ impl Database {
                 payload TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )",
-        )
-        .execute(&self.pool)
-        .await?;
+                (),
+            )
+            .await?;
 
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_offline_queue_remote ON offline_queue(remote_id)",
-        )
-        .execute(&self.pool)
-        .await?;
+        self.conn
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_offline_queue_remote ON offline_queue(remote_id)",
+                (),
+            )
+            .await?;
 
         tracing::info!("Added offline_queue table");
         Ok(())
     }
 
-    /// Get the underlying connection pool.
-    #[must_use]
-    pub fn pool(&self) -> &AnyPool {
-        &self.pool
+    // ============================================================
+    // Query helpers
+    // ============================================================
+
+    /// Check if a table exists in the database.
+    async fn table_exists(&self, table_name: &str) -> Result<bool> {
+        let sql = format!(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{}'",
+            table_name
+        );
+        let count = self.query_scalar_i64(&sql).await.unwrap_or(0);
+        Ok(count > 0)
+    }
+
+    /// Check if a column exists on a table.
+    async fn has_column(&self, table_name: &str, column_name: &str) -> Result<bool> {
+        let schema = self
+            .query_scalar_optional_string(&format!(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='{}'",
+                table_name
+            ))
+            .await?;
+        Ok(schema
+            .as_ref()
+            .map(|s| s.to_lowercase().contains(column_name))
+            .unwrap_or(false))
+    }
+
+    /// Execute a query that returns a single i64 scalar.
+    pub(crate) async fn query_scalar_i64(&self, sql: &str) -> Result<i64> {
+        let mut rows = self
+            .conn
+            .query(sql, ())
+            .await
+            .map_err(|e| anyhow::anyhow!("Query failed: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch row: {}", e))?
+        {
+            row.get::<i64>(0)
+                .map_err(|e| anyhow::anyhow!("Failed to get value: {}", e))
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Execute a query that returns an optional string scalar.
+    pub(crate) async fn query_scalar_optional_string(&self, sql: &str) -> Result<Option<String>> {
+        let mut rows = self
+            .conn
+            .query(sql, ())
+            .await
+            .map_err(|e| anyhow::anyhow!("Query failed: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch row: {}", e))?
+        {
+            let val: Option<String> = row
+                .get(0)
+                .map_err(|e| anyhow::anyhow!("Failed to get value: {}", e))?;
+            Ok(val)
+        } else {
+            Ok(None)
+        }
     }
 }
 
 impl Clone for Database {
     fn clone(&self) -> Self {
         Self {
-            pool: self.pool.clone(),
-            dialect: self.dialect,
+            db: self.db.clone(),
+            conn: self.conn.clone(),
             events: self.events.clone(),
         }
     }
@@ -1651,15 +1185,11 @@ mod tests {
     async fn migrate_is_idempotent() {
         let db = Database::open_memory().await.expect("open in-memory db");
 
-        // First migration: creates all tables from scratch
         db.migrate().await.expect("first migration");
-
-        // Second migration: should succeed without errors (IF NOT EXISTS)
         db.migrate().await.expect("second migration (idempotent)");
 
-        // Verify tables exist by running a simple query
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM features")
-            .fetch_one(db.pool())
+        let count = db
+            .query_scalar_i64("SELECT COUNT(*) FROM features")
             .await
             .expect("query features table");
         assert_eq!(count, 0);
@@ -1669,10 +1199,7 @@ mod tests {
     async fn migrate_then_incremental_is_idempotent() {
         let db = Database::open_memory().await.expect("open in-memory db");
 
-        // Run initial schema
         db.migrate().await.expect("initial migration");
-
-        // Incremental migrations should be safe to re-run on a fresh schema
         db.run_incremental_migrations()
             .await
             .expect("incremental migrations on fresh schema");

@@ -11,51 +11,73 @@ const VERSION_COLS: &str = "id, project_id, name, description, released_at, crea
 impl Database {
     /// Count unreleased versions for a project using `SELECT COUNT(*)`.
     async fn count_unreleased_versions(&self, project_id: ProjectId) -> Result<usize> {
-        let row: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM versions WHERE project_id = $1 AND released_at IS NULL",
-        )
-        .bind(project_id.to_string())
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(row.0 as usize)
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT COUNT(*) FROM versions WHERE project_id = ?1 AND released_at IS NULL",
+                libsql::params![project_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let row = rows
+            .next()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .ok_or_else(|| anyhow::anyhow!("Expected a COUNT(*) row"))?;
+        let count = row.get::<i64>(0).map_err(|e| anyhow::anyhow!("{}", e))?;
+        Ok(count as usize)
     }
 
     /// Get all versions for a project, ordered by creation date.
     pub async fn get_versions_by_project(&self, project_id: ProjectId) -> Result<Vec<Version>> {
         let sql = format!(
-            "SELECT {VERSION_COLS} FROM versions WHERE project_id = $1 ORDER BY created_at"
+            "SELECT {VERSION_COLS} FROM versions WHERE project_id = ?1 ORDER BY created_at"
         );
-        let rows = sqlx::query(&sql)
-            .bind(project_id.to_string())
-            .fetch_all(&self.pool)
-            .await?;
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![project_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        rows.iter().map(row_to_version).collect()
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            results.push(row_to_version(&row)?);
+        }
+        Ok(results)
     }
 
     /// Get a single version by ID.
     pub async fn get_version(&self, id: VersionId) -> Result<Option<Version>> {
-        let sql = format!("SELECT {VERSION_COLS} FROM versions WHERE id = $1");
-        let row = sqlx::query(&sql)
-            .bind(id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
+        let sql = format!("SELECT {VERSION_COLS} FROM versions WHERE id = ?1");
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        row.as_ref().map(row_to_version).transpose()
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Ok(Some(row_to_version(&row)?)),
+            None => Ok(None),
+        }
     }
 
     /// Get the "Next" version (first unreleased version) for a project.
     /// Returns None if no unreleased versions exist.
     pub async fn get_next_version(&self, project_id: ProjectId) -> Result<Option<Version>> {
         let sql = format!(
-            "SELECT {VERSION_COLS} FROM versions WHERE project_id = $1 AND released_at IS NULL ORDER BY created_at LIMIT 1"
+            "SELECT {VERSION_COLS} FROM versions WHERE project_id = ?1 AND released_at IS NULL ORDER BY created_at LIMIT 1"
         );
-        let row = sqlx::query(&sql)
-            .bind(project_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
+        let mut rows = self
+            .conn
+            .query(&sql, libsql::params![project_id.to_string()])
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        row.as_ref().map(row_to_version).transpose()
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Ok(Some(row_to_version(&row)?)),
+            None => Ok(None),
+        }
     }
 
     /// Ensure at least `min_count` unreleased versions exist for a project.
@@ -127,19 +149,28 @@ impl Database {
 
         let id = input.id.unwrap_or_else(VersionId::new);
         let now = Utc::now();
+        let description = input.description.clone().unwrap_or_default();
+        let has_description = input.description.is_some();
 
-        sqlx::query(
-            "INSERT INTO versions (id, project_id, name, description, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind(id.to_string())
-        .bind(project_id.to_string())
-        .bind(&input.name)
-        .bind(&input.description)
-        .bind(now.to_rfc3339())
-        .bind(now.to_rfc3339())
-        .execute(&self.pool)
-        .await?;
+        self.conn
+            .execute(
+                "INSERT INTO versions (id, project_id, name, description, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                libsql::params![
+                    id.to_string(),
+                    project_id.to_string(),
+                    input.name.clone(),
+                    if has_description {
+                        libsql::Value::Text(description)
+                    } else {
+                        libsql::Value::Null
+                    },
+                    now.to_rfc3339(),
+                    now.to_rfc3339()
+                ],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         Ok(Version {
             id,
@@ -167,16 +198,25 @@ impl Database {
         let description = input.description.or(existing.description);
         let released_at = input.released_at.or(existing.released_at);
 
-        sqlx::query(
-            "UPDATE versions SET name = $1, description = $2, released_at = $3, updated_at = $4 WHERE id = $5",
-        )
-        .bind(&name)
-        .bind(&description)
-        .bind(released_at.map(|d| d.to_rfc3339()))
-        .bind(now.to_rfc3339())
-        .bind(id.to_string())
-        .execute(&self.pool)
-        .await?;
+        self.conn
+            .execute(
+                "UPDATE versions SET name = ?1, description = ?2, released_at = ?3, updated_at = ?4 WHERE id = ?5",
+                libsql::params![
+                    name.clone(),
+                    match &description {
+                        Some(d) => libsql::Value::Text(d.clone()),
+                        None => libsql::Value::Null,
+                    },
+                    match &released_at {
+                        Some(d) => libsql::Value::Text(d.to_rfc3339()),
+                        None => libsql::Value::Null,
+                    },
+                    now.to_rfc3339(),
+                    id.to_string()
+                ],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         Ok(Some(Version {
             id,
@@ -192,11 +232,15 @@ impl Database {
     /// Delete a version by ID.
     #[must_use = "check whether the version existed"]
     pub async fn delete_version(&self, id: VersionId) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM versions WHERE id = $1")
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await?;
-        Ok(result.rows_affected() > 0)
+        let rows_affected = self
+            .conn
+            .execute(
+                "DELETE FROM versions WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        Ok(rows_affected > 0)
     }
 
     /// Validate that a version has not been released.

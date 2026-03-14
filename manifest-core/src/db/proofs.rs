@@ -37,23 +37,44 @@ impl Database {
             Some(serde_json::to_string(&input.evidence)?)
         };
 
-        sqlx::query(
-            "INSERT INTO proofs (id, feature_id, history_id, command, exit_code, output, tests, evidence, commit_sha, agent_type, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-        )
-        .bind(id.to_string())
-        .bind(input.feature_id.to_string())
-        .bind(input.history_id.map(|h| h.to_string()))
-        .bind(&input.command)
-        .bind(input.exit_code)
-        .bind(&output)
-        .bind(&tests_json)
-        .bind(&evidence_json)
-        .bind(&input.commit_sha)
-        .bind(&input.agent_type)
-        .bind(now.to_rfc3339())
-        .execute(&self.pool)
-        .await?;
+        self.conn
+            .execute(
+                "INSERT INTO proofs (id, feature_id, history_id, command, exit_code, output, tests, evidence, commit_sha, agent_type, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                libsql::params![
+                    id.to_string(),
+                    input.feature_id.to_string(),
+                    match &input.history_id {
+                        Some(h) => libsql::Value::Text(h.to_string()),
+                        None => libsql::Value::Null,
+                    },
+                    input.command.clone(),
+                    input.exit_code,
+                    match &output {
+                        Some(o) => libsql::Value::Text(o.clone()),
+                        None => libsql::Value::Null,
+                    },
+                    match &tests_json {
+                        Some(t) => libsql::Value::Text(t.clone()),
+                        None => libsql::Value::Null,
+                    },
+                    match &evidence_json {
+                        Some(e) => libsql::Value::Text(e.clone()),
+                        None => libsql::Value::Null,
+                    },
+                    match &input.commit_sha {
+                        Some(s) => libsql::Value::Text(s.clone()),
+                        None => libsql::Value::Null,
+                    },
+                    match &input.agent_type {
+                        Some(a) => libsql::Value::Text(a.clone()),
+                        None => libsql::Value::Null,
+                    },
+                    now.to_rfc3339()
+                ],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         Ok(Proof {
             id,
@@ -72,28 +93,39 @@ impl Database {
 
     /// Get a proof by its ID.
     pub async fn get_proof(&self, id: ProofId) -> Result<Option<Proof>> {
-        let row = sqlx::query(
-            "SELECT id, feature_id, history_id, command, exit_code, output, tests, evidence, commit_sha, agent_type, created_at
-             FROM proofs WHERE id = $1",
-        )
-        .bind(id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT id, feature_id, history_id, command, exit_code, output, tests, evidence, commit_sha, agent_type, created_at
+                 FROM proofs WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        row.as_ref().map(row_to_proof).transpose()
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Ok(Some(row_to_proof(&row)?)),
+            None => Ok(None),
+        }
     }
 
     /// Get all proofs for a feature, ordered by most recent first.
     pub async fn get_proofs_for_feature(&self, feature_id: FeatureId) -> Result<Vec<Proof>> {
-        let rows = sqlx::query(
-            "SELECT id, feature_id, history_id, command, exit_code, output, tests, evidence, commit_sha, agent_type, created_at
-             FROM proofs WHERE feature_id = $1 ORDER BY created_at DESC",
-        )
-        .bind(feature_id.to_string())
-        .fetch_all(&self.pool)
-        .await?;
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT id, feature_id, history_id, command, exit_code, output, tests, evidence, commit_sha, agent_type, created_at
+                 FROM proofs WHERE feature_id = ?1 ORDER BY created_at DESC",
+                libsql::params![feature_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        rows.iter().map(row_to_proof).collect()
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            results.push(row_to_proof(&row)?);
+        }
+        Ok(results)
     }
 
     /// Get the latest proof for a feature (most recent by created_at).
@@ -101,14 +133,19 @@ impl Database {
         &self,
         feature_id: FeatureId,
     ) -> Result<Option<Proof>> {
-        let row = sqlx::query(
-            "SELECT id, feature_id, history_id, command, exit_code, output, tests, evidence, commit_sha, agent_type, created_at
-             FROM proofs WHERE feature_id = $1 ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(feature_id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT id, feature_id, history_id, command, exit_code, output, tests, evidence, commit_sha, agent_type, created_at
+                 FROM proofs WHERE feature_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                libsql::params![feature_id.to_string()],
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        row.as_ref().map(row_to_proof).transpose()
+        match rows.next().await.map_err(|e| anyhow::anyhow!("{}", e))? {
+            Some(row) => Ok(Some(row_to_proof(&row)?)),
+            None => Ok(None),
+        }
     }
 }
